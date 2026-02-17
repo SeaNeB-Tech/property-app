@@ -1,0 +1,79 @@
+/* Sidebar Color Variables */
+:root {
+  --sidebar-primary: #0f66d9;
+  --sidebar-primary-dark: #0a47a8;
+  --sidebar-primary-light: #3b82f6;
+  --sidebar-hover: #0d5bc0;
+  --sidebar-accent: #fbbf24;
+  --sidebar-text: #f0f4f8;
+  --sidebar-text-secondary: #cbd5e1;
+  --sidebar-border: #1e293b;
+  --sidebar-background: #0f172a;
+}
+
+/* Sidebar Primary Color */
+.bg-sidebar-primary {
+  background-color: var(--sidebar-primary);
+}
+
+.bg-sidebar-primary:hover {
+  background-color: var(--sidebar-primary-dark);
+}
+
+/* Sidebar Primary Dark */
+.bg-sidebar-primary-dark {
+  background-color: var(--sidebar-primary-dark);
+}
+
+/* Sidebar Primary Light */
+.bg-sidebar-primary-light {
+  background-color: var(--sidebar-primary-light);
+}
+
+/* Sidebar Hover Color */
+.bg-sidebar-hover {
+  background-color: var(--sidebar-hover);
+}
+
+/* Sidebar Accent Color */
+.text-sidebar-accent {
+  color: var(--sidebar-accent);
+}
+
+.bg-sidebar-accent {
+  background-color: var(--sidebar-accent);
+  color: var(--sidebar-primary-dark);
+}
+
+/* Sidebar Text Colors */
+.text-sidebar-text {
+  color: var(--sidebar-text);
+}
+
+.text-sidebar-text-secondary {
+  color: var(--sidebar-text-secondary);
+}
+
+/* Sidebar Border Color */
+.border-sidebar-border {
+  border-color: var(--sidebar-border);
+}
+
+.divide-sidebar-border > * + * {
+  border-color: var(--sidebar-border) !important;
+}
+
+/* Sidebar Background */
+.bg-sidebar-background {
+  background-color: var(--sidebar-background);
+}
+
+/* Active indicator for menu items */
+.sidebar-menu-item {
+  position: relative;
+}
+
+.sidebar-menu-item.active {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-left: 3px solid var(--sidebar-accent);
+}

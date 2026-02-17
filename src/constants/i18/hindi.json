@@ -1,0 +1,36 @@
+{
+  "login": "लॉगिन",
+  "subtitle": "आगे बढ़ने के लिए अपना मोबाइल नंबर दर्ज करें",
+  "mobileLabel": "मोबाइल नंबर",
+  "placeholder": "मोबाइल नंबर दर्ज करें",
+  "viaWhatsapp": "व्हाट्सएप द्वारा",
+  "viaSms": "एसएमएस द्वारा",
+  "continue": "जारी रखें",
+  "loading": "कृपया प्रतीक्षा करें...",
+
+  "otpTitle": "ओटीपी सत्यापित करें",
+  "otpSubtitle": "भेजा गया 4 अंकों का कोड दर्ज करें",
+  "verifyOtp": "ओटीपी सत्यापित करें",
+  "resendOtp": "ओटीपी पुनः भेजें",
+  "languageLabel": "भाषा चुनें",
+  "languageEnglish": "अंग्रेज़ी",
+  "languageGujarati": "गुजराती",
+  "languageHindi": "हिंदी",
+
+  "completeProfileTitle": "अपनी प्रोफ़ाइल पूरी करें",
+  "completeProfileSubtitle": "कृपया नीचे दिए गए विवरण भरें",
+  "firstName": "पहला नाम",
+  "lastName": "अंतिम नाम",
+  "email": "ईमेल",
+  "gender": "लिंग",
+  "selectGender": "लिंग चुनें",
+  "dob": "जन्म तिथि",
+  "hometown": "गृहनगर",
+  "seanebId": "SeaNeB आईडी",
+  "agreeText": "मैं नियम व शर्तों और गोपनीयता नीति से सहमत हूं",
+  "submit": "जमा करें",
+
+  "successTitle": "पंजीकरण सफल हुआ",
+  "successSubtitle": "आपकी प्रोफ़ाइल सफलतापूर्वक पूरी हो गई है।",
+  "goToDashboard": "डैशबोर्ड पर जाएं"
+}

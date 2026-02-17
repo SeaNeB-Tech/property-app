@@ -1,0 +1,166 @@
+/* ====================================================== */
+/* ============== AREA PAGE STYLES ===================== */
+/* ====================================================== */
+
+.area-page-wrapper {
+  padding: 3.75rem 1.25rem;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f8fafc, #eef2ff);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3.125rem;
+}
+
+/* ====================================================== */
+/* ============== CARD ================================ */
+/* ====================================================== */
+
+.area-page-card {
+  width: 100%;
+  max-width: 850px;
+  padding: 3.125rem 2.5rem;
+  border-radius: var(--radius-xl);
+
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(15px);
+
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.05),
+    0 10px 25px rgba(0, 0, 0, 0.03);
+
+  text-align: center;
+  transition: all var(--transition-base);
+}
+
+.area-page-card:hover {
+  transform: translateY(-6px);
+  box-shadow:
+    0 25px 60px rgba(0, 0, 0, 0.08),
+    0 15px 30px rgba(0, 0, 0, 0.05);
+}
+
+/* ====================================================== */
+/* ============== TITLE ================================ */
+/* ====================================================== */
+
+.area-page-title {
+  font-size: 2.625rem;
+  font-weight: var(--font-weight-extrabold);
+  margin-bottom: 1.25rem;
+
+  background: linear-gradient(to right, var(--brand-blue), #7c3aed);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+
+  letter-spacing: -0.5px;
+}
+
+/* ====================================================== */
+/* ============== DESCRIPTION ========================= */
+/* ====================================================== */
+
+.area-page-description {
+  font-size: 1.125rem;
+  color: var(--text-secondary);
+  margin-bottom: 1.875rem;
+  line-height: 1.7;
+  max-width: 600px;
+}
+
+/* ====================================================== */
+/* ============== BACK LINK/BUTTON ==================== */
+/* ====================================================== */
+
+.area-page-backlink {
+  display: inline-block;
+  padding: 0.75rem 1.375rem;
+  border-radius: var(--radius-lg);
+
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: none;
+
+  background: var(--brand-blue);
+  color: var(--text-inverse);
+
+  transition: all var(--transition-base);
+  border: 2px solid var(--brand-blue);
+}
+
+.area-page-backlink:hover {
+  background: var(--brand-blue-dark);
+  border-color: var(--brand-blue-dark);
+  transform: translateX(-4px);
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+}
+
+.area-page-backlink:active {
+  transform: translateX(-2px);
+}
+
+/* ====================================================== */
+/* ============== RESPONSIVE ========================== */
+/* ====================================================== */
+
+@media (max-width: 1024px) {
+  .area-page-card {
+    padding: 2.5rem 2rem;
+  }
+
+  .area-page-title {
+    font-size: 2.25rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .area-page-wrapper {
+    padding: 2.5rem 1rem;
+    gap: 2.5rem;
+  }
+
+  .area-page-card {
+    padding: 2rem 1.5rem;
+  }
+
+  .area-page-title {
+    font-size: 1.875rem;
+  }
+
+  .area-page-description {
+    font-size: 1rem;
+  }
+
+  .area-page-backlink {
+    padding: 0.625rem 1.125rem;
+    font-size: var(--font-size-sm);
+  }
+}
+
+@media (max-width: 480px) {
+  .area-page-wrapper {
+    padding: 1.5rem 0.75rem;
+    gap: 1.5rem;
+  }
+
+  .area-page-card {
+    padding: 1.5rem 1rem;
+    border-radius: var(--radius-lg);
+  }
+
+  .area-page-title {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .area-page-description {
+    font-size: 0.95rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .area-page-backlink {
+    padding: 0.5rem 1rem;
+    font-size: var(--font-size-xs);
+  }
+}

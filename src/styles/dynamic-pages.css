@@ -1,0 +1,7 @@
+/* Shared dynamic pages stylesheet (kept for reference).
+   This file is intentionally minimal so global import is avoided.
+   The actual styles used by components are in the CSS module
+   `dynamic-pages.module.css` which is imported per-component.
+*/
+
+/* Keep this file present as requested. */

@@ -1,0 +1,8 @@
+{
+  "otpTitle": "Verify OTP",
+  "otpSubtitle": "Enter the 4-digit code sent to",
+  "verifyOtp": "Verify OTP",
+  "resendOtp": "Resend OTP",
+  "resendIn": "Resend in",
+  "verifying": "Verifying..."
+}

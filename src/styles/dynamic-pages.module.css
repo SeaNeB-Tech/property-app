@@ -1,0 +1,1297 @@
+/* ==================================================
+   BASE / SHARED CONTAINER
+   ================================================== */
+
+.dynamicContainer {
+  max-width: 1120px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* ==================================================
+   BASIC SECTIONS
+   ================================================== */
+
+.section {
+  padding: var(--spacing-3xl) 0;
+}
+
+.sectionLight {
+  padding: var(--spacing-3xl) 0;
+  background: var(--gray-50);
+}
+
+/* ==================================================
+   HERO (FULL WIDTH – STATE / CITY / AREA)
+   ================================================== */
+
+.heroDarkFull {
+  width: 100%;
+  background: linear-gradient(
+    180deg,
+    #1f1f1f 0%,
+    #2a2a2a 50%,
+    #3a3a3a 100%
+  );
+  padding: 4.5rem 0;
+  margin-bottom: 3rem;
+}
+
+.heroInner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  color: var(--text-inverse);
+}
+
+.breadcrumb {
+  font-size: var(--font-size-sm);
+  color: var(--gray-300);
+  margin-bottom: 0.75rem;
+}
+
+.heroTitle {
+  font-size: 2.4rem;
+  font-weight: var(--font-weight-bold);
+  color: var(--text-inverse);
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.5px;
+}
+
+.heroDesc {
+  max-width: 640px;
+  color: var(--gray-200);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+/* ==================================================
+   SECTION HEADINGS
+   ================================================== */
+
+.sectionTitle {
+  font-size: 1.5rem;
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+}
+
+.sectionSubTitle {
+  font-size: 1.25rem;
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: 0.75rem;
+  color: var(--text-primary);
+}
+
+.sectionDesc {
+  color: var(--text-secondary);
+  margin-bottom: 2.5rem;
+  font-size: var(--font-size-base);
+}
+
+/* ==================================================
+   CITY / AREA PILLS
+   ================================================== */
+
+.pillGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.pill {
+  padding: 0.55rem 1.4rem;
+  background: var(--gray-100);
+  border-radius: var(--radius-full);
+  font-size: 0.9rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.pill:hover {
+  background: var(--error);
+  color: var(--text-inverse);
+  border-color: var(--error);
+}
+
+.pill:active {
+  transform: scale(0.98);
+}
+
+/* ==================================================
+   LIST (WHY CHOOSE)
+   ================================================== */
+
+.list {
+  list-style: none;
+  padding: 0;
+}
+
+.list li {
+  margin-bottom: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.list li::before {
+  content: "✓";
+  color: var(--success);
+  font-weight: var(--font-weight-bold);
+  flex-shrink: 0;
+}
+
+/* ==================================================
+   CTA BANNER (REUSABLE)
+   ================================================== */
+
+.ctaBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 2.5rem;
+  background: var(--background);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-lg);
+  margin-top: 3rem;
+}
+
+.ctaTitle {
+  font-size: 1.3rem;
+  font-weight: var(--font-weight-bold);
+  margin-bottom: 0.3rem;
+  color: var(--text-primary);
+}
+
+.ctaDesc {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.ctaBtn {
+  background: var(--error);
+  color: var(--text-inverse);
+  padding: 0.65rem 1.6rem;
+  border-radius: var(--radius-full);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+  border: 2px solid var(--error);
+  cursor: pointer;
+  font-size: var(--font-size-base);
+}
+
+.ctaBtn:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  transform: translateY(-2px);
+}
+
+.ctaBtn:active {
+  transform: translateY(0);
+}
+
+/* ==================================================
+   BACK LINK
+   ================================================== */
+
+.backLink {
+  padding: 2rem 0;
+}
+
+.backLink a {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.backLink a:hover {
+  color: var(--brand-blue);
+  text-decoration: underline;
+}
+
+/* ==================================================
+   COUNTRY PAGE STYLES 
+   ================================================== */
+
+.countryHero {
+  width: 100%;
+  background: linear-gradient(
+    180deg,
+    #111111 0%,
+    #1f1f1f 50%,
+    #2a2a2a 100%
+  );
+  padding: 4.5rem 0;
+}
+
+.countryHeroInner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  color: var(--text-inverse);
+}
+
+.countryBreadcrumb {
+  font-size: var(--font-size-sm);
+  color: var(--gray-300);
+  margin-bottom: 0.75rem;
+}
+
+.countryHeroTitle {
+  font-size: 2.6rem;
+  font-weight: var(--font-weight-bold);
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.5px;
+}
+
+.countryHeroDesc {
+  max-width: 720px;
+  font-size: 1rem;
+  color: var(--gray-200);
+  line-height: 1.6;
+}
+
+/* ---------- STATES SECTION ---------- */
+
+.countrySection {
+  padding: 4rem 0;
+  background: var(--background);
+}
+
+.countrySectionTitle {
+  font-size: 2rem;
+  font-weight: var(--font-weight-bold);
+  margin-bottom: 0.5rem;
+  text-align: center;
+  color: var(--text-primary);
+}
+
+.countrySectionDesc {
+  text-align: center;
+  color: var(--text-secondary);
+  margin-bottom: 2.5rem;
+}
+
+.countryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1.25rem;
+}
+
+.countryCard {
+  padding: 1.25rem;
+  border-radius: var(--radius-md);
+  background: var(--background);
+  border: 1px solid var(--border);
+  text-align: center;
+  font-weight: var(--font-weight-semibold);
+  text-transform: capitalize;
+  transition: all var(--transition-fast);
+  cursor: pointer;
+}
+
+.countryCard:hover {
+  border-color: var(--error);
+  background: #fef2f2;
+  color: var(--error);
+  transform: translateY(-2px);
+}
+
+/* ---------- CTA ---------- */
+
+.countryCta {
+  background: linear-gradient(180deg, var(--text-primary) 0%, #020617 100%);
+  padding: 4rem 1rem;
+}
+
+.countryCtaInner {
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: center;
+  color: var(--text-inverse);
+}
+
+.countryCtaTitle {
+  font-size: 2rem;
+  font-weight: var(--font-weight-bold);
+  margin-bottom: 0.75rem;
+}
+
+.countryCtaDesc {
+  color: #cbd5f5;
+  margin-bottom: 2rem;
+}
+
+.countryCtaBtn {
+  display: inline-block;
+  padding: 0.9rem 2.2rem;
+  border-radius: var(--radius-full);
+  background: var(--error);
+  color: var(--text-inverse);
+  font-weight: var(--font-weight-semibold);
+  transition: all var(--transition-fast);
+  border: 2px solid var(--error);
+  cursor: pointer;
+}
+
+.countryCtaBtn:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  transform: translateY(-2px);
+}
+
+/* ==================================================
+   BUSINESS LISTING – REAL ESTATE STYLE
+   ================================================== */
+
+.wrapper {
+  width: 100%;
+  margin-top: 2.5rem;
+}
+
+.header {
+  margin-bottom: 1.6rem;
+}
+
+.header h2 {
+  font-size: 1.7rem;
+  font-weight: var(--font-weight-bold);
+  color: var(--brand-dark);
+  margin-bottom: 0.4rem;
+}
+
+.header p {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.6rem;
+}
+
+.card {
+  background: var(--background);
+  border-radius: 1rem;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  box-shadow: var(--shadow-md);
+}
+
+.card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.15);
+}
+
+.imageWrap {
+  position: relative;
+  width: 100%;
+  height: 210px;
+  background: var(--gray-200);
+  overflow: hidden;
+}
+
+.image {
+  object-fit: cover;
+  width: 100%;
+  height: 100%;
+}
+
+.badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: rgba(15, 23, 42, 0.85);
+  color: var(--text-inverse);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+}
+
+.body {
+  padding: 1rem 1.1rem 1.2rem;
+}
+
+.title {
+  font-size: 1.05rem;
+  font-weight: var(--font-weight-bold);
+  color: var(--brand-dark);
+  margin-bottom: 0.3rem;
+}
+
+.location {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-bottom: 0.9rem;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.price {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+  color: var(--success);
+}
+
+.action {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--brand-blue);
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.action:hover {
+  color: var(--brand-blue-dark);
+}
+
+/* ==================================================
+   GLOBAL RESPONSIVE (ALL DYNAMIC PAGES)
+   ================================================== */
+
+@media (max-width: 1024px) {
+  .heroTitle,
+  .countryHeroTitle {
+    font-size: 2rem;
+  }
+
+  .ctaBanner {
+    padding: 2rem;
+  }
+
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .heroTitle,
+  .countryHeroTitle,
+  .countrySectionTitle {
+    font-size: 1.85rem;
+  }
+
+  .heroDesc {
+    font-size: var(--font-size-sm);
+  }
+
+  .section {
+    padding: 2rem 0;
+  }
+
+  .countryHero {
+    padding: 3rem 0;
+  }
+
+  .ctaBanner,
+  .cityCtaBanner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.5rem;
+  }
+
+  .countryCard {
+    padding: 1rem;
+  }
+
+  .header h2 {
+    font-size: 1.45rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .heroDarkFull,
+  .countryHero {
+    padding: 3rem 0;
+    margin-bottom: 2rem;
+  }
+
+  .heroTitle,
+  .countryHeroTitle {
+    font-size: 1.65rem;
+  }
+
+  .pill,
+  .cityPill {
+    font-size: 0.85rem;
+    padding: 0.45rem 1.1rem;
+  }
+
+  .ctaBanner,
+  .cityCtaBanner,
+  .ctaBnner {
+    padding: 1.75rem;
+  }
+
+  .ctaBtn,
+  .countryCtaBtn {
+    width: 100%;
+    text-align: center;
+    margin-top: 1rem;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .imageWrap {
+    height: 200px;
+  }
+
+  .countrySectionTitle {
+    font-size: 1.6rem;
+  }
+
+  .wrapper {
+    margin-top: 1.5rem;
+  }
+
+  .header h2 {
+    font-size: 1.35rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .heroDarkFull,
+  .countryHero {
+    padding: 2rem 0;
+  }
+
+  .heroTitle,
+  .countryHeroTitle {
+    font-size: 1.4rem;
+  }
+
+  .countryCtaTitle {
+    font-size: 1.5rem;
+  }
+
+  .header h2 {
+    font-size: 1.1rem;
+  }
+}
+
+/* ==================================================
+   HERO (FULL WIDTH – STATE / CITY / AREA)
+   ================================================== */
+
+.heroDarkFull {
+  width: 100%;
+  background: linear-gradient(
+    180deg,
+    #1f1f1f 0%,
+    #2a2a2a 50%,
+    #3a3a3a 100%
+  );
+  padding: 4.5rem 0;
+  margin-bottom: 3rem;
+}
+
+.heroInner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  color: #ffffff;
+}
+
+/* Breadcrumb */
+.breadcrumb {
+  font-size: 0.875rem;
+  color: #d1d5db;
+  margin-bottom: 0.75rem;
+}
+
+/* Hero title */
+.heroTitle {
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 0.75rem;
+}
+
+/* Hero description */
+.heroDesc {
+  max-width: 640px;
+  color: #e5e7eb;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+/* ==================================================
+   SECTION HEADINGS
+   ================================================== */
+
+.sectionTitle {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: #111827;
+}
+
+.sectionSubTitle {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: #111827;
+}
+
+/* ==================================================
+   CITY / AREA PILLS
+   ================================================== */
+
+.pillGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.pill {
+  padding: 0.55rem 1.4rem;
+  background: #f3f4f6;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #111827;
+  transition: all 0.2s ease;
+}
+
+.pill:hover {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+/* ==================================================
+   LIST (WHY CHOOSE)
+   ================================================== */
+
+.list {
+  list-style: none;
+  padding: 0;
+}
+
+.list li {
+  margin-bottom: 0.5rem;
+  color: #374151;
+  font-size: 0.95rem;
+}
+
+/* ==================================================
+   CTA BANNER (REUSABLE)
+   ================================================== */
+
+.ctaBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 2.5rem;
+  background: #ffffff;
+  border-radius: 1rem;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  margin-top: 3rem;
+}
+
+.ctaTitle {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+  color: #111827;
+}
+
+.ctaDesc {
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
+.ctaBtn {
+  background: #dc2626;
+  color: #ffffff;
+  padding: 0.65rem 1.6rem;
+  border-radius: 999px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+}
+
+.ctaBtn:hover {
+  background: #b91c1c;
+}
+
+/* ==================================================
+   BACK LINK
+   ================================================== */
+
+.backLink {
+  padding: 2rem 0;
+}
+
+.backLink a {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.backLink a:hover {
+  text-decoration: underline;
+}
+
+/* ==================================================
+   GLOBAL RESPONSIVE (ALL DYNAMIC PAGES)
+   ================================================== */
+
+@media (max-width: 1024px) {
+  .heroTitle {
+    font-size: 2rem;
+  }
+
+  .ctaBanner {
+    padding: 2rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .heroTitle {
+    font-size: 1.85rem;
+  }
+
+  .heroDesc {
+    font-size: 0.95rem;
+  }
+
+  .section {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .heroDarkFull {
+    padding: 3rem 0;
+  }
+
+  .heroTitle {
+    font-size: 1.65rem;
+  }
+
+  .pill {
+    font-size: 0.85rem;
+    padding: 0.45rem 1.1rem;
+  }
+
+  .ctaBanner {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 1.75rem;
+  }
+
+  .ctaBtn {
+    margin-top: 1rem;
+    width: 100%;
+    text-align: center;
+  }
+}
+/* ==================================================
+   COUNTRY PAGE STYLES (PDF MATCH)
+   ================================================== */
+
+/* ---------- HERO ---------- */
+
+.countryHero {
+  width: 100%;
+  background: linear-gradient(
+    180deg,
+    #111111 0%,
+    #1f1f1f 50%,
+    #2a2a2a 100%
+  );
+  padding: 4.5rem 0;
+}
+
+.countryHeroInner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  color: #ffffff;
+}
+
+.countryBreadcrumb {
+  font-size: 0.875rem;
+  color: #d1d5db;
+  margin-bottom: 0.75rem;
+}
+
+.countryHeroTitle {
+  font-size: 2.6rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+
+.countryHeroDesc {
+  max-width: 720px;
+  font-size: 1rem;
+  color: #e5e7eb;
+  line-height: 1.6;
+}
+
+/* ---------- STATES SECTION ---------- */
+
+.countrySection {
+  padding: 4rem 0;
+  background: #ffffff;
+}
+
+.countrySectionTitle {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  text-align: center;
+  color: #111827;
+}
+
+.countrySectionDesc {
+  text-align: center;
+  color: #6b7280;
+  margin-bottom: 2.5rem;
+}
+
+.countryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1.25rem;
+}
+
+.countryCard {
+  padding: 1.25rem;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  text-align: center;
+  font-weight: 600;
+  text-transform: capitalize;
+  transition: all 0.2s ease;
+}
+
+.countryCard:hover {
+  border-color: #dc2626;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+/* ---------- CTA ---------- */
+
+.countryCta {
+  background: linear-gradient(
+    180deg,
+    #111827 0%,
+    #020617 100%
+  );
+  padding: 4rem 1rem;
+}
+
+.countryCtaInner {
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: center;
+  color: #ffffff;
+}
+
+.countryCtaTitle {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+
+.countryCtaDesc {
+  color: #cbd5f5;
+  margin-bottom: 2rem;
+}
+
+.countryCtaBtn {
+  display: inline-block;
+  padding: 0.9rem 2.2rem;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #ffffff;
+  font-weight: 600;
+  transition: background 0.2s ease;
+}
+
+.countryCtaBtn:hover {
+  background: #b91c1c;
+}
+
+/* ---------- RESPONSIVE ---------- */
+
+@media (max-width: 768px) {
+  .countryHeroTitle {
+    font-size: 2rem;
+  }
+
+  .countrySectionTitle {
+    font-size: 1.6rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .countryHero {
+    padding: 3rem 0;
+  }
+
+  .countryHeroTitle {
+    font-size: 1.7rem;
+  }
+}
+/* =================================================
+   BUSINESS LISTING – REAL ESTATE STYLE
+   ================================================= */
+
+.wrapper {
+  width: 100%;
+  margin-top: 2.5rem;
+}
+
+/* ---------- HEADER ---------- */
+
+.header {
+  margin-bottom: 1.6rem;
+}
+
+.header h2 {
+  font-size: 1.7rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 0.4rem;
+}
+
+.header p {
+  font-size: 0.95rem;
+  color: #64748b;
+}
+
+/* ---------- GRID ---------- */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.6rem;
+}
+
+/* ---------- CARD ---------- */
+
+.card {
+  background: #ffffff;
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.15);
+}
+
+/* ---------- IMAGE ---------- */
+
+.imageWrap {
+  position: relative;
+  width: 100%;
+  height: 210px;
+}
+
+.image {
+  object-fit: cover;
+}
+
+/* property type badge */
+
+.badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+
+/* ---------- BODY ---------- */
+
+.body {
+  padding: 1rem 1.1rem 1.2rem;
+}
+
+.title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 0.3rem;
+}
+
+.location {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin-bottom: 0.9rem;
+}
+
+/* ---------- FOOTER ---------- */
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.price {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #16a34a;
+}
+
+.action {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #2563eb;
+}
+
+/* =================================================
+   RESPONSIVE
+   ================================================= */
+
+@media (max-width: 1024px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .imageWrap {
+    height: 200px;
+  }
+
+  .header h2 {
+    font-size: 1.45rem;
+  }
+}
+
+/* ==================================================
+   CITY AREAS
+   ================================================== */
+
+.cityPill {
+  padding: 0.55rem 1.4rem;
+  background: #f3f4f6;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #111827;
+  transition: all 0.2s ease;
+}
+
+.cityPill:hover {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+/* ==================================================
+   CITY CONTENT
+   ================================================== */
+
+.cityText {
+  max-width: 720px;
+  color: #374151;
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+}
+
+/* ==================================================
+   CITY CTA
+   ================================================== */
+
+.cityCtaBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 2.5rem;
+  background: #ffffff;
+  border-radius: 1rem;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  margin-top: 3rem;
+}
+
+/* ==================================================
+   RESPONSIVE (CITY)
+   ================================================== */
+
+@media (max-width: 768px) {
+  .cityHeroTitle {
+    font-size: 1.9rem;
+  }
+
+  .cityHero {
+    padding: 3rem 0;
+  }
+
+  .cityCtaBanner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .cityHeroTitle {
+    font-size: 1.6rem;
+  }
+
+  .cityPill {
+    font-size: 0.85rem;
+    padding: 0.45rem 1.1rem;
+  }
+}
+/* =================================================
+   SEANEB – REAL ESTATE PROPERTY LISTING
+   ================================================= */
+
+.wrapper {
+  margin-top: 3rem;
+  padding: 3rem 2.5rem;
+  background: #f8fafc;
+  border-radius: 18px;
+}
+
+/* HEADER */
+.header {
+  margin-bottom: 2.5rem;
+}
+
+.header h2 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.header p {
+  margin-top: 0.4rem;
+  font-size: 0.95rem;
+  color: #64748b;
+}
+
+/* GRID */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 2rem;
+}
+
+/* CARD */
+.card {
+  background: #ffffff;
+  border-radius: 18px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+}
+
+.card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.16);
+}
+
+/* IMAGE */
+.imageWrap {
+  position: relative;
+  height: 220px;
+  background: #e5e7eb;
+}
+
+.image {
+  object-fit: cover;
+}
+
+/* BADGE */
+.badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #ffffff;
+  font-size: 0.75rem;
+  padding: 6px 14px;
+  border-radius: 999px;
+}
+
+/* BODY */
+.body {
+  padding: 1.3rem 1.4rem 1.6rem;
+}
+
+.title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #020617;
+}
+
+.location {
+  font-size: 0.9rem;
+  color: #64748b;
+  margin: 0.6rem 0 1.1rem;
+}
+
+/* FOOTER */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.price {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.action {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #2563eb;
+}
+
+/* RESPONSIVE */
+@media (max-width: 640px) {
+  .wrapper {
+    padding: 2rem 1.3rem;
+  }
+
+  .header h2 {
+    font-size: 1.45rem;
+  }
+}

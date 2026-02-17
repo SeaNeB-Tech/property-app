@@ -1,0 +1,197 @@
+/* ====================================================== */
+/* ============ BUSINESS DETAIL STYLES ================= */
+/* ====================================================== */
+
+/* ====== WRAPPER ====== */
+
+.wrapper {
+  min-height: 100vh;
+  padding: var(--spacing-xl);
+  background-color: var(--gray-50);
+}
+
+/* ====== CONTAINER ====== */
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  background: var(--background);
+  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+/* ====== BREADCRUMB ====== */
+
+.breadcrumb {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.breadcrumb a {
+  color: var(--brand-blue);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.breadcrumb a:hover {
+  color: var(--brand-blue-dark);
+  text-decoration: underline;
+}
+
+/* ====== TITLE ====== */
+
+.title {
+  font-size: 1.5rem;
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+/* ====== DESCRIPTION ====== */
+
+.desc {
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+
+/* ====== RATING ROW ====== */
+
+.rating-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.rating {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.rating-value {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+/* ====== FEATURES LIST ====== */
+
+.features {
+  margin-top: 1rem;
+  list-style: none;
+  padding-left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.features li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.features li::before {
+  content: "✓";
+  color: var(--success);
+  font-weight: var(--font-weight-bold);
+  flex-shrink: 0;
+}
+
+/* ====== CONTACT BUTTON ====== */
+
+.contact-btn {
+  display: inline-block;
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  padding: 0.625rem 1.125rem;
+  border-radius: var(--radius-md);
+  margin-top: 1rem;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
+  border: 2px solid var(--text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.contact-btn:hover {
+  background: var(--text-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.contact-btn:active {
+  transform: translateY(0);
+}
+
+/* ====== RESPONSIVE ====== */
+
+@media (max-width: 768px) {
+  .wrapper {
+    padding: var(--spacing-md);
+  }
+
+  .container {
+    padding: 1.25rem;
+  }
+
+  .title {
+    font-size: 1.25rem;
+  }
+
+  .rating-row {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .features li {
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .wrapper {
+    padding: var(--spacing-md);
+    min-height: 100%;
+  }
+
+  .container {
+    padding: 1rem;
+    border-radius: var(--radius-md);
+  }
+
+  .title {
+    font-size: 1.125rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .desc {
+    font-size: 0.875rem;
+  }
+
+  .rating-row {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+  }
+
+  .contact-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 0.75rem;
+  }
+}

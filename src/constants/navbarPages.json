@@ -1,0 +1,363 @@
+[
+  {
+    "key": "about",
+    "title": "About SeaNeB",
+    "subtitle": "Building trusted local discovery for real estate",
+    "intro": "SeaNeB helps buyers, renters, and brokers discover verified properties and connect faster with the right opportunities.",
+    "stats": [
+      { "label": "Active Localities", "value": "120+" },
+      { "label": "Verified Listings", "value": "10K+" },
+      { "label": "Partner Businesses", "value": "850+" },
+      { "label": "Monthly Search Sessions", "value": "75K+" }
+    ],
+    "featureCards": [
+      {
+        "title": "Verification Layer",
+        "description": "We prioritize listing quality checks so users can evaluate properties with higher confidence.",
+        "href": "/in"
+      },
+      {
+        "title": "Location First Discovery",
+        "description": "Country, state, city, and area pages make local discovery fast and structured.",
+        "href": "/in"
+      },
+      {
+        "title": "Direct Business Connect",
+        "description": "Users can reach brokers and businesses directly from listing detail pages.",
+        "href": "/partner"
+      }
+    ],
+    "process": [
+      "Search by location and property type.",
+      "Review verified listing details and business profile context.",
+      "Connect directly and shortlist faster."
+    ],
+    "sections": [
+      {
+        "heading": "Who We Serve",
+        "items": [
+          "Property seekers looking for verified options in their city.",
+          "Owners and brokers who want qualified leads and better visibility.",
+          "Teams that need clean workflows for listings and follow-ups."
+        ]
+      },
+      {
+        "heading": "Our Story",
+        "items": [
+          "SeaNeB started with a simple idea: local property discovery should be transparent and quick.",
+          "We are focused on reducing search friction and improving trust through better listing quality.",
+          "Our platform continues to evolve with practical tools for both consumers and businesses."
+        ]
+      }
+    ],
+    "faq": [
+      {
+        "question": "What makes SeaNeB different?",
+        "answer": "We focus on verified listing quality, clear information, and a smoother local search experience."
+      },
+      {
+        "question": "Can businesses join SeaNeB?",
+        "answer": "Yes. Owners and brokers can list properties, manage visibility, and connect with genuine inquiries."
+      }
+    ],
+    "cta": {
+      "label": "Explore Listings",
+      "href": "/in"
+    }
+  },
+  {
+    "key": "solution",
+    "title": "SeaNeB Solutions",
+    "subtitle": "Practical tools for buyers, renters, and property businesses",
+    "intro": "From local discovery to business growth, SeaNeB provides a focused set of features for real estate operations.",
+    "stats": [
+      { "label": "City Pages", "value": "250+" },
+      { "label": "Average Lead Response", "value": "< 2 hrs" },
+      { "label": "Business Dashboards", "value": "Live" },
+      { "label": "Discovery Coverage", "value": "Multi Region" }
+    ],
+    "featureCards": [
+      {
+        "title": "Buyer Search Stack",
+        "description": "Smart location flow for faster property shortlisting.",
+        "href": "/in"
+      },
+      {
+        "title": "Business Listing Control",
+        "description": "Manage listings, details, and visibility from one dashboard.",
+        "href": "/dashboard"
+      },
+      {
+        "title": "Analytics Ready",
+        "description": "Track listing activity and optimize conversion quality over time.",
+        "href": "/dashboard/analytics"
+      },
+      {
+        "title": "Partner Onboarding",
+        "description": "Structured onboarding flow for agencies and brokers.",
+        "href": "/auth/business-option"
+      }
+    ],
+    "process": [
+      "Set up profile and service areas.",
+      "Publish verified listings with clear details.",
+      "Capture intent and respond faster to qualified leads.",
+      "Track outcomes and improve listing strategy."
+    ],
+    "sections": [
+      {
+        "heading": "For Property Seekers",
+        "items": [
+          "Browse city, state, and area pages with structured listing information.",
+          "Compare options quickly with clear property details.",
+          "Reach out to businesses directly from listing pages."
+        ]
+      },
+      {
+        "heading": "For Property Businesses",
+        "items": [
+          "Manage business identity and listing presence.",
+          "Use dashboard workflows to organize listings and responses.",
+          "Increase local discoverability with location-first pages."
+        ]
+      }
+    ],
+    "faq": [
+      {
+        "question": "Do you support multiple regions?",
+        "answer": "Yes. SeaNeB is designed for region-first growth and can scale by country, state, and city."
+      },
+      {
+        "question": "Is there a partner program?",
+        "answer": "Yes. Teams can collaborate through our partner onboarding flow."
+      }
+    ],
+    "cta": {
+      "label": "Become a Partner",
+      "href": "/partner"
+    }
+  },
+  {
+    "key": "blogs",
+    "title": "News and Blogs",
+    "subtitle": "Updates, guides, and market insights",
+    "intro": "Read practical content that helps users make better property decisions and helps businesses grow responsibly.",
+    "stats": [
+      { "label": "Guides Published", "value": "150+" },
+      { "label": "Monthly Readers", "value": "40K+" },
+      { "label": "Market Updates", "value": "Weekly" },
+      { "label": "Expert Contributors", "value": "30+" }
+    ],
+    "featureCards": [
+      {
+        "title": "Buyer Playbooks",
+        "description": "Step-by-step guides for home buying and renting decisions.",
+        "href": "/blogs"
+      },
+      {
+        "title": "Local Trends",
+        "description": "Area-level updates on pricing, demand, and supply changes.",
+        "href": "/blogs"
+      },
+      {
+        "title": "Business Growth Content",
+        "description": "Operational tips for agencies and brokers to improve outcomes.",
+        "href": "/partner"
+      }
+    ],
+    "featuredPosts": [
+      {
+        "title": "How to Evaluate Property Listings Before a Site Visit",
+        "description": "A practical checklist for comparing options and avoiding noisy listings.",
+        "href": "/blogs"
+      },
+      {
+        "title": "City Growth Signals Every Buyer Should Track",
+        "description": "Use locality infrastructure and demand indicators to decide better.",
+        "href": "/blogs"
+      },
+      {
+        "title": "Broker Playbook: Improve Lead Quality in 30 Days",
+        "description": "Simple changes in profile and listing setup that drive better inquiry quality.",
+        "href": "/blogs"
+      }
+    ],
+    "sections": [
+      {
+        "heading": "What You Will Find",
+        "items": [
+          "Buying and renting checklists.",
+          "Local market updates and trends.",
+          "Business playbooks for brokers and property owners."
+        ]
+      },
+      {
+        "heading": "Publishing Focus",
+        "items": [
+          "Actionable content over generic advice.",
+          "Clear explanations for first-time seekers.",
+          "Regular updates aligned with platform changes."
+        ]
+      }
+    ],
+    "faq": [
+      {
+        "question": "How often are posts published?",
+        "answer": "We publish updates as new platform features and local insights become available."
+      },
+      {
+        "question": "Can I contribute a guest post?",
+        "answer": "Yes. Partner teams can contact us for editorial collaboration opportunities."
+      }
+    ],
+    "cta": {
+      "label": "Contact Editorial Team",
+      "href": "/contact"
+    }
+  },
+  {
+    "key": "partner",
+    "title": "Partner With SeaNeB",
+    "subtitle": "Grow your real estate business with better local visibility",
+    "intro": "Join SeaNeB to get discovered by serious property seekers and strengthen your brand in your service area.",
+    "stats": [
+      { "label": "Partner Accounts", "value": "850+" },
+      { "label": "Avg Inquiry Growth", "value": "2.3x" },
+      { "label": "Onboarding Window", "value": "2 to 5 days" },
+      { "label": "Support Coverage", "value": "Dedicated" }
+    ],
+    "featureCards": [
+      {
+        "title": "Business Profile Visibility",
+        "description": "Appear in local discovery pages where users are actively searching.",
+        "href": "/in"
+      },
+      {
+        "title": "Listing Quality Tools",
+        "description": "Improve trust with complete listing details and structured information.",
+        "href": "/dashboard/listings"
+      },
+      {
+        "title": "Support and Guidance",
+        "description": "Get help with onboarding, listing setup, and performance optimization.",
+        "href": "/dashboard/help"
+      }
+    ],
+    "process": [
+      "Create your business profile.",
+      "Complete required details and verification.",
+      "Publish and optimize listings.",
+      "Track and improve your lead pipeline."
+    ],
+    "sections": [
+      {
+        "heading": "Why Partner",
+        "items": [
+          "Reach local audiences already searching for properties.",
+          "Showcase your business profile and services.",
+          "Build trust through a consistent digital presence."
+        ]
+      },
+      {
+        "heading": "How It Works",
+        "items": [
+          "Create your business profile and complete verification steps.",
+          "Add or optimize listings with clean details.",
+          "Track responses and improve conversion quality over time."
+        ]
+      }
+    ],
+    "faq": [
+      {
+        "question": "Who can apply as a partner?",
+        "answer": "Brokers, agencies, builders, and property service teams can apply."
+      },
+      {
+        "question": "How fast is onboarding?",
+        "answer": "Most profiles can start quickly once required business information is submitted."
+      }
+    ],
+    "cta": {
+      "label": "Start Partner Onboarding",
+      "href": "/auth/business-option"
+    }
+  },
+  {
+    "key": "contact",
+    "title": "Contact SeaNeB",
+    "subtitle": "Talk to our team",
+    "intro": "Need help with listings, onboarding, or product support? Reach out and we will guide you.",
+    "stats": [
+      { "label": "Support Channels", "value": "4" },
+      { "label": "Avg First Response", "value": "< 4 hrs" },
+      { "label": "Business Assistance", "value": "Priority" },
+      { "label": "Knowledge Base", "value": "24x7" }
+    ],
+    "contactChannels": [
+      {
+        "title": "Sales",
+        "description": "Partnership, pricing, and business growth discussion.",
+        "href": "/partner"
+      },
+      {
+        "title": "Support",
+        "description": "Account, listing, and technical troubleshooting help.",
+        "href": "/dashboard/help"
+      },
+      {
+        "title": "General",
+        "description": "Feedback, media, and collaboration requests.",
+        "href": "/about"
+      }
+    ],
+    "featureCards": [
+      {
+        "title": "Help Center",
+        "description": "Find quick answers for common product and account questions.",
+        "href": "/dashboard/help"
+      },
+      {
+        "title": "Partner Support",
+        "description": "Get setup guidance for onboarding and listing optimization.",
+        "href": "/partner"
+      },
+      {
+        "title": "Product Feedback",
+        "description": "Share feature ideas that can improve search and business workflows.",
+        "href": "/contact"
+      }
+    ],
+    "sections": [
+      {
+        "heading": "Get In Touch",
+        "items": [
+          "Sales support for partnership and growth conversations.",
+          "Product support for account and dashboard queries.",
+          "General assistance for platform feedback and requests."
+        ]
+      },
+      {
+        "heading": "Response Expectations",
+        "items": [
+          "Share complete context to speed up resolution.",
+          "Include your profile or listing details if applicable.",
+          "Our team prioritizes requests based on impact and urgency."
+        ]
+      }
+    ],
+    "faq": [
+      {
+        "question": "Where should I request technical help?",
+        "answer": "Use the Help Center first, then contact support if you need direct assistance."
+      },
+      {
+        "question": "Can I request a sales demo?",
+        "answer": "Yes. Use the partner or sales contact flow and our team will follow up."
+      }
+    ],
+    "cta": {
+      "label": "Open Help Center",
+      "href": "/dashboard/help"
+    }
+  }
+]
