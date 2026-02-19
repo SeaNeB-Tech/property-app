@@ -41,6 +41,11 @@ export default function SeanebIdField({ value, onChange, verified, setVerified }
     }
   };
 
+  const handleEdit = () => {
+    if (!verified || checking) return;
+    setVerified(false);
+  };
+
   return (
     <div className="space-y-1.5 md:col-span-2">
       <label className="text-sm font-medium text-slate-800">SeaNeB ID *</label>
@@ -67,13 +72,13 @@ export default function SeanebIdField({ value, onChange, verified, setVerified }
           type="button"
           className={`h-11 min-w-[110px] rounded-lg border px-4 text-sm font-semibold transition-all ${
             verified
-              ? "border-emerald-600 bg-emerald-600 text-white"
+              ? "border-amber-500 bg-amber-500 text-white hover:bg-amber-600"
               : "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
           } disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}
-          disabled={!isValidSeaneb || checking || verified}
-          onClick={handleVerify}
+          disabled={checking || (!verified && !isValidSeaneb)}
+          onClick={verified ? handleEdit : handleVerify}
         >
-          {checking ? "Checking..." : verified ? "Verified" : "Verify"}
+          {checking ? "Checking..." : verified ? "Edit" : "Verify"}
         </button>
       </div>
 

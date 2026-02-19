@@ -22,11 +22,20 @@ import { getJsonCookie, getCookie, setCookie, setJsonCookie, removeCookie } from
 const LANG_MAP = { eng, guj, hindi };
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
 const MOBILE_OTP_UNTIL_COOKIE = "mobile_otp_until";
+const LANGUAGE_STORAGE_KEY = "auth_language";
 
 export default function OtpPage() {
   const router = useRouter();
 
-  const [language, setLanguage] = useState("eng");
+  const [language, setLanguage] = useState(() => {
+    if (typeof window !== "undefined") {
+      const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+      if (savedLanguage && LANG_MAP[savedLanguage]) {
+        return savedLanguage;
+      }
+    }
+    return "eng";
+  });
   const [otp, setOtp] = useState("");
   const [mobileLabel, setMobileLabel] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,6 +47,13 @@ export default function OtpPage() {
 
   const t = LANG_MAP[language] || eng;
   const isValid = otp.length === 4;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (LANG_MAP[language]) {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+    }
+  }, [language]);
 
 
   useEffect(() => {
@@ -155,6 +171,15 @@ export default function OtpPage() {
 
       const ctx = getJsonCookie("otp_context");
       const channel = String(ctx?.via || otpVia || "whatsapp").toLowerCase() === "sms" ? "sms" : "whatsapp";
+      setOtpVia(channel);
+      setJsonCookie(
+        "otp_context",
+        {
+          ...(ctx || {}),
+          via: channel,
+        },
+        { maxAge: 300, path: "/" }
+      );
 
       await sendOtp({ via: channel });
 

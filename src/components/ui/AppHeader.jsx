@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import BrandLogo from "./BrandLogo";
-import { clearPanelAuthSession } from "@/services/authSession.service";
+import { logoutPanelSession } from "@/services/authSession.service";
 
 export default function AppHeader({ showLogout = true }) {
   const router = useRouter();
@@ -13,8 +13,7 @@ export default function AppHeader({ showLogout = true }) {
   const handleLogout = async () => {
     try {
       setIsLoading(true);
-      clearPanelAuthSession();
-      
+      await logoutPanelSession();
       router.push("/");
     } catch (err) {
       console.error("Logout error:", err);

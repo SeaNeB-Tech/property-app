@@ -1,11 +1,51 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const portsConfigPath = path.resolve(__dirname, "..", "deployment-ports.json");
+
+const readPortsConfig = () => {
+  try {
+    const raw = fs.readFileSync(portsConfigPath, "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      host: String(parsed?.host || "159.65.154.221").trim(),
+      listingPort: String(parsed?.listingPort || "1001").trim(),
+      appPort: String(parsed?.appPort || "1002").trim(),
+    };
+  } catch {
+    return { host: "159.65.154.221", listingPort: "1001", appPort: "1002" };
+  }
+};
+
+const portsConfig = readPortsConfig();
+const defaultListingUrl = `http://${portsConfig.host}:${portsConfig.listingPort}`;
+const defaultAuthUrl = `http://${portsConfig.host}:${portsConfig.appPort}`;
+
 const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const normalizedBasePath =
   rawBasePath && rawBasePath !== "/"
     ? `/${rawBasePath.replace(/^\/+|\/+$/g, "")}`
     : "";
-const listingAppBaseUrl = (process.env.NEXT_PUBLIC_LISTING_APP_URL || "http://159.65.154.221:1001").replace(
-  /\/+$/,
-  ""
+const normalizeUrl = (value) => String(value || "").replace(/\/+$/, "");
+const normalizeListingAppUrl = (value) => {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return normalized;
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.port === "8877" || parsed.port === "1002") {
+      parsed.port = "1001";
+      return normalizeUrl(parsed.toString());
+    }
+  } catch {
+    return normalized;
+  }
+  return normalized;
+};
+const listingAppBaseUrl = normalizeListingAppUrl(
+  process.env.NEXT_PUBLIC_LISTING_APP_URL || defaultListingUrl
 );
 const apiBaseUrl = (
   process.env.NEXT_PUBLIC_API_URL ||
@@ -17,6 +57,10 @@ const apiHostname = new URL(apiBaseUrl).hostname;
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   basePath: normalizedBasePath,
+  env: {
+    NEXT_PUBLIC_AUTH_APP_URL: process.env.NEXT_PUBLIC_AUTH_APP_URL || defaultAuthUrl,
+    NEXT_PUBLIC_LISTING_APP_URL: process.env.NEXT_PUBLIC_LISTING_APP_URL || defaultListingUrl,
+  },
   images: {
     remotePatterns: [
       {

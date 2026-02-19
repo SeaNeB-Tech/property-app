@@ -1,5 +1,6 @@
 import { removeCookie } from "./cookie";
 import { authStore } from "@/app/auth/auth-service/store/authStore";
+import api from "@/services/api";
 
 const PANEL_AUTH_COOKIE_KEYS = [
   "access_token",
@@ -15,6 +16,35 @@ const PANEL_AUTH_COOKIE_KEYS = [
   "mobile_verified",
   "otp_mobile",
   "otp_cc",
+  "otp_context",
+  "email_otp_until",
+  "mobile_otp_until",
+  "business_mobile_otp_until",
+  "reg_form_draft",
+  "verified_email",
+  "verified_business_email",
+  "verified_mobile",
+  "verified_business_mobile",
+  "verified_pan",
+  "verified_gstin",
+  "business_registered",
+  "business_name",
+  "business_type",
+  "business_location",
+  "business_id",
+  "branch_id",
+  "dashboard_mode",
+  "product_key",
+];
+
+const STORAGE_KEYS = [
+  "access_token",
+  "refresh_token",
+  "csrf_token",
+  "csrf-token",
+  "session_start_time",
+  "profile_completed",
+  "product_key",
 ];
 
 const getCookieKeys = () => {
@@ -44,4 +74,25 @@ export const clearPanelAuthSession = () => {
       );
     })
     .forEach((key) => removeCookie(key));
+  if (typeof window !== "undefined") {
+    STORAGE_KEYS.forEach((key) => {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {}
+      try {
+        window.sessionStorage.removeItem(key);
+      } catch {}
+    });
+  }
+};
+
+export const logoutPanelSession = async () => {
+  clearPanelAuthSession();
+  try {
+    await api.post("/auth/logout", {}, { withCredentials: true });
+  } catch {
+    // Continue with local cleanup.
+  } finally {
+    clearPanelAuthSession();
+  }
 };

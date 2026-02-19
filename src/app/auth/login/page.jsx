@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import phoneCodes from "@/constants/phoneCodes.json";
 
@@ -20,6 +20,7 @@ import { sendOtp } from "@/app/auth/auth-service/otp.service";
 import { setCookie, setJsonCookie } from "@/services/cookie";
 
 const LANG_MAP = { eng, guj, hindi };
+const LANGUAGE_STORAGE_KEY = "auth_language";
 
 const getFriendlyOtpError = (err) => {
   const status = Number(err?.response?.status || 0);
@@ -42,7 +43,15 @@ const getFriendlyOtpError = (err) => {
 export default function LoginPage() {
   const router = useRouter();
 
-  const [language, setLanguage] = useState("eng");
+  const [language, setLanguage] = useState(() => {
+    if (typeof window !== "undefined") {
+      const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+      if (savedLanguage && LANG_MAP[savedLanguage]) {
+        return savedLanguage;
+      }
+    }
+    return "eng";
+  });
   const [mobile, setMobile] = useState("");
   const [country, setCountry] = useState(phoneCodes[0]);
   const [method, setMethod] = useState("whatsapp");
@@ -52,6 +61,13 @@ export default function LoginPage() {
   const t = LANG_MAP[language] || eng;
 
   const isValidMobile = /^\d{10}$/.test(mobile);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (LANG_MAP[language]) {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+    }
+  }, [language]);
 
   const handleContinue = useCallback(async () => {
     if (!isValidMobile || loading) return;

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getCookie } from "@/services/cookie";
+import { authStore } from "@/app/auth/auth-service/store/authStore";
+import { bootstrapProductAuth } from "@/app/auth/auth-service/auth.bootstrap";
 import {
   DASHBOARD_MODE_BUSINESS,
   DASHBOARD_MODE_USER,
@@ -12,10 +14,13 @@ import {
 
 export default function AuthHome() {
   const router = useRouter();
-  const [requestedMode, setRequestedMode] = useState("");
+  const [requestedMode] = useState(() => {
+    if (typeof window === "undefined") return "";
+    const params = new URLSearchParams(window.location.search || "");
+    return String(params.get("mode") || "").toLowerCase();
+  });
 
   const hasProfile = getCookie("profile_completed") === "true";
-  const hasSession = Boolean(getCookie("access_token")) || Boolean(getCookie("session_start_time"));
   const hasBusiness = getCookie("business_registered") === "true";
 
   const modeLabel = useMemo(() => {
@@ -24,26 +29,40 @@ export default function AuthHome() {
   }, [requestedMode]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search || "");
-    setRequestedMode(String(params.get("mode") || "").toLowerCase());
-  }, []);
+    let active = true;
 
-  useEffect(() => {
-    if (!hasProfile && !hasSession) {
-      router.replace("/auth/login");
-      return;
-    }
-
-    if (requestedMode === "business") {
-      setDashboardMode(DASHBOARD_MODE_BUSINESS);
-      if (!hasBusiness) {
-        router.replace("/auth/business-register");
+    const validate = async () => {
+      let sessionOk = !!authStore.getAccessToken();
+      if (!sessionOk) {
+        try {
+          await bootstrapProductAuth();
+          sessionOk = !!authStore.getAccessToken();
+        } catch {
+          sessionOk = false;
+        }
       }
-      return;
-    }
+      if (!active) return;
+      if (!hasProfile && !sessionOk) {
+        router.replace("/auth/login");
+        return;
+      }
 
-    setDashboardMode(DASHBOARD_MODE_USER);
-  }, [hasBusiness, hasProfile, hasSession, requestedMode, router]);
+      if (requestedMode === "business") {
+        setDashboardMode(DASHBOARD_MODE_BUSINESS);
+        if (!hasBusiness) {
+          router.replace("/auth/business-register");
+        }
+        return;
+      }
+
+      setDashboardMode(DASHBOARD_MODE_USER);
+    };
+
+    validate();
+    return () => {
+      active = false;
+    };
+  }, [hasBusiness, hasProfile, requestedMode, router]);
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">

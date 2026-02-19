@@ -40,6 +40,7 @@ const PURPOSE_BUSINESS_EMAIL_VERIFY = 3
 const DEFAULT_MAIN_CATEGORY_ID = process.env.NEXT_PUBLIC_MAIN_CATEGORY_ID || ""
 const OTP_VIA_WHATSAPP = "whatsapp"
 const OTP_VIA_SMS = "sms"
+const LANGUAGE_STORAGE_KEY = "auth_language"
 
 const EMPTY_FORM = {
   businessName: "",
@@ -91,7 +92,15 @@ const getBusinessSuggestionPlaceId = (item) =>
 
 export default function BusinessRegisterPage() {
   const router = useRouter()
-  const [language, setLanguage] = useState("eng")
+  const [language, setLanguage] = useState(() => {
+    if (typeof window !== "undefined") {
+      const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
+      if (savedLanguage && LANG_MAP[savedLanguage]) {
+        return savedLanguage
+      }
+    }
+    return "eng"
+  })
   const [form, setForm] = useState(EMPTY_FORM)
   const [mounted, setMounted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -131,8 +140,6 @@ export default function BusinessRegisterPage() {
   const requiredChecks = [
     form.businessName.trim().length > 0,
     form.businessType !== "",
-    form.mainCategoryId.trim().length > 0,
-    form.primaryNumber.trim().length > 0,
     mobileVerified,
     form.businessLocation.trim().length > 0,
     form.placeId.trim().length > 0,
@@ -140,6 +147,13 @@ export default function BusinessRegisterPage() {
   ]
   const completedRequired = requiredChecks.filter(Boolean).length
   const completionPercent = Math.round((completedRequired / requiredChecks.length) * 100)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    if (LANG_MAP[language]) {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
+    }
+  }, [language])
 
   useEffect(() => {
     const init = async () => {
@@ -164,6 +178,14 @@ export default function BusinessRegisterPage() {
           maxAge: 60 * 60 * 24 * 30,
           path: "/",
         })
+      }
+
+      // If business was already registered earlier, do not show registration again.
+      const hasBusinessCookie = getCookie("business_registered") === "true"
+      const existingBranchId = String(getCookie("branch_id") || "").trim()
+      if (hasBusinessCookie || existingBranchId) {
+        router.replace("/dashboard/broker")
+        return
       }
 
       const verifiedMobile = getJsonCookie("verified_mobile")
@@ -295,7 +317,6 @@ export default function BusinessRegisterPage() {
         gstin: verifiedGstin || prev.gstin,
       }))
 
-      const existingBranchId = getCookie("branch_id")
       if (existingBranchId) {
         setBranchId(existingBranchId)
       }
@@ -350,6 +371,18 @@ export default function BusinessRegisterPage() {
     if (key === "primaryNumber") {
       setMobileVerified(false)
       removeCookie("verified_business_mobile")
+      setForm((prev) => {
+        const prevPrimary = String(prev.primaryNumber || "").trim()
+        const prevWhatsapp = String(prev.whatsappNumber || "").trim()
+        const nextPrimary = String(safeValue || "").trim()
+        const shouldSyncWhatsapp = !prevWhatsapp || prevWhatsapp === prevPrimary
+        return {
+          ...prev,
+          primaryNumber: safeValue,
+          ...(shouldSyncWhatsapp ? { whatsappNumber: nextPrimary } : {}),
+        }
+      })
+      return
     }
     if (key === "seanebId") {
       setSeanebVerified(false)
@@ -649,6 +682,15 @@ export default function BusinessRegisterPage() {
         const channel = String(ctx?.via || mobileOtpVia || OTP_VIA_WHATSAPP).toLowerCase() === OTP_VIA_SMS
           ? OTP_VIA_SMS
           : OTP_VIA_WHATSAPP
+        setMobileOtpVia(channel)
+        setJsonCookie(
+          "otp_context",
+          {
+            ...(ctx || {}),
+            via: channel,
+          },
+          { maxAge: 300, path: "/" }
+        )
         await sendOtp({ via: channel })
         const until = Date.now() + 60 * 1000
         setCookie("business_mobile_otp_until", String(until), { maxAge: 60, path: "/" })
@@ -734,6 +776,8 @@ export default function BusinessRegisterPage() {
     const businessType = form.businessType
     const placeId = form.placeId.trim()
     const primaryNumber = form.primaryNumber.trim()
+    const whatsappNumber = form.whatsappNumber.trim()
+    const effectiveWhatsappNumber = whatsappNumber || primaryNumber
     const businessEmail = form.businessEmail.trim()
     const pan = form.pan.trim().toUpperCase()
     const gstin = form.gstin.trim().toUpperCase()
@@ -821,7 +865,7 @@ export default function BusinessRegisterPage() {
         business_type: Number(form.businessType),
         seaneb_id: form.seanebId.trim(),
         primary_number: primaryNumber,
-        whatsapp_number: form.whatsappNumber.trim() || primaryNumber,
+        whatsapp_number: effectiveWhatsappNumber,
         business_email: businessEmail || undefined,
         about_branch: form.aboutBranch.trim() || "Head office branch",
         address: form.businessLocation.trim(),
@@ -1079,7 +1123,19 @@ export default function BusinessRegisterPage() {
               </Field>
 
               <Field label="WhatsApp Number">
-                <input type="text" className="business-form-input" value={form.whatsappNumber} onChange={(e) => setField("whatsappNumber", e.target.value.replace(/\D/g, ""))} />
+                <div>
+                  <input
+                    type="text"
+                    className="business-form-input"
+                    value={form.whatsappNumber}
+                    onChange={(e) => setField("whatsappNumber", e.target.value.replace(/\D/g, ""))}
+                  />
+                  {mobileVerified &&
+                    form.primaryNumber.trim() &&
+                    (form.whatsappNumber.trim() || form.primaryNumber.trim()) === form.primaryNumber.trim() && (
+                      <p className="business-verify-note">Same as primary number. No separate verification required.</p>
+                  )}
+                </div>
               </Field>
 
               <Field label="Business Email (Optional)" hint="You can leave this blank or verify it when needed.">

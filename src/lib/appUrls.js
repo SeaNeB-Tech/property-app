@@ -1,13 +1,16 @@
 const normalizeUrl = (value) => String(value || "").replace(/\/+$/, "");
-const normalizeLocalPort = (value, fromPort, toPort) => {
+const defaultAuthAppUrl = "http://159.65.154.221:1002";
+const defaultListingAppUrl = "http://159.65.154.221:1001";
+
+const normalizeAuthPort = (value) => {
   const normalized = normalizeUrl(value);
-  if (!normalized || process.env.NODE_ENV !== "development") return normalized;
+  if (!normalized) return normalized;
 
   try {
     const parsed = new URL(normalized);
-    const isLocalHost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-    if (isLocalHost && parsed.port === fromPort) {
-      parsed.port = toPort;
+    // Backward compatibility: old auth port and accidental listing port.
+    if (parsed.port === "3000" || parsed.port === "1001") {
+      parsed.port = "1002";
       return normalizeUrl(parsed.toString());
     }
   } catch {
@@ -17,16 +20,27 @@ const normalizeLocalPort = (value, fromPort, toPort) => {
   return normalized;
 };
 
-const defaultAuthAppUrl = "http://localhost:1002";
-const defaultListingAppUrl = "http://localhost:1001";
+const normalizeListingPort = (value) => {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return normalized;
 
-export const AUTH_APP_BASE_URL = normalizeUrl(
-  normalizeLocalPort(process.env.NEXT_PUBLIC_AUTH_APP_URL || defaultAuthAppUrl, "3000", "1002")
-);
+  try {
+    const parsed = new URL(normalized);
+    // Backward compatibility: old listing port and accidental app port.
+    if (parsed.port === "8877" || parsed.port === "1002") {
+      parsed.port = "1001";
+      return normalizeUrl(parsed.toString());
+    }
+  } catch {
+    return normalized;
+  }
 
-export const LISTING_APP_BASE_URL = normalizeUrl(
-  normalizeLocalPort(process.env.NEXT_PUBLIC_LISTING_APP_URL || defaultListingAppUrl, "8877", "1001")
-);
+  return normalized;
+};
+
+export const AUTH_APP_BASE_URL = normalizeAuthPort(process.env.NEXT_PUBLIC_AUTH_APP_URL || defaultAuthAppUrl);
+
+export const LISTING_APP_BASE_URL = normalizeListingPort(process.env.NEXT_PUBLIC_LISTING_APP_URL || defaultListingAppUrl);
 
 export const getAuthAppUrl = (path = "/") => {
   const safePath = path.startsWith("/") ? path : `/${path}`;

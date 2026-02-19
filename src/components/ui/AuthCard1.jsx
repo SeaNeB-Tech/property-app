@@ -7,7 +7,7 @@ export default function AuthCard1({
 }) {
   return (
     <div
-      className="min-h-screen w-full flex items-center justify-center bg-[radial-gradient(circle_at_top,_#1f2937_0%,_#000_60%)] px-6 py-8"
+      className="auth-shell auth-shell--wide min-h-screen w-full flex items-center justify-center px-6 py-8"
       suppressHydrationWarning
     >
       <div

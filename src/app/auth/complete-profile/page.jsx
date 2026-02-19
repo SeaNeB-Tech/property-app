@@ -20,7 +20,7 @@ import OtpVerificationModal from "@/components/ui/OtpVerificationModal"
 // Services
 import { signupUser } from "@/app/auth/auth-service/signup.service"
 import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.service"
-import { getProducts, getDefaultProductKey, getDefaultProductName, setDefaultProductKey } from "@/services/pro.service"
+import { getDefaultProductKey, setDefaultProductKey } from "@/services/pro.service"
 import { authStore } from "@/app/auth/auth-service/store/authStore"
 import {
   getCookie,
@@ -31,6 +31,7 @@ import {
 } from "@/services/cookie"
 
 const LANG_MAP = { eng, guj, hindi }
+const LANGUAGE_STORAGE_KEY = "auth_language"
 
 const emailRegex =
   /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
@@ -46,19 +47,6 @@ const EMPTY_FORM = {
   seanebId: "",
   agree: false,
 }
-
-const getProductKey = (product) =>
-  product?.product_key || String(product?.product_id || product?.id || "")
-
-const getProductName = (product) =>
-  getProductKey(product) === "property"
-    ? "Property"
-    : (product?.product_name || product?.name || product?.product_key || "Unnamed product")
-
-const getDefaultProduct = () => ({
-  product_key: getDefaultProductKey(),
-  product_name: getDefaultProductName(),
-})
 
 const isAge13Plus = (dob) => {
   if (!dob) return false
@@ -78,8 +66,17 @@ const isAge13Plus = (dob) => {
 
 export default function CompleteProfilePage() {
   const router = useRouter()
+  const lockedProductKey = getDefaultProductKey()
 
-  const [language, setLanguage] = useState("eng")
+  const [language, setLanguage] = useState(() => {
+    if (typeof window !== "undefined") {
+      const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
+      if (savedLanguage && LANG_MAP[savedLanguage]) {
+        return savedLanguage
+      }
+    }
+    return "eng"
+  })
   const t = LANG_MAP[language]
 
   const [form, setForm] = useState(EMPTY_FORM)
@@ -98,9 +95,6 @@ export default function CompleteProfilePage() {
   const [mobileVerified, setMobileVerified] = useState(false)
   const [seanebVerified, setSeanebVerified] = useState(false)
 
-  const [products, setProducts] = useState([])
-  const [selectedProduct, setSelectedProduct] = useState("")
-  const [productsLoading, setProductsLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState("")
 
@@ -131,6 +125,13 @@ export default function CompleteProfilePage() {
 
     setForm((prev) => ({ ...prev, [key]: safeValue }))
   }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    if (LANG_MAP[language]) {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
+    }
+  }, [language])
 
   /* ================= MOBILE OTP GUARD ================= */
 
@@ -163,36 +164,6 @@ export default function CompleteProfilePage() {
     if (!mounted) return
     setJsonCookie("reg_form_draft", form, { path: "/" })
   }, [form, mounted])
-
-  /* ================= PRODUCTS ================= */
-
-  useEffect(() => {
-    if (!mounted) return
-
-    const fetchProducts = async () => {
-      try {
-        setProductsLoading(true)
-        const list = await getProducts()
-
-        if (Array.isArray(list) && list.length > 0) {
-          setProducts(list)
-          setSelectedProduct(getProductKey(list[0]) || getDefaultProductKey())
-        } else {
-          const fallbackProduct = getDefaultProduct()
-          setProducts([fallbackProduct])
-          setSelectedProduct(getProductKey(fallbackProduct))
-        }
-      } catch {
-        const fallbackProduct = getDefaultProduct()
-        setProducts([fallbackProduct])
-        setSelectedProduct(getProductKey(fallbackProduct))
-      } finally {
-        setProductsLoading(false)
-      }
-    }
-
-    fetchProducts()
-  }, [mounted])
 
   /* ================= EMAIL VERIFIED ================= */
 
@@ -347,9 +318,9 @@ export default function CompleteProfilePage() {
         place_id: form.placeId,
         gender: form.gender,
         seaneb_id: form.seanebId,
-        product_key: selectedProduct || getProductKey(products[0]) || getDefaultProductKey(),
+        product_key: lockedProductKey,
       })
-      setDefaultProductKey(selectedProduct || getProductKey(products[0]) || getDefaultProductKey())
+      setDefaultProductKey(lockedProductKey)
 
       // ✅ FIX: Capture tokens from signup response
       const data = response?.data || response || {}
@@ -496,14 +467,6 @@ export default function CompleteProfilePage() {
           />
         </div>
 
-        {/* Products Section */}
-        <ProductsSection
-          products={products}
-          selectedProduct={selectedProduct}
-          productsLoading={productsLoading}
-          onSelect={setSelectedProduct}
-        />
-
         {/* Checkbox */}
         <div className="checkbox-row">
           <input
@@ -600,60 +563,6 @@ function EmailField({ value, onChange, onVerify, verified, loading, cooldown }) 
       <p className={`text-xs ${verified ? "text-emerald-600" : "text-slate-500"}`}>
         {verified ? "Email verified successfully." : "You can continue without email verification."}
       </p>
-    </div>
-  )
-}
-
-function ProductSelect({ products, selectedProduct, onSelect }) {
-  return (
-    <select
-      className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition-all focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-      value={selectedProduct}
-      onChange={(e) => onSelect(e.target.value)}
-    >
-      {products.map((product) => {
-        const key = getProductKey(product)
-        return (
-          <option key={key} value={key}>
-            {getProductName(product)}
-          </option>
-        )
-      })}
-    </select>
-  )
-}
-
-function ProductsSection({ products, selectedProduct, productsLoading, onSelect }) {
-  if (productsLoading) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <div className="py-6 text-center text-sm text-slate-500">Loading available products...</div>
-      </div>
-    )
-  }
-
-  if (!products || products.length === 0) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <div className="py-6 text-center text-sm text-slate-500">No products available</div>
-      </div>
-    )
-  }
-
-  const selected = products.find((p) => getProductKey(p) === selectedProduct) || products[0]
-
-  return (
-    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-      <label className="block text-sm font-medium text-slate-800">Select Product *</label>
-      <ProductSelect products={products} selectedProduct={selectedProduct} onSelect={onSelect} />
-      {selected && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-          <p className="text-sm font-semibold text-slate-900">{getProductName(selected)}</p>
-          {selected?.product_description && (
-            <p className="mt-1 text-xs text-slate-600">{selected.product_description}</p>
-          )}
-        </div>
-      )}
     </div>
   )
 }

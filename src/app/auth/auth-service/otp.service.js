@@ -1,7 +1,7 @@
 import api from "@/services/api";
 import { authStore } from "./store/authStore";
 import { getDefaultProductKey, getDefaultProductName } from "@/services/pro.service";
-import { getJsonCookie } from "@/services/cookie";
+import { getJsonCookie, setJsonCookie } from "@/services/cookie";
 
 const IDENTIFIER_TYPE_MOBILE = 0;
 const PURPOSE_SIGNUP_OR_LOGIN = 0;
@@ -43,14 +43,25 @@ export const sendOtp = async ({ via } = {}) => {
       ? Number(ctx.purpose)
       : PURPOSE_SIGNUP_OR_LOGIN;
 
+  const effectiveVia = String(via || ctx.via || DEFAULT_VIA).toLowerCase() === "sms" ? "sms" : "whatsapp";
+
   const basePayload = {
     identifier_type: IDENTIFIER_TYPE_MOBILE,
     country_code: String(ctx.country_code).trim(),
     mobile_number: String(ctx.mobile_number).trim(),
     purpose,
-    via: via || ctx.via || DEFAULT_VIA,
+    via: effectiveVia,
     product_key: getDefaultProductKey(),
   };
+
+  setJsonCookie(
+    "otp_context",
+    {
+      ...ctx,
+      via: effectiveVia,
+    },
+    { maxAge: 300, path: "/" }
+  );
 
   console.log("sendOtp payload:", JSON.stringify(basePayload, null, 2));
   try {

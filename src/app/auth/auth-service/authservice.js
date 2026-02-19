@@ -4,6 +4,7 @@ import api from "@/services/api";
 import { getDefaultProductKey, getDefaultProductName, setDefaultProductKey } from "@/services/pro.service";
 import { getJsonCookie, getCookie } from "@/services/cookie";
 import { authStore } from "./store/authStore";
+import { clearPanelAuthSession } from "@/services/authSession.service";
 
 
 const IDENTIFIER_TYPE_MOBILE = 0;
@@ -245,6 +246,7 @@ export const logout = async () => {
   } finally {
     console.log("    Session cleared");
     authStore.clearAll();
+    clearPanelAuthSession();
     console.log("   → Redirecting to login");
     window.location.href = withBasePath("/auth/login");
   }

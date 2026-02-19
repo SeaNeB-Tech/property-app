@@ -20,6 +20,7 @@ import { verifyEmailOtp, sendEmailOtp } from "@/app/auth/auth-service/email.serv
 import { getJsonCookie, setCookie, removeCookie, getCookie } from "@/services/cookie"
 
 const LANG_MAP = { eng, guj, hindi }
+const LANGUAGE_STORAGE_KEY = "auth_language"
 
 export default function EmailOtpPage() {
   return (
@@ -32,7 +33,15 @@ export default function EmailOtpPage() {
 function EmailOtpContent() {
   const router = useRouter()
 
-  const [language, setLanguage] = useState("eng")
+  const [language, setLanguage] = useState(() => {
+    if (typeof window !== "undefined") {
+      const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
+      if (savedLanguage && LANG_MAP[savedLanguage]) {
+        return savedLanguage
+      }
+    }
+    return "eng"
+  })
   const t = LANG_MAP[language] || eng
 
   const [otp, setOtp] = useState("")
@@ -47,6 +56,13 @@ function EmailOtpContent() {
   const [otpClearSignal, setOtpClearSignal] = useState(0)
 
   const isValid = otp.length === 4
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    if (LANG_MAP[language]) {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
+    }
+  }, [language])
 
   /* ================= INIT ================= */
 

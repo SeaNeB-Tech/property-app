@@ -14,6 +14,8 @@ export default function AutoComplete({
   const [cities, setCities] = useState([]);
   const [loading, setLoading] = useState(false);
   const wrapperRef = useRef(null);
+  const lastSelectedLabelRef = useRef("");
+  const selectedLockRef = useRef(false);
 
   const debouncedValue = useDebounce(value, 300);
   const dedupeCities = (items = []) => {
@@ -35,6 +37,16 @@ export default function AutoComplete({
   useEffect(() => {
     let active = true;
     const query = debouncedValue?.trim();
+
+    if (
+      selectedLockRef.current &&
+      query &&
+      query === lastSelectedLabelRef.current
+    ) {
+      setOpen(false);
+      setLoading(false);
+      return;
+    }
 
     if (!query || query.length < 2) {
       setCities([]);
@@ -89,10 +101,26 @@ export default function AutoComplete({
         value={value}
         autoComplete="off"
         onChange={(e) => {
-          onChange(e.target.value);
+          const nextValue = e.target.value;
+          const selectedLabel = lastSelectedLabelRef.current;
+          const hasEditedSelectedValue =
+            selectedLockRef.current && nextValue.trim() !== selectedLabel;
+
+          if (hasEditedSelectedValue) {
+            selectedLockRef.current = false;
+            lastSelectedLabelRef.current = "";
+          }
+
+          onChange(nextValue);
           onSelect?.(null); // clear placeId when typing
         }}
-        onFocus={() => value && value.trim().length >= 2 && (cities.length > 0 || loading) && setOpen(true)}
+        onFocus={() =>
+          !selectedLockRef.current &&
+          value &&
+          value.trim().length >= 2 &&
+          (cities.length > 0 || loading) &&
+          setOpen(true)
+        }
       />
 
       {open && (
@@ -132,6 +160,9 @@ export default function AutoComplete({
                       place_id: resolvedPlaceId,
                       city_id: city.city_id,
                     });
+                    lastSelectedLabelRef.current = label.trim();
+                    selectedLockRef.current = true;
+                    setCities([]);
                     setOpen(false);
                   }}
                 >

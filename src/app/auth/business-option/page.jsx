@@ -4,19 +4,60 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { getCookie } from "@/services/cookie"
 import { setDashboardMode, DASHBOARD_MODE_USER } from "@/services/dashboardMode.service"
+import { authStore } from "@/app/auth/auth-service/store/authStore"
+import { bootstrapProductAuth } from "@/app/auth/auth-service/auth.bootstrap"
 import AuthCard1 from "@/components/ui/AuthCard1"
 import AuthHeader from "@/components/ui/AuthHeader"
 
+const LANGUAGE_STORAGE_KEY = "auth_language"
+const SUPPORTED_LANGUAGES = new Set(["eng", "guj", "hindi"])
+
 export default function BusinessOptionPage() {
   const router = useRouter()
-  const [language, setLanguage] = useState("eng")
+  const [language, setLanguage] = useState(() => {
+    if (typeof window !== "undefined") {
+      const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
+      if (savedLanguage && SUPPORTED_LANGUAGES.has(savedLanguage)) {
+        return savedLanguage
+      }
+    }
+    return "eng"
+  })
   const isProfileCompleted = getCookie("profile_completed") === "true"
+  const [hasSession, setHasSession] = useState(false)
 
   useEffect(() => {
-    if (!isProfileCompleted) {
-      router.replace("/auth/login")
+    let active = true
+
+    const checkSession = async () => {
+      let sessionOk = !!authStore.getAccessToken()
+      if (!sessionOk) {
+        try {
+          await bootstrapProductAuth()
+          sessionOk = !!authStore.getAccessToken()
+        } catch {
+          sessionOk = false
+        }
+      }
+      if (!active) return
+      setHasSession(sessionOk)
+      if (!isProfileCompleted || !sessionOk) {
+        router.replace("/auth/login")
+      }
+    }
+
+    checkSession()
+    return () => {
+      active = false
     }
   }, [isProfileCompleted, router])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    if (SUPPORTED_LANGUAGES.has(language)) {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
+    }
+  }, [language])
 
   const handleHaveBusiness = () => {
     router.push("/auth/business-register")
@@ -27,7 +68,7 @@ export default function BusinessOptionPage() {
     router.push("/dashboard")
   }
 
-  if (!isProfileCompleted) return null
+  if (!isProfileCompleted || !hasSession) return null
 
   return (
     <AuthCard1 header={<AuthHeader language={language} setLanguage={setLanguage} />}>
