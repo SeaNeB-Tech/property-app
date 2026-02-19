@@ -14,6 +14,14 @@ const geistMono = Geist_Mono({
 export const metadata = {
   title: "SeaNeB Property Panel",
   description: "SeaNeB Property authentication and panel application",
+  icons: {
+    icon: [
+      { url: "/logos/Fav.svg", type: "image/svg+xml" },
+      { url: "/logos/Fav.png", type: "image/png", sizes: "32x32" },
+    ],
+    shortcut: "/logos/Fav.png",
+    apple: "/logos/Fav.png",
+  },
 };
 
 export default function RootLayout({ children }) {

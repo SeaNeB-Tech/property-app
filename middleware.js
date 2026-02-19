@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const LISTING_APP_BASE_URL = (process.env.NEXT_PUBLIC_LISTING_APP_URL || "http://localhost:8877").replace(
+const LISTING_APP_BASE_URL = (process.env.NEXT_PUBLIC_LISTING_APP_URL || "http://localhost:1001").replace(
   /\/+$/,
   ""
 );

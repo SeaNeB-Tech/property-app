@@ -3,7 +3,7 @@ const normalizedBasePath =
   rawBasePath && rawBasePath !== "/"
     ? `/${rawBasePath.replace(/^\/+|\/+$/g, "")}`
     : "";
-const listingAppBaseUrl = (process.env.NEXT_PUBLIC_LISTING_APP_URL || "http://159.65.154.221:1002").replace(
+const listingAppBaseUrl = (process.env.NEXT_PUBLIC_LISTING_APP_URL || "http://159.65.154.221:1001").replace(
   /\/+$/,
   ""
 );

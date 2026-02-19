@@ -21,6 +21,24 @@ import { setCookie, setJsonCookie } from "@/services/cookie";
 
 const LANG_MAP = { eng, guj, hindi };
 
+const getFriendlyOtpError = (err) => {
+  const status = Number(err?.response?.status || 0);
+
+  if (status === 429) {
+    return "Too many attempts. Please wait a moment and try again.";
+  }
+
+  if (status === 400 || status === 401 || status === 403 || status === 422) {
+    return "Unable to send OTP. Please check your number and try again.";
+  }
+
+  if (status >= 500) {
+    return "Something went wrong on our side. Please try again shortly.";
+  }
+
+  return "Unable to send OTP right now. Please try again.";
+};
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -65,12 +83,8 @@ export default function LoginPage() {
 
       router.push("/auth/otp");
     } catch (err) {
-      const message =
-        err?.response?.data?.message ||
-        err?.message ||
-        "Failed to send OTP";
-
-      setError(message);
+      console.error("sendOtp failed:", err);
+      setError(getFriendlyOtpError(err));
     } finally {
       setLoading(false);
     }
