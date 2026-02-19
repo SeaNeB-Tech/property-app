@@ -4,6 +4,7 @@ const isBrowser = typeof window !== "undefined";
 const envCookiePath = process.env.NEXT_PUBLIC_COOKIE_PATH || "/";
 const envCookieDomain = process.env.NEXT_PUBLIC_COOKIE_DOMAIN || "";
 const envSameSite = process.env.NEXT_PUBLIC_COOKIE_SAMESITE || "Lax";
+const COOKIE_CHANGE_EVENT = "seaneb:cookie-change";
 
 const normalizePath = (path) => {
   if (!path || typeof path !== "string") return "/";
@@ -22,6 +23,15 @@ const resolveCookieOptions = (options = {}) => {
   return { ...options, path, domain, sameSite, secure };
 };
 
+const emitCookieChange = (name) => {
+  if (!isBrowser) return;
+  try {
+    window.dispatchEvent(new CustomEvent(COOKIE_CHANGE_EVENT, { detail: { name } }));
+  } catch {
+    // Ignore event dispatch issues in older environments.
+  }
+};
+
 export const setCookie = (name, value, options = {}) => {
   if (!isBrowser) return;
   const { maxAge, path, domain, sameSite, secure } = resolveCookieOptions(options);
@@ -33,6 +43,7 @@ export const setCookie = (name, value, options = {}) => {
   if (secure) cookie += "; Secure";
 
   document.cookie = cookie;
+  emitCookieChange(name);
 };
 
 export const getCookie = (name) => {
@@ -58,6 +69,7 @@ export const removeCookie = (name, options = {}) => {
   if (sameSite) cookie += `; SameSite=${sameSite}`;
   if (secure) cookie += "; Secure";
   document.cookie = cookie;
+  emitCookieChange(name);
 };
 
 export const setJsonCookie = (name, obj, options = {}) => {

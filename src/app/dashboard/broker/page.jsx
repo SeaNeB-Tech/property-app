@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-export default async function DashboardPage() {
+export default async function BrokerDashboardPage() {
   const cookieStore = await cookies();
   const hasProfile = cookieStore.get("profile_completed")?.value === "true";
   const hasSession =
@@ -12,5 +12,5 @@ export default async function DashboardPage() {
     redirect("/auth/login");
   }
 
-  redirect("/auth/home");
+  redirect("/auth/home?mode=business");
 }

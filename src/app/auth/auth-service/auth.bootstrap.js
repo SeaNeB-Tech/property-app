@@ -2,6 +2,7 @@ import axios from "axios";
 import { authStore } from "./store/authStore";
 import { getDefaultProductKey, setDefaultProductKey } from "@/services/pro.service";
 import { getCookie } from "@/services/cookie";
+import { API_BASE_URL } from "@/lib/apiBaseUrl";
 
 const getRefreshProductKeyCandidates = () => {
   return ["property"];
@@ -81,7 +82,7 @@ export const bootstrapProductAuth = async ({ force = false } = {}) => {
         }
 
         const res = await axios.post(
-          "https://dev.seaneb.com/api/v1/auth/refresh",
+          `${API_BASE_URL}/auth/refresh`,
           requestBody,
           {
             withCredentials: true,

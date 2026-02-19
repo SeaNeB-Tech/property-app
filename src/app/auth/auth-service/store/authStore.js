@@ -1,135 +1,52 @@
 "use client";
 
-// src/services/store/authStore.js
-// Token storage: All tokens now stored in cookies for persistence across page reloads
+import { getCookie, removeCookie, setCookie } from "@/services/cookie";
 
-const getCookieValue = (name) => {
-  if (typeof window === "undefined") return null;
-  
-  console.log(`[getCookieValue] Searching for "${name}" in cookies`);
-  console.log(`  document.cookie: "${document.cookie}"`);
-  
-  const pairs = document.cookie.split("; ");
-  console.log(`  Split into ${pairs.length} cookie pairs`);
-  
-  for (let i = 0; i < pairs.length; i++) {
-    const p = pairs[i];
-    if (!p) continue;
-    
-    // FIX: Split only on the FIRST "=" to handle values that contain "="
-    const eqIndex = p.indexOf("=");
-    if (eqIndex < 0) continue;
-    
-    const k = p.substring(0, eqIndex);
-    const v = p.substring(eqIndex + 1);
-    const decodedKey = decodeURIComponent(k || "");
-    
-    if (decodedKey === name) {
-      const decoded = decodeURIComponent(v || "");
-      console.log(`FOUND "${name}" in cookies!`);
-      console.log(`  Value length: ${decoded.length}`);
-      console.log(`  First 30 chars: ${decoded.substring(0, 30)}...`);
-      return decoded;
-    }
-  }
-  
-  console.log(`"${name}" NOT found in cookies`);
-  return null;
-};
+const ACCESS_TOKEN_MAX_AGE = 15 * 60;
+const REFRESH_TOKEN_MAX_AGE = 60 * 60 * 24 * 30;
+const CSRF_TOKEN_MAX_AGE = 6 * 60 * 60;
+const SESSION_MAX_AGE = 6 * 60 * 60;
 
-const getCookiePath = () => {
-  const path = process.env.NEXT_PUBLIC_COOKIE_PATH || "/";
-  return path.startsWith("/") ? path : `/${path}`;
-};
+const CSRF_COOKIE_KEYS = [
+  "csrf_token",
+  "csrf-token",
+  "XSRF-TOKEN",
+  "xsrf-token",
+  "XSRF_TOKEN",
+  "_csrf",
+];
 
-const getCookieDomain = () => process.env.NEXT_PUBLIC_COOKIE_DOMAIN || "";
-const getCookieSameSite = () => process.env.NEXT_PUBLIC_COOKIE_SAMESITE || "Lax";
+const AUTH_COOKIE_KEYS = [
+  "access_token",
+  "refresh_token",
+  "access_token_issued_time",
+  "session_start_time",
+  ...CSRF_COOKIE_KEYS,
+];
 
-const getFirstCookieValue = (names = []) => {
-  for (const name of names) {
-    const value = getCookieValue(name);
+const getFirstCookieValue = (keys = []) => {
+  for (const key of keys) {
+    const value = String(getCookie(key) || "").trim();
     if (value) return value;
   }
   return null;
 };
 
-const getAllCookies = () => {
+const parseCookies = () => {
   if (typeof window === "undefined") return {};
   const pairs = document.cookie.split("; ");
-  const cookies = {};
-  
-  for (let p of pairs) {
-    if (!p) continue;
-    
-    // FIX: Split only on the FIRST "=" to handle values that contain "="
-    const eqIndex = p.indexOf("=");
-    if (eqIndex < 0) continue;
-    
-    const k = p.substring(0, eqIndex);
-    const v = p.substring(eqIndex + 1);
-    cookies[decodeURIComponent(k)] = decodeURIComponent(v || "");
-  }
-  return cookies;
-};
+  const cookieMap = {};
 
-const setCookie = (name, value, maxAgeSeconds) => {
-  if (typeof window === "undefined") return;
-  
-  console.log(`\n[setCookie] Setting "${name}" with maxAge=${maxAgeSeconds}s`);
-  
-  if (value) {
-    console.log(`  Value length: ${value.length}`);
-    console.log(`  Value (first 30): ${value.substring(0, 30)}...`);
-    
-    // Encode value for safe transmission
-    const encoded = encodeURIComponent(value);
-    
-    // Build cookie string with deploy-safe attributes.
-    const path = getCookiePath();
-    const domain = getCookieDomain();
-    const sameSite = getCookieSameSite();
-    const useSecure = window.location.protocol === "https:";
-    let cookieString = `${name}=${encoded}; path=${path}; max-age=${maxAgeSeconds}; SameSite=${sameSite}`;
-    if (domain) cookieString += `; domain=${domain}`;
-    if (useSecure) cookieString += "; Secure";
-    
-    console.log(`  Cookie string length: ${cookieString.length}`);
-    console.log(`  Setting to document.cookie...`);
-    
-    // SET THE COOKIE
-    document.cookie = cookieString;
-    console.log(`  document.cookie assignment executed`);
-    
-    // Verify immediately - read it back
-    console.log(`  Verifying cookie was stored...`);
-    const retrieved = getCookieValue(name);
-    
-    if (retrieved === value) {
-      console.log(`  SUCCESS: Cookie stored and retrieved correctly!`);
-      return true;
-    } else if (retrieved) {
-      console.warn(`  Cookie stored but value mismatch (encoding issue?)`);
-      console.warn(`     Expected: ${value.substring(0, 20)}...`);
-      console.warn(`     Got: ${retrieved.substring(0, 20)}...`);
-      return true;
-    } else {
-      console.error(`  FAILED: Cookie was NOT stored!`);
-      console.error(`     Browser may have rejected it`);
-      console.error(`     Cookie string: ${cookieString}`);
-      return false;
-    }
-  } else {
-    // Clear cookie
-    const path = getCookiePath();
-    const domain = getCookieDomain();
-    const sameSite = getCookieSameSite();
-    const useSecure = window.location.protocol === "https:";
-    let cookieString = `${name}=; path=${path}; max-age=0; SameSite=${sameSite}`;
-    if (domain) cookieString += `; domain=${domain}`;
-    if (useSecure) cookieString += "; Secure";
-    document.cookie = cookieString;
-    console.log(`   Cookie cleared`);
+  for (const pair of pairs) {
+    if (!pair) continue;
+    const index = pair.indexOf("=");
+    if (index < 0) continue;
+    const key = decodeURIComponent(pair.slice(0, index));
+    const value = decodeURIComponent(pair.slice(index + 1));
+    cookieMap[key] = value;
   }
+
+  return cookieMap;
 };
 
 const authStore = {
@@ -137,97 +54,68 @@ const authStore = {
   refreshToken: null,
   csrfToken: null,
 
-
   getAccessToken() {
-    // Check in-memory first
-    if (this.accessToken) {
-      console.log("[authStore.getAccessToken] Returning from memory (length=" + this.accessToken.length + ")");
-      return this.accessToken;
-    }
+    if (this.accessToken) return this.accessToken;
 
-    // Fall back to cookie (persists across page reloads)
-    const token = getCookieValue("access_token");
-    if (token) {
-      console.log("[authStore.getAccessToken] Retrieved from cookie (length=" + token.length + ")");
-      this.accessToken = token;
-      return token;
-    }
+    const token = String(getCookie("access_token") || "").trim();
+    if (!token) return null;
 
-    console.warn("[authStore.getAccessToken] Access token not found in memory or cookies");
-    return null;
+    this.accessToken = token;
+    return token;
   },
 
   setAccessToken(token) {
-    this.accessToken = token || null;
+    const safeToken = String(token || "").trim();
+    this.accessToken = safeToken || null;
 
-    if (typeof window !== "undefined") {
-      if (token) {
-        // Store access token in cookie (15 minute lifespan)
-        setCookie("access_token", token, 15 * 60);
-        // Track when this token was issued (for proactive refresh)
-        setCookie("access_token_issued_time", Date.now().toString(), 15 * 60);
-        
-        // Verify storage
-        const verified = getCookieValue("access_token");
-        if (verified === token) {
-          console.log("[authStore] Access token stored in cookie (expires in 15 minutes) - VERIFIED");
-        } else {
-          console.error("[authStore] Access token FAILED to store in cookie!");
-        }
-      } else {
-        setCookie("access_token", null, 0);
-        setCookie("access_token_issued_time", null, 0);
-      }
+    if (safeToken) {
+      setCookie("access_token", safeToken, { maxAge: ACCESS_TOKEN_MAX_AGE, path: "/" });
+      setCookie("access_token_issued_time", String(Date.now()), {
+        maxAge: ACCESS_TOKEN_MAX_AGE,
+        path: "/",
+      });
+      return;
     }
-  },
 
+    removeCookie("access_token");
+    removeCookie("access_token_issued_time");
+  },
 
   getRefreshToken() {
     if (this.refreshToken) return this.refreshToken;
 
-    // Refresh token is set as HttpOnly cookie by backend, we can't read it directly
-    // But we can try to read a readable version if backend also sets one
-    const token = getCookieValue("refresh_token");
-    if (token) {
-      this.refreshToken = token;
-      return token;
-    }
+    const token = String(getCookie("refresh_token") || "").trim();
+    if (!token) return null;
 
-    return null;
+    this.refreshToken = token;
+    return token;
   },
 
   setRefreshToken(token) {
-    this.refreshToken = token || null;
+    const safeToken = String(token || "").trim();
+    this.refreshToken = safeToken || null;
 
-    if (typeof window !== "undefined") {
-      if (token) {
-        // Store refresh token in cookie (30 day lifespan)
-        setCookie("refresh_token", token, 60 * 60 * 24 * 30);
-        console.log("[authStore] Refresh token stored in cookie");
-      } else {
-        setCookie("refresh_token", null, 0);
-      }
+    if (safeToken) {
+      setCookie("refresh_token", safeToken, { maxAge: REFRESH_TOKEN_MAX_AGE, path: "/" });
+      return;
     }
+
+    removeCookie("refresh_token");
   },
 
-
   getSessionStartTime() {
-    const time = getCookieValue("session_start_time");
-    if (time) {
-      return parseInt(time, 10);
-    }
-    return null;
+    const raw = String(getCookie("session_start_time") || "").trim();
+    if (!raw) return null;
+    const value = Number.parseInt(raw, 10);
+    return Number.isFinite(value) ? value : null;
   },
 
   setSessionStartTime() {
-    if (typeof window !== "undefined") {
-      const now = Date.now().toString();
-      // 6 hours session validity
-      setCookie("session_start_time", now, 6 * 60 * 60);
-      console.log("[authStore] Session start time recorded (6 hour validity)");
-    }
+    setCookie("session_start_time", String(Date.now()), {
+      maxAge: SESSION_MAX_AGE,
+      path: "/",
+    });
   },
-
 
   setSession({ access_token, refresh_token, csrf_token }) {
     this.setAccessToken(access_token);
@@ -236,105 +124,57 @@ const authStore = {
     this.setSessionStartTime();
   },
 
-
   getCsrfToken() {
-    // Check in-memory first
-    if (this.csrfToken) {
-      console.log("[authStore.getCsrfToken] Returning from memory");
-      return this.csrfToken;
-    }
+    if (this.csrfToken) return this.csrfToken;
 
-    // Fall back to cookie (persists across page reloads)
-    const token = getFirstCookieValue([
-      "csrf_token",
-      "csrf-token",
-      "XSRF-TOKEN",
-      "xsrf-token",
-      "XSRF_TOKEN",
-      "_csrf",
-    ]);
-    if (token) {
-      console.log("[authStore.getCsrfToken] Retrieved from cookie (length=" + token.length + ")");
-      this.csrfToken = token;
-      return token;
-    }
+    const token = getFirstCookieValue(CSRF_COOKIE_KEYS);
+    if (!token) return null;
 
-    console.warn("[authStore.getCsrfToken] CSRF token not found in memory or cookies");
-    return null;
+    this.csrfToken = token;
+    return token;
   },
 
   setCsrfToken(token) {
-    this.csrfToken = token || null;
+    const safeToken = String(token || "").trim();
+    this.csrfToken = safeToken || null;
 
-    if (typeof window !== "undefined") {
-      if (token) {
-          // Store both variants because backend/docs use mixed naming.
-          setCookie("csrf_token", token, 6 * 60 * 60);
-          setCookie("csrf-token", token, 6 * 60 * 60);
-          setCookie("XSRF-TOKEN", token, 6 * 60 * 60);
-        
-          // Verify it was stored
-          const verified =
-            getCookieValue("csrf_token") ||
-            getCookieValue("csrf-token") ||
-            getCookieValue("XSRF-TOKEN");
-          if (verified === token) {
-            console.log("[authStore] CSRF token stored in cookie (length=" + token.length + ") - VERIFIED");
-          } else {
-            console.error("[authStore] CSRF token FAILED to store in cookie!");
-            console.error("   Expected:", token.substring(0, 20) + "...");
-            console.error("   Got:", verified ? verified.substring(0, 20) + "..." : "NOTHING");
-          }
-      } else {
-        setCookie("csrf_token", null, 0);
-        setCookie("csrf-token", null, 0);
-        setCookie("XSRF-TOKEN", null, 0);
-        console.log("[authStore] CSRF token cleared");
-      }
+    if (safeToken) {
+      setCookie("csrf_token", safeToken, { maxAge: CSRF_TOKEN_MAX_AGE, path: "/" });
+      setCookie("csrf-token", safeToken, { maxAge: CSRF_TOKEN_MAX_AGE, path: "/" });
+      setCookie("XSRF-TOKEN", safeToken, { maxAge: CSRF_TOKEN_MAX_AGE, path: "/" });
+      return;
     }
-  },
 
+    removeCookie("csrf_token");
+    removeCookie("csrf-token");
+    removeCookie("XSRF-TOKEN");
+  },
 
   clearAll() {
     this.accessToken = null;
     this.refreshToken = null;
     this.csrfToken = null;
-
-    if (typeof window !== "undefined") {
-      setCookie("access_token", null, 0);
-      setCookie("csrf_token", null, 0);
-      setCookie("csrf-token", null, 0);
-      setCookie("XSRF-TOKEN", null, 0);
-      setCookie("refresh_token", null, 0);
-      setCookie("session_start_time", null, 0);
-      setCookie("access_token_issued_time", null, 0);
-      
-      console.log("[authStore] All tokens cleared - session ended (logout)");
-      console.log("   → User must login again");
-    }
+    AUTH_COOKIE_KEYS.forEach((key) => removeCookie(key));
   },
-
 
   dumpAuthState() {
-    console.log("\n [authStore] Authentication State Dump:");
-    console.log("   In-memory state:");
-    console.log(`     - accessToken: ${this.accessToken ? `EXISTS (${this.accessToken.length} chars)` : "MISSING"}`);
-    console.log(`     - refreshToken: ${this.refreshToken ? `EXISTS (${this.refreshToken.length} chars)` : "MISSING"}`);
-    console.log(`     - csrfToken: ${this.csrfToken ? `EXISTS (${this.csrfToken.length} chars)` : "MISSING"}`);
-    
-    if (typeof window !== "undefined") {
-      console.log("   Cookies:");
-      const allCookies = getAllCookies();
-      Object.keys(allCookies).forEach(key => {
-        const value = allCookies[key];
-        const isAuthCookie = key.includes("access") || key.includes("csrf") || key.includes("refresh") || key.includes("session");
-        if (isAuthCookie) {
-          console.log(`     - ${key}: ${value ? `${value.substring(0, 20)}...` : "EMPTY"}`);
-        }
-      });
-    }
-  },
+    const cookies = parseCookies();
+    const getLength = (value) => (value ? String(value).length : 0);
 
+    console.log("[authStore] Snapshot", {
+      memory: {
+        accessToken: getLength(this.accessToken),
+        refreshToken: getLength(this.refreshToken),
+        csrfToken: getLength(this.csrfToken),
+      },
+      cookies: {
+        access_token: getLength(cookies.access_token),
+        refresh_token: getLength(cookies.refresh_token),
+        csrf_token: getLength(cookies.csrf_token || cookies["csrf-token"] || cookies["XSRF-TOKEN"]),
+        session_start_time: getLength(cookies.session_start_time),
+      },
+    });
+  },
 
   initFromResponseHeaders(headers) {
     if (!headers) return;
@@ -348,7 +188,8 @@ const authStore = {
     if (csrf) {
       this.setCsrfToken(csrf);
     }
-  }
+  },
 };
 
-export { authStore, getAllCookies };
+export const getAllCookies = parseCookies;
+export { authStore };

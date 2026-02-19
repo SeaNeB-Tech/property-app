@@ -896,12 +896,7 @@ export default function BusinessRegisterPage() {
 
   return (
     <AuthCard1 header={<AuthHeader language={language} setLanguage={setLanguage} />}>
-      <div className="rounded-xl border border-slate-200 bg-white p-8 text-center">
-        <h1 className="text-2xl font-semibold text-slate-900">Business Registration</h1>
-        <p className="mt-3 text-sm text-slate-600">Features coming soon...</p>
-      </div>
-
-      <div className="business-register-shell hidden">
+      <div className="business-register-shell">
         <div className="business-register-top">
           <div className="business-register-header">
             <h1 className="business-register-title">Register Your Business</h1>

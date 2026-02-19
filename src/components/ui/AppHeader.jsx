@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import BrandLogo from "./BrandLogo";
-import { removeCookie } from "@/services/cookie";
+import { clearPanelAuthSession } from "@/services/authSession.service";
 
 export default function AppHeader({ showLogout = true }) {
   const router = useRouter();
@@ -13,12 +13,7 @@ export default function AppHeader({ showLogout = true }) {
   const handleLogout = async () => {
     try {
       setIsLoading(true);
-      // Clear app session cookies
-      removeCookie("access_token");
-      removeCookie("refresh_token");
-      removeCookie("mobile_verified");
-      removeCookie("otp_mobile");
-      removeCookie("otp_cc");
+      clearPanelAuthSession();
       
       router.push("/");
     } catch (err) {

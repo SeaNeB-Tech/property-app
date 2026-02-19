@@ -2,9 +2,10 @@
 import axios from "axios";
 import { authStore } from "@/app/auth/auth-service/store/authStore";
 import { refreshAccessToken } from "@/app/auth/auth-service/authservice";
+import { API_BASE_URL } from "@/lib/apiBaseUrl";
 
 const api = axios.create({
-  baseURL: "https://dev.seaneb.com/api/v1", //  unchanged
+  baseURL: API_BASE_URL,
   withCredentials: true,
 });
 
