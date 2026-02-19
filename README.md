@@ -25,7 +25,7 @@ NEXT_PUBLIC_COOKIE_DOMAIN=property.seaneb.app
 NEXT_PUBLIC_COOKIE_PATH=/
 NEXT_PUBLIC_COOKIE_SAMESITE=Lax
 NEXT_PUBLIC_LISTING_APP_URL=https://property.seaneb.com
-NEXT_PUBLIC_API_BASE_URL=https://central-api.seaneb.com/api/v1
+NEXT_PUBLIC_API_BASE_URL=https://dev.seaneb.com
 ```
 
 - If hosted on same origin under a subpath, set `NEXT_PUBLIC_COOKIE_PATH` to that path (example: `/panel`).
