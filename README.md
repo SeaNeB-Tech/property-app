@@ -24,8 +24,8 @@ Set these variables for production-safe cookie behavior:
 NEXT_PUBLIC_COOKIE_DOMAIN=property.seaneb.app
 NEXT_PUBLIC_COOKIE_PATH=/
 NEXT_PUBLIC_COOKIE_SAMESITE=Lax
-NEXT_PUBLIC_LISTING_APP_URL=https://property.seaneb.com
-NEXT_PUBLIC_API_BASE_URL=https://dev.seaneb.com
+NEXT_PUBLIC_LISTING_APP_URL=http://159.65.154.221:1001
+NEXT_PUBLIC_API_BASE_URL=https://dev.seaneb.com/api/v1
 ```
 
 - If hosted on same origin under a subpath, set `NEXT_PUBLIC_COOKIE_PATH` to that path (example: `/panel`).
