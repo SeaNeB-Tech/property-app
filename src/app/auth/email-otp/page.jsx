@@ -133,11 +133,7 @@ function EmailOtpContent() {
       router.replace(redirectTo)
     } catch (err) {
       console.error("Email OTP verification failed:", err)
-      setInfoMessage(
-        err?.response?.data?.message ||
-          err?.message ||
-          "Invalid OTP"
-      )
+      setInfoMessage("Invalid OTP. Please try again.")
       setOtp("")
       setOtpClearSignal((value) => value + 1)
     } finally {
@@ -166,11 +162,7 @@ function EmailOtpContent() {
       setInfoMessage("OTP sent to your email")
     } catch (err) {
       console.error("Resend OTP failed:", err)
-      setInfoMessage(
-        err?.response?.data?.message ||
-          err?.message ||
-          "Failed to resend OTP"
-      )
+      setInfoMessage("Unable to resend OTP right now. Please try again.")
     } finally {
       setResending(false)
     }

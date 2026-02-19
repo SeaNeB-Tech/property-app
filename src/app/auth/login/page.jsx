@@ -17,7 +17,7 @@ import PhoneInput from "@/components/ui/PhoneInput";
 
 // Service
 import { sendOtp } from "@/app/auth/auth-service/otp.service";
-import { setJsonCookie } from "@/services/cookie";
+import { setCookie, setJsonCookie } from "@/services/cookie";
 
 const LANG_MAP = { eng, guj, hindi };
 
@@ -60,6 +60,8 @@ export default function LoginPage() {
 
       // trigger OTP
       await sendOtp({ via: method });
+      const until = Date.now() + 60 * 1000;
+      setCookie("mobile_otp_until", String(until), { maxAge: 60, path: "/" });
 
       router.push("/auth/otp");
     } catch (err) {

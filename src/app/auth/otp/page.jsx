@@ -17,10 +17,11 @@ import OtpInput from "@/components/ui/OtpInput";
 // Services
 import { verifyOtpAndLogin } from "@/app/auth/auth-service/authservice";
 import { sendOtp } from "@/app/auth/auth-service/otp.service";
-import { getJsonCookie, setCookie, setJsonCookie, removeCookie } from "@/services/cookie";
+import { getJsonCookie, getCookie, setCookie, setJsonCookie, removeCookie } from "@/services/cookie";
 
 const LANG_MAP = { eng, guj, hindi };
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
+const MOBILE_OTP_UNTIL_COOKIE = "mobile_otp_until";
 
 export default function OtpPage() {
   const router = useRouter();
@@ -33,6 +34,7 @@ export default function OtpPage() {
   const [cooldown, setCooldown] = useState(0);
   const [resending, setResending] = useState(false);
   const [otpClearSignal, setOtpClearSignal] = useState(0);
+  const [otpVia, setOtpVia] = useState("whatsapp");
 
   const t = LANG_MAP[language] || eng;
   const isValid = otp.length === 4;
@@ -48,7 +50,29 @@ export default function OtpPage() {
     if (ctx.country_code && ctx.mobile_number) {
       setMobileLabel(`+${ctx.country_code} ${ctx.mobile_number}`);
     }
+
+    setOtpVia(String(ctx.via || "whatsapp").toLowerCase() === "sms" ? "sms" : "whatsapp");
+
+    const until = Number(getCookie(MOBILE_OTP_UNTIL_COOKIE) || 0);
+    if (until > Date.now()) {
+      setCooldown(Math.floor((until - Date.now()) / 1000));
+    }
   }, [router]);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setInterval(() => {
+      setCooldown((value) => {
+        if (value <= 1) {
+          removeCookie(MOBILE_OTP_UNTIL_COOKIE);
+          return 0;
+        }
+        return value - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [cooldown]);
 
 
   const handleVerify = async () => {
@@ -113,11 +137,7 @@ export default function OtpPage() {
       router.replace("/auth/complete-profile");
     } catch (err) {
       console.error("OTP verify failed:", err);
-      setInfoMessage(
-        err?.response?.data?.message ||
-        err?.message ||
-        "Invalid OTP"
-      );
+      setInfoMessage("Invalid OTP. Please try again.");
       setOtp("");
       setOtpClearSignal((value) => value + 1);
     } finally {
@@ -133,20 +153,17 @@ export default function OtpPage() {
       setResending(true);
       setInfoMessage("");
 
-      await sendOtp({ via: "whatsapp" });
+      const ctx = getJsonCookie("otp_context");
+      const channel = String(ctx?.via || otpVia || "whatsapp").toLowerCase() === "sms" ? "sms" : "whatsapp";
 
+      await sendOtp({ via: channel });
+
+      const until = Date.now() + 60 * 1000;
+      setCookie(MOBILE_OTP_UNTIL_COOKIE, String(until), { maxAge: 60, path: "/" });
       setCooldown(60);
-      const timer = setInterval(() => {
-        setCooldown((c) => {
-          if (c <= 1) {
-            clearInterval(timer);
-            return 0;
-          }
-          return c - 1;
-        });
-      }, 1000);
+      setInfoMessage(`OTP resent via ${channel === "sms" ? "SMS" : "WhatsApp"}.`);
     } catch (err) {
-      setInfoMessage(err?.message || "Failed to resend OTP");
+      setInfoMessage("Unable to resend OTP right now. Please try again.");
     } finally {
       setResending(false);
     }
@@ -170,6 +187,10 @@ export default function OtpPage() {
         {t.otpSubtitle || "Please enter the 4-digit code sent to"}{" "}
         <span className="text-black font-medium">
           {mobileLabel}
+        </span>
+        <br />
+        <span className="text-xs text-gray-500">
+          via {otpVia === "sms" ? "SMS" : "WhatsApp"}
         </span>
       </p>
 

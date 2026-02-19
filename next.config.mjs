@@ -7,10 +7,11 @@ const listingAppBaseUrl = (process.env.NEXT_PUBLIC_LISTING_APP_URL || "http://15
   /\/+$/,
   ""
 );
-const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || "https://dev.seaneb.com/api/v1").replace(
-  /\/+$/,
-  ""
-);
+const apiBaseUrl = (
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "https://dev.seaneb.com/api/v1"
+).replace(/\/+$/, "");
 const apiHostname = new URL(apiBaseUrl).hostname;
 
 /** @type {import('next').NextConfig} */
@@ -25,6 +26,10 @@ const nextConfig = {
       {
         protocol: "https",
         hostname: apiHostname,
+      },
+      {
+        protocol: "https",
+        hostname: "img.icons8.com",
       },
     ],
   },
@@ -64,6 +69,14 @@ const nextConfig = {
         source: "/in/:path*",
         destination: `${listingAppBaseUrl}/in/:path*`,
         permanent: false,
+      },
+    ];
+  },
+  async rewrites() {
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${apiBaseUrl}/:path*`,
       },
     ];
   },

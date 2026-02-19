@@ -38,6 +38,8 @@ const MOBILE_REGEX = /^[0-9]{8,15}$/
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2
 const PURPOSE_BUSINESS_EMAIL_VERIFY = 3
 const DEFAULT_MAIN_CATEGORY_ID = process.env.NEXT_PUBLIC_MAIN_CATEGORY_ID || ""
+const OTP_VIA_WHATSAPP = "whatsapp"
+const OTP_VIA_SMS = "sms"
 
 const EMPTY_FORM = {
   businessName: "",
@@ -105,6 +107,7 @@ export default function BusinessRegisterPage() {
   const [mobileVerified, setMobileVerified] = useState(false)
   const [mobileLoading, setMobileLoading] = useState(false)
   const [mobileCooldown, setMobileCooldown] = useState(0)
+  const [mobileOtpVia, setMobileOtpVia] = useState(OTP_VIA_WHATSAPP)
   const [otpModalOpen, setOtpModalOpen] = useState(false)
   const [otpModalType, setOtpModalType] = useState("")
   const [otpModalTarget, setOtpModalTarget] = useState("")
@@ -166,7 +169,6 @@ export default function BusinessRegisterPage() {
       const verifiedMobile = getJsonCookie("verified_mobile")
       const regDraft = getJsonCookie("reg_form_draft")
       const verifiedBusinessEmail = getCookie("verified_business_email")
-      const verifiedBusinessMobile = getJsonCookie("verified_business_mobile")
       const verifiedPan = getCookie("verified_pan")
       const verifiedGstin = getCookie("verified_gstin")
       const initialBusinessEmail =
@@ -275,12 +277,19 @@ export default function BusinessRegisterPage() {
       console.log("[business-register] Final selected category ID:", autoMainCategoryId)
       setProductCategoryId(String(autoMainCategoryId || "").trim())
 
+      const initialPrimaryNumber = String(
+        regDraft?.primaryNumber || verifiedMobile?.mobile_number || ""
+      ).trim()
+      const initialWhatsappNumber = String(
+        regDraft?.whatsappNumber || verifiedMobile?.mobile_number || ""
+      ).trim()
+
       setForm((prev) => ({
         ...prev,
         mainCategoryId: String(autoMainCategoryId || prev.mainCategoryId || "").trim(),
         seanebId: regDraft?.seanebId || prev.seanebId,
-        primaryNumber: verifiedMobile?.mobile_number || prev.primaryNumber,
-        whatsappNumber: verifiedMobile?.mobile_number || prev.whatsappNumber,
+        primaryNumber: initialPrimaryNumber || prev.primaryNumber,
+        whatsappNumber: initialWhatsappNumber || prev.whatsappNumber,
         businessEmail: initialBusinessEmail || prev.businessEmail,
         pan: verifiedPan || prev.pan,
         gstin: verifiedGstin || prev.gstin,
@@ -294,19 +303,8 @@ export default function BusinessRegisterPage() {
       if (verifiedBusinessEmail && verifiedBusinessEmail === initialBusinessEmail) {
         setEmailVerified(true)
       }
-      if (
-        verifiedBusinessMobile?.mobile_number &&
-        String(verifiedBusinessMobile.mobile_number) === String(verifiedMobile?.mobile_number || regDraft?.primaryNumber || "")
-      ) {
-        setMobileVerified(true)
-      } else if (verifiedBusinessMobile?.mobile_number) {
-        setMobileVerified(true)
-        setForm((prev) => ({
-          ...prev,
-          primaryNumber: String(verifiedBusinessMobile.mobile_number),
-          whatsappNumber: prev.whatsappNumber || String(verifiedBusinessMobile.mobile_number),
-        }))
-      }
+      // Always require fresh mobile verification on business registration form.
+      setMobileVerified(false)
       if (verifiedPan) {
         setPanVerified(true)
       }
@@ -368,18 +366,6 @@ export default function BusinessRegisterPage() {
       setEmailVerified(false)
     }
   }, [form.businessEmail])
-
-  useEffect(() => {
-    const verifiedBusinessMobile = getJsonCookie("verified_business_mobile")
-    if (
-      verifiedBusinessMobile?.mobile_number &&
-      String(verifiedBusinessMobile.mobile_number) === form.primaryNumber.trim()
-    ) {
-      setMobileVerified(true)
-    } else {
-      setMobileVerified(false)
-    }
-  }, [form.primaryNumber])
 
   useEffect(() => {
     const until = Number(getCookie("email_otp_until") || 0)
@@ -536,7 +522,8 @@ export default function BusinessRegisterPage() {
       const verifiedMobile = getJsonCookie("verified_mobile")
       const countryCode = String(verifiedMobile?.country_code || getCookie("otp_cc") || "").trim()
       setOtpModalType("mobile")
-      setOtpModalTarget(countryCode ? `+${countryCode} ${mobile}` : mobile)
+      const channelLabel = mobileOtpVia === OTP_VIA_SMS ? "SMS" : "WhatsApp"
+      setOtpModalTarget(`${channelLabel}: ${countryCode ? `+${countryCode} ${mobile}` : mobile}`)
       setOtpModalOpen(true)
       return
     }
@@ -564,14 +551,14 @@ export default function BusinessRegisterPage() {
         {
           country_code: countryCode,
           mobile_number: mobile,
-          via: "whatsapp",
+          via: mobileOtpVia,
           purpose: PURPOSE_BUSINESS_MOBILE_VERIFY,
           redirect_to: "/auth/business-register",
         },
         { maxAge: 300, path: "/" }
       )
 
-      await sendOtp({ via: "whatsapp" })
+      await sendOtp({ via: mobileOtpVia })
 
       const until = Date.now() + 60 * 1000
       setCookie("business_mobile_otp_until", String(until), { maxAge: 60, path: "/" })
@@ -579,10 +566,10 @@ export default function BusinessRegisterPage() {
       setOtpValue("")
       setOtpClearSignal((value) => value + 1)
       setOtpModalType("mobile")
-      setOtpModalTarget(`+${countryCode} ${mobile}`)
+      setOtpModalTarget(`${mobileOtpVia === OTP_VIA_SMS ? "SMS" : "WhatsApp"}: +${countryCode} ${mobile}`)
       setOtpModalOpen(true)
     } catch (err) {
-      setSubmitError(getErrorMessage(err, "Failed to send mobile OTP"))
+      setSubmitError("Failed to send mobile OTP. Please try again.")
     } finally {
       setMobileLoading(false)
     }
@@ -658,13 +645,17 @@ export default function BusinessRegisterPage() {
         setEmailCooldown(60)
       } else if (otpModalType === "mobile") {
         if (mobileCooldown > 0) return
-        await sendOtp({ via: "whatsapp" })
+        const ctx = getJsonCookie("otp_context")
+        const channel = String(ctx?.via || mobileOtpVia || OTP_VIA_WHATSAPP).toLowerCase() === OTP_VIA_SMS
+          ? OTP_VIA_SMS
+          : OTP_VIA_WHATSAPP
+        await sendOtp({ via: channel })
         const until = Date.now() + 60 * 1000
         setCookie("business_mobile_otp_until", String(until), { maxAge: 60, path: "/" })
         setMobileCooldown(60)
       }
     } catch (err) {
-      setOtpError(getErrorMessage(err, "Failed to resend OTP"))
+      setOtpError("Failed to resend OTP. Please try again.")
     } finally {
       setOtpResending(false)
     }
@@ -1061,6 +1052,29 @@ export default function BusinessRegisterPage() {
                   >
                     {mobileLoading ? "Sending..." : mobileVerified ? "Verified" : mobileCooldown > 0 ? "Enter OTP" : "Verify"}
                   </button>
+                </div>
+              </Field>
+
+              <Field label="Send Mobile OTP Via">
+                <div className="flex items-center gap-6 pt-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="business_mobile_otp_via"
+                      checked={mobileOtpVia === OTP_VIA_WHATSAPP}
+                      onChange={() => setMobileOtpVia(OTP_VIA_WHATSAPP)}
+                    />
+                    WhatsApp
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="business_mobile_otp_via"
+                      checked={mobileOtpVia === OTP_VIA_SMS}
+                      onChange={() => setMobileOtpVia(OTP_VIA_SMS)}
+                    />
+                    SMS
+                  </label>
                 </div>
               </Field>
 

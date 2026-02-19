@@ -1,14 +1,10 @@
-import axios from "axios"
 import api from "@/services/api"
 import { authStore } from "@/app/auth/auth-service/store/authStore"
 import { refreshAccessToken } from "@/app/auth/auth-service/authservice"
 import { getDefaultProductKey, getDefaultProductName } from "@/services/pro.service"
 import { bootstrapProductAuth } from "@/app/auth/auth-service/auth.bootstrap"
 
-const businessApi = axios.create({
-  baseURL: "/api",
-  withCredentials: true,
-})
+const businessApi = api
 
 const parseErrorMessage = (err, fallback) =>
   err?.response?.data?.error?.message ||

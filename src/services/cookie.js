@@ -11,9 +11,25 @@ const normalizePath = (path) => {
   return path.startsWith("/") ? path : `/${path}`;
 };
 
+const resolveDomain = (domain) => {
+  const safeDomain = String(domain || "").trim();
+  if (!safeDomain || !isBrowser) return safeDomain;
+
+  const host = String(window.location.hostname || "").toLowerCase();
+  const isLocalHost =
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host.endsWith(".localhost");
+
+  // Domain cookies on localhost often break auth sharing in local multi-port setup.
+  if (isLocalHost) return "";
+  return safeDomain;
+};
+
 const resolveCookieOptions = (options = {}) => {
   const path = normalizePath(options.path || envCookiePath);
-  const domain = options.domain ?? envCookieDomain;
+  const domain = resolveDomain(options.domain ?? envCookieDomain);
   const sameSite = options.sameSite ?? envSameSite;
   const secure =
     typeof options.secure === "boolean"

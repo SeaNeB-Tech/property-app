@@ -59,6 +59,14 @@ export const createMainCategory = async (categoryName) => {
   }
 
   try {
+    // Avoid expected 409s by reusing category when it already exists.
+    const existingCategories = await getAllActiveCategories();
+    const existingCategoryId = findCategoryIdByName(existingCategories, name);
+    if (existingCategoryId) {
+      console.log(`[category.service] Reusing existing category "${name}" (${existingCategoryId})`);
+      return existingCategoryId;
+    }
+
     console.log(`[category.service] Creating main category: ${name}`);
     const productKey = getDefaultProductKey();
     const makeRequest = () =>

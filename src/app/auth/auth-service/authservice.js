@@ -1,11 +1,9 @@
 // src/services/authservice.js
 
 import api from "@/services/api";
-import axios from "axios";
 import { getDefaultProductKey, getDefaultProductName, setDefaultProductKey } from "@/services/pro.service";
 import { getJsonCookie, getCookie } from "@/services/cookie";
 import { authStore } from "./store/authStore";
-import { API_BASE_URL } from "@/lib/apiBaseUrl";
 
 
 const IDENTIFIER_TYPE_MOBILE = 0;
@@ -184,7 +182,7 @@ export const refreshAccessToken = async () => {
     if (refreshToken) requestBody.refresh_token = refreshToken;
 
     try {
-      res = await axios.post(`${API_BASE_URL}/auth/refresh`, requestBody, {
+      res = await api.post("/auth/refresh", requestBody, {
         withCredentials: true,
         headers: {
           "x-csrf-token": csrf,

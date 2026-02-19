@@ -1,8 +1,7 @@
-import axios from "axios";
+import api from "@/services/api";
 import { authStore } from "./store/authStore";
 import { getDefaultProductKey, setDefaultProductKey } from "@/services/pro.service";
 import { getCookie } from "@/services/cookie";
-import { API_BASE_URL } from "@/lib/apiBaseUrl";
 
 const getRefreshProductKeyCandidates = () => {
   return ["property"];
@@ -81,8 +80,8 @@ export const bootstrapProductAuth = async ({ force = false } = {}) => {
           console.log("     Also including refresh_token in body");
         }
 
-        const res = await axios.post(
-          `${API_BASE_URL}/auth/refresh`,
+        const res = await api.post(
+          "/auth/refresh",
           requestBody,
           {
             withCredentials: true,
