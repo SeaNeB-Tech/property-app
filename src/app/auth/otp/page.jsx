@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 // i18n
@@ -18,11 +18,123 @@ import OtpInput from "@/components/ui/OtpInput";
 import { verifyOtpAndLogin } from "@/app/auth/auth-service/authservice";
 import { sendOtp } from "@/app/auth/auth-service/otp.service";
 import { getJsonCookie, getCookie, setCookie, setJsonCookie, removeCookie } from "@/services/cookie";
+import { getListingAppUrl } from "@/lib/appUrls";
 
 const LANG_MAP = { eng, guj, hindi };
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
 const MOBILE_OTP_UNTIL_COOKIE = "mobile_otp_until";
 const LANGUAGE_STORAGE_KEY = "auth_language";
+const RETURN_TO_COOKIE = "auth_return_to";
+const POST_OTP_VERIFIED_COOKIE = "post_otp_verified";
+
+const getFriendlyVerifyError = (err) => {
+  const status = Number(err?.response?.status || 0);
+  const code = String(
+    err?.response?.data?.error?.code ||
+      err?.response?.data?.code ||
+      ""
+  )
+    .trim()
+    .toUpperCase();
+  const message = String(
+    err?.response?.data?.error?.message ||
+      err?.response?.data?.message ||
+      err?.message ||
+      ""
+  )
+    .trim()
+    .toLowerCase();
+
+  const isOtpError =
+    status === 422 ||
+    code.includes("OTP") ||
+    message.includes("invalid otp") ||
+    message.includes("otp invalid") ||
+    message.includes("otp expired");
+
+  if (isOtpError) {
+    return { message: "Invalid OTP. Please try again.", clearOtp: true, redirectLogin: false };
+  }
+
+  if (status === 429) {
+    return {
+      message: "Too many attempts. Please wait and retry OTP.",
+      clearOtp: false,
+      redirectLogin: false,
+    };
+  }
+
+  if (status === 401 || status === 403 || message.includes("session")) {
+    return {
+      message: "Session expired. Please login again and request OTP.",
+      clearOtp: false,
+      redirectLogin: true,
+    };
+  }
+
+  if (status >= 500) {
+    return {
+      message: "Server error while verifying OTP. Please try again shortly.",
+      clearOtp: false,
+      redirectLogin: false,
+    };
+  }
+
+  return {
+    message: "Unable to verify OTP right now. Please try again.",
+    clearOtp: false,
+    redirectLogin: false,
+  };
+};
+
+const isSafeReturnTo = (value) => {
+  const target = String(value || "").trim();
+  if (!target) return false;
+  if (target.startsWith("/")) return true;
+
+  try {
+    const parsed = new URL(target);
+    if (!/^https?:$/.test(parsed.protocol)) return false;
+    if (typeof window === "undefined") return true;
+    return parsed.hostname === window.location.hostname;
+  } catch {
+    return false;
+  }
+};
+
+const getPostLoginTarget = () => {
+  const queryTarget =
+    typeof window !== "undefined"
+      ? String(new URLSearchParams(window.location.search).get("returnTo") || "").trim()
+      : "";
+  if (isSafeReturnTo(queryTarget)) return queryTarget;
+
+  const cookieTarget = String(getCookie(RETURN_TO_COOKIE) || "").trim();
+  if (isSafeReturnTo(cookieTarget)) return cookieTarget;
+
+  return getListingAppUrl("/dashboard");
+};
+
+const resolveRedirectTarget = (target) => {
+  const safeTarget = String(target || "").trim();
+  if (!safeTarget) return getListingAppUrl("/dashboard");
+  if (/^https?:\/\//i.test(safeTarget)) return safeTarget;
+  if (safeTarget.startsWith("/dashboard")) return getListingAppUrl(safeTarget);
+  return safeTarget;
+};
+
+const isDashboardTarget = (target) => {
+  const safeTarget = String(target || "").trim();
+  if (!safeTarget) return false;
+  try {
+    const parsed = safeTarget.startsWith("/")
+      ? new URL(safeTarget, typeof window !== "undefined" ? window.location.origin : "http://localhost")
+      : new URL(safeTarget);
+    return parsed.pathname.startsWith("/dashboard");
+  } catch {
+    return safeTarget.startsWith("/dashboard");
+  }
+};
 
 export default function OtpPage() {
   const router = useRouter();
@@ -44,6 +156,19 @@ export default function OtpPage() {
   const [resending, setResending] = useState(false);
   const [otpClearSignal, setOtpClearSignal] = useState(0);
   const [otpVia, setOtpVia] = useState("whatsapp");
+  const verifyInFlightRef = useRef(false);
+
+  const redirectToPostLoginTarget = () => {
+    const target = resolveRedirectTarget(getPostLoginTarget());
+    removeCookie(RETURN_TO_COOKIE);
+
+    if (/^https?:\/\//i.test(target)) {
+      window.location.href = target;
+      return;
+    }
+
+    router.replace(target || "/dashboard");
+  };
 
   const t = LANG_MAP[language] || eng;
   const isValid = otp.length === 4;
@@ -59,9 +184,12 @@ export default function OtpPage() {
   useEffect(() => {
     const ctx = getJsonCookie("otp_context");
     if (!ctx) {
+      removeCookie("otp_in_progress");
       router.replace("/auth/login");
       return;
     }
+
+    setCookie("otp_in_progress", "1", { maxAge: 10 * 60, path: "/" });
 
     if (ctx.country_code && ctx.mobile_number) {
       setMobileLabel(`+${ctx.country_code} ${ctx.mobile_number}`);
@@ -92,13 +220,29 @@ export default function OtpPage() {
 
 
   const handleVerify = async () => {
-    if (!isValid || loading) return;
+    if (!isValid || loading || verifyInFlightRef.current) return;
 
     try {
+      verifyInFlightRef.current = true;
       setLoading(true);
       setInfoMessage("");
+      const contextSnapshot =
+        getJsonCookie("otp_context") ||
+        (mobileLabel
+          ? {
+              country_code: String((mobileLabel.split(" ")[0] || "").replace("+", "")).trim(),
+              mobile_number: String(mobileLabel.split(" ").slice(1).join(" ")).trim(),
+              purpose: 0,
+              via: otpVia,
+            }
+          : null);
 
-      const result = await verifyOtpAndLogin({ otp });
+      if (!contextSnapshot?.country_code || !contextSnapshot?.mobile_number) {
+        throw new Error("OTP context missing");
+      }
+
+      const result = await verifyOtpAndLogin({ otp, context: contextSnapshot });
+      console.log("[otp] verify result:", result);
 
       //  OTP VERIFIED
       // Backend sets HttpOnly refresh cookie here
@@ -116,9 +260,6 @@ export default function OtpPage() {
         );
       }
 
-      // remove ephemeral OTP context
-      removeCookie("otp_context");
-
       if (ctx?.purpose === PURPOSE_BUSINESS_MOBILE_VERIFY) {
         if (ctx?.mobile_number && ctx?.country_code) {
           setJsonCookie(
@@ -132,37 +273,80 @@ export default function OtpPage() {
         }
 
         const redirectTo = String(ctx?.redirect_to || "/auth/business-register");
+        removeCookie("otp_context");
         router.replace(redirectTo);
         return;
       }
 
-
-      // EXISTING USER
-      if (result?.isExistingUser === true) {
-        setCookie("profile_completed", "true", {
-          maxAge: 60 * 60 * 24 * 7,
-        });
-
-
-        router.replace("/dashboard");
+      // NEW USER: do not call refresh/profile from OTP flow; continue onboarding.
+      if (result?.requiresRegistration === true || result?.isExistingUser === false) {
+        removeCookie("otp_in_progress");
+        removeCookie("otp_context");
+        router.replace("/auth/complete-profile");
         return;
       }
 
-      // NEW USER
+      // EXISTING USER
+      if (!result?.sessionConfirmed) {
+        setInfoMessage("OTP verified, but session setup failed. Please login again.");
+        removeCookie("otp_in_progress");
+        removeCookie("otp_context");
+        setTimeout(() => {
+          router.replace("/auth/login");
+        }, 900);
+        return;
+      }
 
+      const targetAfterOtp = resolveRedirectTarget(getPostLoginTarget());
+      if (isDashboardTarget(targetAfterOtp)) {
+        removeCookie("otp_in_progress");
+        removeCookie("otp_context");
+        setCookie(POST_OTP_VERIFIED_COOKIE, "1", { maxAge: 180, path: "/" });
+        setCookie("profile_completed", "true", {
+          maxAge: 60 * 60 * 24 * 7,
+        });
+        redirectToPostLoginTarget();
+        return;
+      }
+
+      if (result?.isExistingUser === true) {
+        removeCookie("otp_in_progress");
+        removeCookie("otp_context");
+        setCookie(POST_OTP_VERIFIED_COOKIE, "1", { maxAge: 180, path: "/" });
+        setCookie("profile_completed", "true", {
+          maxAge: 60 * 60 * 24 * 7,
+        });
+        redirectToPostLoginTarget();
+        return;
+      }
+
+      // Fallback to onboarding if response is unexpected.
+      removeCookie("otp_in_progress");
+      removeCookie("otp_context");
       router.replace("/auth/complete-profile");
     } catch (err) {
       console.error("OTP verify failed:", err);
-      setInfoMessage("Invalid OTP. Please try again.");
-      setOtp("");
-      setOtpClearSignal((value) => value + 1);
+      const friendly = getFriendlyVerifyError(err);
+      setInfoMessage(friendly.message);
+      if (friendly.clearOtp) {
+        setOtp("");
+        setOtpClearSignal((value) => value + 1);
+      }
+      if (friendly.redirectLogin) {
+        removeCookie("otp_in_progress");
+        removeCookie("otp_context");
+        setTimeout(() => {
+          router.replace("/auth/login");
+        }, 800);
+      }
     } finally {
+      verifyInFlightRef.current = false;
       setLoading(false);
     }
   };
 
 
-  const handleResend = async () => {
+  const handleResend = async (requestedChannel) => {
     if (cooldown > 0 || resending) return;
 
     try {
@@ -170,7 +354,10 @@ export default function OtpPage() {
       setInfoMessage("");
 
       const ctx = getJsonCookie("otp_context");
-      const channel = String(ctx?.via || otpVia || "whatsapp").toLowerCase() === "sms" ? "sms" : "whatsapp";
+      const channel =
+        String(requestedChannel || ctx?.via || otpVia || "whatsapp").toLowerCase() === "sms"
+          ? "sms"
+          : "whatsapp";
       setOtpVia(channel);
       setJsonCookie(
         "otp_context",
@@ -244,14 +431,29 @@ export default function OtpPage() {
             {t.resendIn || "Resend OTP in"} {cooldown}s
           </span>
         ) : (
-          <span
-            onClick={handleResend}
-            className={`cursor-pointer ${
-              resending ? "text-gray-400" : "text-blue-600"
-            }`}
-          >
-            {t.resendOtp || "Resend OTP"}
-          </span>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => handleResend("whatsapp")}
+              disabled={resending}
+              className={`${
+                resending ? "text-gray-400" : "text-blue-600 hover:text-blue-700"
+              }`}
+            >
+              Resend via WhatsApp
+            </button>
+            <span className="text-gray-300">|</span>
+            <button
+              type="button"
+              onClick={() => handleResend("sms")}
+              disabled={resending}
+              className={`${
+                resending ? "text-gray-400" : "text-blue-600 hover:text-blue-700"
+              }`}
+            >
+              Resend via SMS
+            </button>
+          </div>
         )}
       </div>
     </AuthOtpCard>

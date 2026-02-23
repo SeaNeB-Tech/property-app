@@ -20,8 +20,10 @@ import OtpVerificationModal from "@/components/ui/OtpVerificationModal"
 // Services
 import { signupUser } from "@/app/auth/auth-service/signup.service"
 import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.service"
-import { getDefaultProductKey, setDefaultProductKey } from "@/services/pro.service"
+import api from "@/lib/api/client"
+import { getDefaultProductKey, setDefaultProductKey } from "@/services/product.service"
 import { authStore } from "@/app/auth/auth-service/store/authStore"
+import { refreshAccessToken } from "@/app/auth/auth-service/authservice"
 import {
   getCookie,
   getJsonCookie,
@@ -136,6 +138,43 @@ export default function CompleteProfilePage() {
   /* ================= MOBILE OTP GUARD ================= */
 
   useEffect(() => {
+    let active = true
+
+    const redirectIfSessionAlreadyValid = async () => {
+      const hasCsrf = String(getCookie("csrf_token_property") || "").trim().length > 0
+      if (!hasCsrf) return
+
+      try {
+        if (!authStore.getAccessToken()) {
+          await refreshAccessToken()
+        }
+        const res = await api.get("/profile/me", {
+          withCredentials: true,
+          skipRefresh: true,
+          skipAuthRedirect: true,
+        })
+        if (!active) return
+        if (Number(res?.status || 0) === 200 && getCookie("profile_completed") === "true") {
+          router.replace("/dashboard")
+        }
+      } catch {
+        // Continue normal onboarding flow when session isn't fully ready.
+      }
+    }
+
+    void redirectIfSessionAlreadyValid()
+    return () => {
+      active = false
+    }
+  }, [router])
+
+  useEffect(() => {
+    const hasCsrf = String(getCookie("csrf_token_property") || "").trim().length > 0
+    if (hasCsrf) {
+      // Existing authenticated users are handled by session redirect guard above.
+      return
+    }
+
     let verified = getCookie("mobile_verified")
     let mobile = getCookie("otp_mobile")
     let cc = getCookie("otp_cc")
@@ -331,11 +370,6 @@ export default function CompleteProfilePage() {
         console.log("[complete-profile] Access token captured from signup response")
       }
       
-      if (data.refresh_token) {
-        authStore.setRefreshToken(data.refresh_token)
-        console.log("[complete-profile] Refresh token captured from signup response")
-      }
-      
       if (data.csrf_token) {
         authStore.setCsrfToken(data.csrf_token)
         console.log("[complete-profile] CSRF token captured from signup response")
@@ -386,9 +420,6 @@ export default function CompleteProfilePage() {
       // Handle session expired (401)
       if (status === 401) {
         setSubmitError("Session expired. Please login again.")
-        setTimeout(() => {
-          router.replace("/auth/login")
-        }, 2000)
         return
       }
 
@@ -566,3 +597,4 @@ function EmailField({ value, onChange, onVerify, verified, loading, cooldown }) 
     </div>
   )
 }
+

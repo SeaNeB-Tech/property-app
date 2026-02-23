@@ -15,7 +15,7 @@ import { verifyOtpAndLogin } from "@/app/auth/auth-service/authservice"
 import { authStore } from "@/app/auth/auth-service/store/authStore"
 import { bootstrapProductAuth } from "@/app/auth/auth-service/auth.bootstrap"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
-import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/pro.service"
+import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/product.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboardMode.service"
 import useDebounce from "@/hooks/useDebounce"
 import AuthCard1 from "@/components/ui/AuthCard1"
@@ -718,7 +718,6 @@ export default function BusinessRegisterPage() {
     }
     if (!(await ensureAccessToken())) {
       setSubmitError("Session expired. Please login again.")
-      router.replace("/auth/login")
       return
     }
 
@@ -752,7 +751,6 @@ export default function BusinessRegisterPage() {
     }
     if (!(await ensureAccessToken())) {
       setSubmitError("Session expired. Please login again.")
-      router.replace("/auth/login")
       return
     }
 
@@ -850,7 +848,6 @@ export default function BusinessRegisterPage() {
     }
     if (!(await ensureAccessToken())) {
       setSubmitError("Session expired. Please login again.")
-      router.replace("/auth/login")
       return
     }
 
@@ -1276,3 +1273,4 @@ function Field({ label, hint, error, children }) {
     </div>
   )
 }
+

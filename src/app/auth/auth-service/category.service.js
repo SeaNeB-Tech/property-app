@@ -1,5 +1,5 @@
-import api from "@/services/api";
-import { getProducts, getDefaultProductKey } from "@/services/pro.service";
+import api from "@/lib/api/client";
+import { getProducts, getDefaultProductKey } from "@/services/product.service";
 import { refreshAccessToken } from "@/app/auth/auth-service/authservice";
 
 const normalizeCategoryRows = (payload) => {
@@ -200,3 +200,4 @@ export const resolveMainCategoryId = async () => {
     return "";
   }
 };
+

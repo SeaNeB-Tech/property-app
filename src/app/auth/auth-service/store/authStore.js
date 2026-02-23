@@ -2,9 +2,6 @@
 
 import { getCookie, removeCookie, setCookie } from "@/services/cookie";
 
-const ACCESS_TOKEN_MAX_AGE = 15 * 60;
-const REFRESH_TOKEN_MAX_AGE = 60 * 60 * 24 * 30;
-const CSRF_TOKEN_MAX_AGE = 6 * 60 * 60;
 const SESSION_MAX_AGE = 6 * 60 * 60;
 
 const CSRF_COOKIE_KEYS = [
@@ -17,20 +14,10 @@ const CSRF_COOKIE_KEYS = [
 ];
 
 const AUTH_COOKIE_KEYS = [
-  "access_token",
-  "refresh_token",
   "access_token_issued_time",
   "session_start_time",
   ...CSRF_COOKIE_KEYS,
 ];
-
-const getFirstCookieValue = (keys = []) => {
-  for (const key of keys) {
-    const value = String(getCookie(key) || "").trim();
-    if (value) return value;
-  }
-  return null;
-};
 
 const parseCookies = () => {
   if (typeof window === "undefined") return {};
@@ -52,16 +39,9 @@ const parseCookies = () => {
 const authStore = {
   accessToken: null,
   refreshToken: null,
-  csrfToken: null,
 
   getAccessToken() {
-    if (this.accessToken) return this.accessToken;
-
-    const token = String(getCookie("access_token") || "").trim();
-    if (!token) return null;
-
-    this.accessToken = token;
-    return token;
+    return this.accessToken || null;
   },
 
   setAccessToken(token) {
@@ -69,38 +49,28 @@ const authStore = {
     this.accessToken = safeToken || null;
 
     if (safeToken) {
-      setCookie("access_token", safeToken, { maxAge: ACCESS_TOKEN_MAX_AGE, path: "/" });
       setCookie("access_token_issued_time", String(Date.now()), {
-        maxAge: ACCESS_TOKEN_MAX_AGE,
+        maxAge: SESSION_MAX_AGE,
         path: "/",
       });
+      try {
+        if (typeof window !== "undefined") {
+          window.sessionStorage.removeItem("auth_redirect_in_progress");
+        }
+      } catch {}
       return;
     }
 
-    removeCookie("access_token");
     removeCookie("access_token_issued_time");
   },
 
   getRefreshToken() {
-    if (this.refreshToken) return this.refreshToken;
-
-    const token = String(getCookie("refresh_token") || "").trim();
-    if (!token) return null;
-
-    this.refreshToken = token;
-    return token;
+    return this.refreshToken || null;
   },
 
   setRefreshToken(token) {
     const safeToken = String(token || "").trim();
     this.refreshToken = safeToken || null;
-
-    if (safeToken) {
-      setCookie("refresh_token", safeToken, { maxAge: REFRESH_TOKEN_MAX_AGE, path: "/" });
-      return;
-    }
-
-    removeCookie("refresh_token");
   },
 
   getSessionStartTime() {
@@ -125,35 +95,15 @@ const authStore = {
   },
 
   getCsrfToken() {
-    if (this.csrfToken) return this.csrfToken;
-
-    const token = getFirstCookieValue(CSRF_COOKIE_KEYS);
-    if (!token) return null;
-
-    this.csrfToken = token;
-    return token;
+    const cookieToken = String(getCookie("csrf_token_property") || "").trim();
+    return cookieToken || null;
   },
 
-  setCsrfToken(token) {
-    const safeToken = String(token || "").trim();
-    this.csrfToken = safeToken || null;
-
-    if (safeToken) {
-      setCookie("csrf_token", safeToken, { maxAge: CSRF_TOKEN_MAX_AGE, path: "/" });
-      setCookie("csrf-token", safeToken, { maxAge: CSRF_TOKEN_MAX_AGE, path: "/" });
-      setCookie("XSRF-TOKEN", safeToken, { maxAge: CSRF_TOKEN_MAX_AGE, path: "/" });
-      return;
-    }
-
-    removeCookie("csrf_token");
-    removeCookie("csrf-token");
-    removeCookie("XSRF-TOKEN");
-  },
+  setCsrfToken() {},
 
   clearAll() {
     this.accessToken = null;
     this.refreshToken = null;
-    this.csrfToken = null;
     AUTH_COOKIE_KEYS.forEach((key) => removeCookie(key));
   },
 
@@ -165,7 +115,7 @@ const authStore = {
       memory: {
         accessToken: getLength(this.accessToken),
         refreshToken: getLength(this.refreshToken),
-        csrfToken: getLength(this.csrfToken),
+        csrfToken: 0,
       },
       cookies: {
         access_token: getLength(cookies.access_token),

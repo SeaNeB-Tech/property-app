@@ -17,10 +17,50 @@ import PhoneInput from "@/components/ui/PhoneInput";
 
 // Service
 import { sendOtp } from "@/app/auth/auth-service/otp.service";
-import { setCookie, setJsonCookie } from "@/services/cookie";
+import { clearPreAuthCsrfCookies, getCookie, removeCookie, setCookie, setJsonCookie } from "@/services/cookie";
+import api from "@/lib/api/client";
+import { getListingAppUrl } from "@/lib/appUrls";
 
 const LANG_MAP = { eng, guj, hindi };
 const LANGUAGE_STORAGE_KEY = "auth_language";
+const RETURN_TO_COOKIE = "auth_return_to";
+const POST_OTP_VERIFIED_COOKIE = "post_otp_verified";
+const PURPOSE_LOGIN = 1;
+
+const isSafeReturnTo = (value) => {
+  const target = String(value || "").trim();
+  if (!target) return false;
+  if (target.startsWith("/")) return true;
+
+  try {
+    const parsed = new URL(target);
+    if (!/^https?:$/.test(parsed.protocol)) return false;
+    if (typeof window === "undefined") return true;
+    return parsed.hostname === window.location.hostname;
+  } catch {
+    return false;
+  }
+};
+
+const getPostLoginTarget = () => {
+  if (typeof window === "undefined") return getListingAppUrl("/dashboard");
+
+  const queryTarget = String(new URLSearchParams(window.location.search).get("returnTo") || "").trim();
+  if (isSafeReturnTo(queryTarget)) return queryTarget;
+
+  const cookieTarget = String(getCookie(RETURN_TO_COOKIE) || "").trim();
+  if (isSafeReturnTo(cookieTarget)) return cookieTarget;
+
+  return getListingAppUrl("/dashboard");
+};
+
+const resolveRedirectTarget = (target) => {
+  const safeTarget = String(target || "").trim();
+  if (!safeTarget) return getListingAppUrl("/dashboard");
+  if (/^https?:\/\//i.test(safeTarget)) return safeTarget;
+  if (safeTarget.startsWith("/dashboard")) return getListingAppUrl(safeTarget);
+  return safeTarget;
+};
 
 const getFriendlyOtpError = (err) => {
   const status = Number(err?.response?.status || 0);
@@ -69,6 +109,45 @@ export default function LoginPage() {
     }
   }, [language]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const returnTo = String(params.get("returnTo") || "").trim();
+    if (!returnTo) return;
+    setCookie(RETURN_TO_COOKIE, returnTo, { maxAge: 10 * 60, path: "/" });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const otpInProgress = String(getCookie("otp_in_progress") || "").trim().toLowerCase();
+    const postOtpVerified = String(getCookie(POST_OTP_VERIFIED_COOKIE) || "").trim().toLowerCase();
+    const shouldPreserveForOtpFlow =
+      otpInProgress === "1" ||
+      otpInProgress === "true" ||
+      otpInProgress === "yes" ||
+      postOtpVerified === "1" ||
+      postOtpVerified === "true" ||
+      postOtpVerified === "yes";
+
+    // Keep login form clean and never auto-probe /profile/me from login page.
+    Promise.resolve().finally(() => {
+      if (!active) return;
+      if (!shouldPreserveForOtpFlow) {
+        // Never delete backend-issued csrf_token_property here.
+        // Removing it breaks refresh/session recovery and causes login loops.
+        clearPreAuthCsrfCookies();
+      } else {
+        // Stale post-OTP marker should not force repeated login-side checks.
+        removeCookie(POST_OTP_VERIFIED_COOKIE);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [router]);
+
   const handleContinue = useCallback(async () => {
     if (!isValidMobile || loading) return;
 
@@ -85,19 +164,21 @@ export default function LoginPage() {
       const context = {
         country_code: dialCode,
         mobile_number: mobile,
-        purpose: 0,
+        purpose: PURPOSE_LOGIN,
         via: method,
       };
 
       // store OTP context for next step
       setJsonCookie("otp_context", context, { maxAge: 300 });
+      setCookie("otp_in_progress", "1", { maxAge: 10 * 60, path: "/" });
 
       // trigger OTP
       await sendOtp({ via: method });
       const until = Date.now() + 60 * 1000;
       setCookie("mobile_otp_until", String(until), { maxAge: 60, path: "/" });
 
-      router.push("/auth/otp");
+      const returnTo = encodeURIComponent(resolveRedirectTarget(getPostLoginTarget()));
+      router.push(`/auth/otp?returnTo=${returnTo}`);
     } catch (err) {
       console.error("sendOtp failed:", err);
       setError(getFriendlyOtpError(err));

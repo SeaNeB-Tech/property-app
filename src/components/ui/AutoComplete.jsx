@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { getCities } from "@/services/city.services";
+import { getCities } from "@/services/city.service";
 import useDebounce from "@/hooks/useDebounce";
 
 export default function AutoComplete({
@@ -177,3 +177,4 @@ export default function AutoComplete({
     </div>
   );
 }
+

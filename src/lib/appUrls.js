@@ -9,7 +9,7 @@ const normalizeAuthPort = (value) => {
   try {
     const parsed = new URL(normalized);
     // Backward compatibility: old auth port and accidental listing port.
-    if (parsed.port === "3000" || parsed.port === "1001") {
+    if (parsed.port === "3000" || parsed.port === "8877" || parsed.port === "1001") {
       parsed.port = "1002";
       return normalizeUrl(parsed.toString());
     }
@@ -27,7 +27,7 @@ const normalizeListingPort = (value) => {
   try {
     const parsed = new URL(normalized);
     // Backward compatibility: old listing port and accidental app port.
-    if (parsed.port === "8877" || parsed.port === "1002") {
+    if (parsed.port === "3000" || parsed.port === "8877" || parsed.port === "1002") {
       parsed.port = "1001";
       return normalizeUrl(parsed.toString());
     }

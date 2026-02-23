@@ -1,15 +1,77 @@
 // src/services/authservice.js
 
-import api from "@/services/api";
-import { getDefaultProductKey, getDefaultProductName, setDefaultProductKey } from "@/services/pro.service";
-import { getJsonCookie, getCookie } from "@/services/cookie";
+import api, {
+  getInMemoryCsrfToken,
+  setInMemoryAccessToken,
+  setInMemoryCsrfToken,
+} from "@/lib/api/client";
+import {
+  getDefaultProductKey,
+} from "@/services/product.service";
+import { getJsonCookie, getCookie, removeCookie } from "@/services/cookie";
 import { authStore } from "./store/authStore";
 import { clearPanelAuthSession } from "@/services/authSession.service";
 
-
 const IDENTIFIER_TYPE_MOBILE = 0;
 const PURPOSE_SIGNUP_OR_LOGIN = 0;
-const getRefreshProductKeyCandidates = () => ["property"];
+const AUTH_COOKIE_WAIT_TIMEOUT_MS = 2000;
+const AUTH_COOKIE_WAIT_POLL_MS = 120;
+const CSRF_COOKIE_NAME = "csrf_token_property";
+const REFRESH_COOKIE_NAME = "refresh_token_property";
+let refreshInFlightPromise = null;
+
+/* ------------------------------------------------ */
+/* 🔐 HELPERS */
+/* ------------------------------------------------ */
+
+export const waitForAuthCookies = async ({
+  timeoutMs = AUTH_COOKIE_WAIT_TIMEOUT_MS,
+  pollMs = AUTH_COOKIE_WAIT_POLL_MS,
+} = {}) => {
+  const startedAt = Date.now();
+  let csrfToken = "";
+  let refreshCookieVisible = false;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    csrfToken = String(getCookie(CSRF_COOKIE_NAME) || "").trim();
+    // HttpOnly refresh cookies are not readable by JS; this will be false in secure setups.
+    refreshCookieVisible = Boolean(String(getCookie(REFRESH_COOKIE_NAME) || "").trim());
+
+    if (csrfToken) {
+      return {
+        ok: true,
+        csrfToken,
+        refreshCookieVisible,
+        waitedMs: Date.now() - startedAt,
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+
+  return {
+    ok: false,
+    csrfToken: "",
+    refreshCookieVisible,
+    waitedMs: Date.now() - startedAt,
+  };
+};
+
+export const hasCsrfCookie = () => Boolean(String(getCookie(CSRF_COOKIE_NAME) || "").trim());
+
+const waitForCsrfCookie = async ({ timeoutMs = AUTH_COOKIE_WAIT_TIMEOUT_MS, pollMs = AUTH_COOKIE_WAIT_POLL_MS } = {}) => {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const csrf = String(getCookie(CSRF_COOKIE_NAME) || "").trim();
+    if (csrf) return csrf;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return "";
+};
+
+const getLatestCsrfCookieValue = () =>
+  String(getCookie(CSRF_COOKIE_NAME) || getInMemoryCsrfToken() || "").trim();
+
 const getBasePath = () => {
   const raw = process.env.NEXT_PUBLIC_BASE_PATH || "";
   if (!raw || raw === "/") return "";
@@ -17,238 +79,295 @@ const getBasePath = () => {
 };
 const withBasePath = (path) => `${getBasePath()}${path}`;
 
-const isProductNotFoundError = (err) => {
-  const status = err?.response?.status;
-  const message =
-    err?.response?.data?.error?.message ||
-    err?.response?.data?.message ||
-    "";
-  return status === 404 && String(message).toLowerCase().includes("product not found");
+const deepTokenValue = (payload = {}, keys = []) => {
+  const candidates = [
+    payload,
+    payload?.data,
+    payload?.result,
+    payload?.payload,
+    payload?.response,
+    payload?.session,
+    payload?.tokens,
+    payload?.data?.session,
+    payload?.data?.tokens,
+  ];
+  for (const c of candidates) {
+    if (!c) continue;
+    for (const k of keys) {
+      const val = String(c?.[k] || "").trim();
+      if (val) return val;
+    }
+  }
+  return "";
 };
 
-const ensureLoginProduct = async () => {
-  const productKey = getDefaultProductKey();
+const readCsrfValueFromResponse = (response) => {
+  const data = response?.data || {};
+  const fromBody = deepTokenValue(data, ["csrf_token", "csrfToken"]);
+  const fromHeader = String(
+    response?.headers?.["x-csrf-token"] ||
+      response?.headers?.["csrf-token"] ||
+      response?.headers?.["x-xsrf-token"] ||
+      ""
+  ).trim();
+  return String(fromBody || fromHeader || "").trim();
+};
+
+const readBoolFromPayload = (payload = {}, keys = []) => {
+  const candidates = [
+    payload,
+    payload?.data,
+    payload?.result,
+    payload?.payload,
+    payload?.response,
+    payload?.session,
+    payload?.tokens,
+    payload?.data?.session,
+    payload?.data?.tokens,
+  ];
+  for (const c of candidates) {
+    if (!c || typeof c !== "object") continue;
+    for (const key of keys) {
+      const value = c?.[key];
+      if (typeof value === "boolean") return value;
+      const normalized = String(value ?? "").trim().toLowerCase();
+      if (["true", "1", "yes", "y"].includes(normalized)) return true;
+      if (["false", "0", "no", "n"].includes(normalized)) return false;
+    }
+  }
+  return null;
+};
+
+const tryFetchSession = async () => {
   try {
-    await api.post("/products", {
-      product_key: productKey,
-      product_name: getDefaultProductName(),
+    const res = await api.get("/profile/me", {
+      withCredentials: true,
+      skipAuthRedirect: true,
+      skipRefresh: true,
     });
-    return true;
-  } catch (err) {
-    if (err?.response?.status === 409) return true;
-    return false;
+    return res?.data || null;
+  } catch {
+    return null;
   }
 };
 
-const toBool = (value) => {
-  if (value === true) return true;
-  if (value === false || value == null) return false;
-  const normalized = String(value).trim().toLowerCase();
-  return normalized === "true" || normalized === "1" || normalized === "yes";
+const setAccessTokenEverywhere = (token) => {
+  const safeToken = String(token || "").trim();
+  authStore.setAccessToken(safeToken);
+  setInMemoryAccessToken(safeToken);
 };
 
-const detectExistingUser = (payload = {}) => {
-  const nested =
-    payload?.data ||
-    payload?.result ||
-    payload?.response ||
-    payload?.payload ||
-    {};
+/* ------------------------------------------------ */
+/* 🔐 OTP VERIFY */
+/* ------------------------------------------------ */
 
-  return (
-    toBool(payload?.is_existing_user) ||
-    toBool(payload?.isExistingUser) ||
-    toBool(payload?.user_exists) ||
-    toBool(payload?.existing_user) ||
-    toBool(nested?.is_existing_user) ||
-    toBool(nested?.isExistingUser) ||
-    toBool(nested?.user_exists) ||
-    toBool(nested?.existing_user)
-  );
-};
-
-
-/**
- * Verifies OTP.
- * Backend behavior:
- * - Sets refresh_token + csrf_token as HttpOnly cookies
- * - May return access_token + csrf_token in response body
- */
-export const verifyOtpAndLogin = async ({ otp }) => {
-  const ctx = getJsonCookie("otp_context");
+export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
+  const ctx = context || getJsonCookie("otp_context");
   if (!ctx) throw new Error("OTP context missing");
-
-  if (!ctx.country_code || !ctx.mobile_number) {
-    throw new Error("Invalid OTP context");
-  }
-
-  const code = String(otp).trim();
-  if (code.length !== 4) {
-    throw new Error("OTP must be 4 digits");
-  }
-
-  const purpose =
-    Number.isFinite(Number(ctx.purpose)) && String(ctx.purpose).trim() !== ""
-      ? Number(ctx.purpose)
-      : PURPOSE_SIGNUP_OR_LOGIN;
 
   const verifyPayload = {
     identifier_type: IDENTIFIER_TYPE_MOBILE,
     country_code: String(ctx.country_code).trim(),
     mobile_number: String(ctx.mobile_number).trim(),
-    otp: code,
-    purpose,
+    otp: String(otp).trim(),
+    purpose:
+      Number.isFinite(Number(ctx.purpose)) &&
+      String(ctx.purpose).trim() !== ""
+        ? Number(ctx.purpose)
+        : PURPOSE_SIGNUP_OR_LOGIN,
     product_key: getDefaultProductKey(),
   };
 
-  console.log("OTP verify payload:", verifyPayload);
-  let res;
-  try {
-    res = await api.post("/otp/verify-otp", verifyPayload, { withCredentials: true });
-  } catch (err) {
-    if (isProductNotFoundError(err) && (await ensureLoginProduct())) {
-      res = await api.post("/otp/verify-otp", verifyPayload, { withCredentials: true });
-    } else {
-      throw err;
-    }
-  }
+  console.log("[auth] OTP verify start");
 
-    console.log("OTP verified response:", res.data);
+  const res = await api.post("/otp/verify-otp", verifyPayload, {
+    withCredentials: true,
+  });
 
-  // If backend returned tokens in the response, store them in authStore.
-  // Preferred flow is HttpOnly refresh cookie set by backend; when backend
-  // also returns tokens in body (for SPA-only flows) we persist them.
   const data = res.data || {};
-  
-  // Try to get CSRF from response body first, then from response headers
-  let csrfToken = data?.csrf_token || res.headers?.["x-csrf-token"] || res.headers?.["csrf-token"];
-  if (csrfToken) {
-    authStore.setCsrfToken(csrfToken);
-      console.log("\n[authservice] CSRF token captured from OTP verify response (length=" + csrfToken.length + ")");
-  } else {
-      console.warn("\n[authservice] WARNING: No CSRF token found in OTP response body or headers");
+  const responseCsrfToken = readCsrfValueFromResponse(res);
+  const accessToken = deepTokenValue(data, [
+    "access_token",
+    "accessToken",
+    "token",
+    "jwt",
+  ]);
+
+  if (accessToken) {
+    console.log("[auth] OTP verify returned access token in response");
+    setAccessTokenEverywhere(accessToken);
   }
-  
-  if (data?.access_token) {
-    authStore.setAccessToken(data.access_token);
-    console.log("[authservice] Access token set from OTP response");
-  }
-  if (data?.refresh_token) {
-    authStore.setRefreshToken(data.refresh_token);
-    console.log("[authservice] Refresh token set from OTP response");
+  if (responseCsrfToken) {
+    setInMemoryCsrfToken(responseCsrfToken);
+    console.log("[auth] OTP verify returned csrf token in response");
   }
 
-  //  START 6-HOUR SESSION IMMEDIATELY ON OTP VERIFY (not on dashboard load)
+  const isExistingUserField = readBoolFromPayload(data, ["is_existing_user", "isExistingUser"]);
+  const userExistsField = readBoolFromPayload(data, ["user_exists", "userExists", "existing_user"]);
+  const profileCompletedField = readBoolFromPayload(data, ["profile_completed", "profileCompleted"]);
+  const isExistingUser =
+    isExistingUserField === true ||
+    userExistsField === true ||
+    profileCompletedField === true;
+  const requiresRegistration = !isExistingUser;
+
+  console.log(
+    `[auth] user classification: existing=${isExistingUser} (is_existing_user=${isExistingUserField}, user_exists=${userExistsField}, profile_completed=${profileCompletedField})`
+  );
+
+  if (requiresRegistration) {
+    removeCookie("otp_in_progress");
+    return {
+      sessionConfirmed: false,
+      isExistingUser: false,
+      requiresRegistration: true,
+      reason: "NEW_USER",
+    };
+  }
+
   authStore.setSessionStartTime();
-    console.log("\n[authservice] Session started - 6 hour countdown begun");
+  console.log("[auth] session timer initialized");
 
-  const isExistingUser = detectExistingUser(data);
+  // Existing users must have CSRF before refresh.
+  console.log("[auth] waiting for csrf_token_property before refresh");
+  const csrfFromCookie = await waitForCsrfCookie();
+  if (!csrfFromCookie) {
+    console.warn("[auth] csrf_token_property not available for existing user");
+    return {
+      sessionConfirmed: false,
+      isExistingUser: true,
+      requiresRegistration: false,
+      reason: "MISSING_CSRF_COOKIE",
+    };
+  }
+
+  try {
+    await refreshAccessToken();
+    console.log("[auth] refresh success after OTP");
+  } catch (err) {
+    console.warn("[auth] refresh failed after OTP:", err?.message || err);
+    const fallbackSession = await tryFetchSession();
+    if (fallbackSession) {
+      console.log("[auth] fallback /profile/me succeeded even after refresh failure");
+      removeCookie("otp_in_progress");
+      return {
+        sessionConfirmed: true,
+        isExistingUser: true,
+      };
+    }
+    return {
+      sessionConfirmed: false,
+      isExistingUser: true,
+      requiresRegistration: false,
+      reason: "REFRESH_FAILED",
+    };
+  }
+
+  const session = await tryFetchSession();
+  const sessionConfirmed = Boolean(session);
+  console.log(`[auth] /profile/me session check: ${sessionConfirmed ? "OK" : "FAILED"}`);
+
+  if (sessionConfirmed) removeCookie("otp_in_progress");
 
   return {
-    isExistingUser,
+    sessionConfirmed,
+    isExistingUser: true,
+    requiresRegistration: false,
   };
 };
 
+/* ------------------------------------------------ */
+/* 🔐 REFRESH TOKEN */
+/* ------------------------------------------------ */
 
-/**
- * Generates access token using HttpOnly refresh_token cookie + CSRF token
- * CSRF token is obtained from cookies (persisted across page reloads)
- */
 export const refreshAccessToken = async () => {
-  console.log("\n[refreshAccessToken] Starting token refresh...");
-  authStore.dumpAuthState();
-
-  let csrf = authStore.getCsrfToken();
-  if (!csrf) {
-    csrf =
-      getCookie("csrf_token") ||
-      getCookie("csrf-token") ||
-      getCookie("XSRF-TOKEN") ||
-      getCookie("xsrf-token") ||
-      getCookie("_csrf");
-    if (csrf) authStore.setCsrfToken(csrf);
+  if (refreshInFlightPromise) {
+    console.log("[auth] refresh already in-flight, reusing promise");
+    return refreshInFlightPromise;
   }
 
-  if (!csrf) {
-    throw new Error("CSRF token missing, cannot refresh access token");
-  }
+  refreshInFlightPromise = (async () => {
+    console.log("[auth] refresh start");
 
-  const refreshToken = authStore.getRefreshToken();
-  const productKeyCandidates = getRefreshProductKeyCandidates();
-  let res = null;
-  let lastErr = null;
-
-  for (const productKey of productKeyCandidates) {
-    const requestBody = { product_key: productKey };
-    if (refreshToken) requestBody.refresh_token = refreshToken;
-
-    try {
-      res = await api.post("/auth/refresh", requestBody, {
-        withCredentials: true,
-        headers: {
-          "x-csrf-token": csrf,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (productKey !== getDefaultProductKey()) {
-        setDefaultProductKey(productKey);
-      }
-      break;
-    } catch (err) {
-      lastErr = err;
-      const status = Number(err?.response?.status || 0);
-      const code = String(err?.response?.data?.error?.code || "").toUpperCase();
-      const message = String(
-        err?.response?.data?.error?.message ||
-          err?.response?.data?.message ||
-          err?.message ||
-          ""
-      ).toLowerCase();
-
-      const retryable =
-        status === 400 ||
-        status === 403 ||
-        code.includes("PRODUCT") ||
-        message.includes("product") ||
-        message.includes("csrf");
-
-      if (!retryable) break;
+    const csrfToken = getLatestCsrfCookieValue();
+    if (!csrfToken) {
+      throw new Error("Missing csrf_token_property cookie");
     }
-  }
 
-  if (!res) {
-    throw lastErr || new Error("Refresh endpoint failed");
-  }
-  if (!res.data?.access_token) {
-    throw new Error("No access_token returned from refresh");
-  }
+    const productKey = String(getDefaultProductKey() || "property").trim() || "property";
 
-  const newAccessToken = res.data.access_token;
-  authStore.setAccessToken(newAccessToken);
+    const res = await api.post(
+      "/auth/refresh",
+      { product_key: productKey },
+      {
+        withCredentials: true,
+        skipRefresh: true,
+        skipAuthRedirect: true,
+        headers: {
+          "x-product-key": productKey,
+          "x-csrf-token": csrfToken,
+        },
+      },
+    );
 
-  const newCsrf =
-    res?.data?.csrf_token ||
-    res?.headers?.["x-csrf-token"] ||
-    res?.headers?.["csrf-token"];
-  if (newCsrf) {
-    authStore.setCsrfToken(newCsrf);
+    let newToken = deepTokenValue(res?.data, [
+      "access_token",
+      "accessToken",
+      "token",
+      "jwt",
+    ]);
+
+    if (!newToken) {
+      const headerToken = String(
+        res?.headers?.authorization ||
+          res?.headers?.Authorization ||
+          res?.headers?.["x-access-token"] ||
+          ""
+      ).trim();
+      if (/^bearer\s+/i.test(headerToken)) {
+        newToken = headerToken.replace(/^bearer\s+/i, "").trim();
+      }
+    }
+
+    if (!newToken) throw new Error("No access token returned");
+
+    setAccessTokenEverywhere(newToken);
+    console.log("[auth] refresh success, access token updated in memory");
+    return newToken;
+  })();
+
+  try {
+    return await refreshInFlightPromise;
+  } finally {
+    refreshInFlightPromise = null;
   }
-
-  return newAccessToken;
 };
+
+/* ------------------------------------------------ */
+/* 🔐 LOGOUT */
+/* ------------------------------------------------ */
+
 export const logout = async () => {
   try {
-      console.log("\n[authservice] Logging out...");
-    await api.post("/auth/logout", {}, { withCredentials: true });
-  } catch (_) {
-    // ignore
-  } finally {
-    console.log("    Session cleared");
-    authStore.clearAll();
-    clearPanelAuthSession();
-    console.log("   → Redirecting to login");
-    window.location.href = withBasePath("/auth/login");
-  }
-};
+    const csrfToken = getCookie("csrf_token_property");
+    const accessToken = authStore.getAccessToken();
+    const productKey = getDefaultProductKey();
 
+    await api.post(
+      "/auth/logout",
+      { product_key: productKey },
+      {
+        withCredentials: true,
+        headers: {
+          "x-product-key": productKey,
+          ...(csrfToken && { "x-csrf-token": csrfToken }),
+          ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
+        },
+      }
+    );
+  } catch (_) {}
+
+  authStore.clearAll();
+  clearPanelAuthSession();
+  window.location.href = withBasePath("/auth/login");
+};

@@ -1,127 +1,48 @@
-import api from "@/services/api";
-
+import api from "@/lib/api/client";
+import { getDefaultProductKey } from "@/services/product.service";
+import { pickFirst, toText } from "@/app/auth/auth-service/service.utils";
 
 const formatDob = (dob) => {
-  if (!dob) return null;
+  const value = toText(dob);
+  if (!value) return null;
+  if (value.split("-")[0]?.length === 4) return value; // YYYY-MM-DD
 
-  // Already YYYY-MM-DD
-  if (dob.split("-")[0]?.length === 4) {
-    return dob;
-  }
-
-  // Convert DD-MM-YYYY → YYYY-MM-DD
-  const [dd, mm, yyyy] = dob.split("-");
+  const [dd, mm, yyyy] = value.split("-");
   if (!dd || !mm || !yyyy) return null;
-
   return `${yyyy}-${mm}-${dd}`;
 };
 
+const ENV_PRODUCT_KEY = "property";
 
 export const signupUser = (data = {}) => {
-  const {
-    countryCode,
-    country_code,
-    mobileNumber,
-    mobile_number,
-    firstName,
-    first_name,
-    lastName,
-    last_name,
-    email,
-    dob,
-    seanebId,
-    seaneb_id,
-    placeId,
-    place_id,
-    gender,
-  } = data;
+  const countryCode = pickFirst(data.country_code, data.countryCode);
+  const mobileNumber = pickFirst(data.mobile_number, data.mobileNumber);
+  const placeId = pickFirst(data.place_id, data.placeId);
+  const gender = toText(data.gender).toLowerCase();
+  const dob = formatDob(data.dob);
 
-  const finalCountryCode = country_code ?? countryCode;
-  const finalMobile = mobile_number ?? mobileNumber;
-  const finalFirstName = first_name ?? firstName;
-  const finalLastName = last_name ?? lastName;
-  const finalSeanebId = seaneb_id ?? seanebId;
-  const finalPlaceId = place_id ?? placeId;
-
-  const finalProductKey = "property";
-
-  const finalEmail = email?.trim() || "";
-  const finalGender = gender?.toLowerCase() || "";
-  const finalDob = formatDob(dob);
-
-
-  if (!finalCountryCode || !finalMobile) {
-    return Promise.reject(
-      new Error("Missing mobile verification data")
-    );
-  }
-
-  if (!finalPlaceId) {
-    return Promise.reject(new Error("City not selected"));
-  }
-
-  if (!finalGender) {
-    return Promise.reject(new Error("Gender is required"));
-  }
-
-  if (!finalDob) {
-    return Promise.reject(new Error("Invalid date of birth"));
-  }
-
+  if (!countryCode || !mobileNumber) return Promise.reject(new Error("Missing mobile verification data"));
+  if (!placeId) return Promise.reject(new Error("City not selected"));
+  if (!gender) return Promise.reject(new Error("Gender is required"));
+  if (!dob) return Promise.reject(new Error("Invalid date of birth"));
 
   const payload = {
-    country_code: String(finalCountryCode).trim(),
-    mobile_number: String(finalMobile).trim(),
-    first_name: finalFirstName?.trim() || "",
-    last_name: finalLastName?.trim() || "",
-    dob: finalDob,
-    seaneb_id: finalSeanebId?.trim() || "",
-    place_id: String(finalPlaceId).trim(),
-    gender: finalGender,
-    product_key: finalProductKey,
+    country_code: toText(countryCode),
+    mobile_number: toText(mobileNumber),
+    first_name: toText(pickFirst(data.first_name, data.firstName)),
+    last_name: toText(pickFirst(data.last_name, data.lastName)),
+    dob,
+    seaneb_id: toText(pickFirst(data.seaneb_id, data.seanebId)),
+    place_id: toText(placeId),
+    gender,
+    product_key: toText(getDefaultProductKey()) || ENV_PRODUCT_KEY,
   };
 
-  if (finalEmail) {
-    payload.email = finalEmail.toLowerCase();
-  }
+  const email = toText(data.email).toLowerCase();
+  if (email) payload.email = email;
 
-  console.log("signupUser payload:", JSON.stringify(payload, null, 2));
-
-  const isProductNotFound = (err) => {
-    const status = err?.response?.status;
-    const code = err?.response?.data?.error?.code;
-    const message =
-      err?.response?.data?.error?.message ||
-      err?.response?.data?.message ||
-      "";
-
-    return (
-      status === 404 &&
-      (code === "PRODUCT_NOT_FOUND" ||
-        String(message).toLowerCase().includes("product not found"))
-    );
-  };
-
-  const fallbackKeys = ["property"];
-
-  const trySignup = async () => {
-    let lastError;
-
-    for (const key of fallbackKeys) {
-      try {
-        const tryPayload = { ...payload, product_key: key };
-        console.log(`[signupUser] trying with product_key=${key}`);
-        return await api.post("/user/signup", tryPayload);
-      } catch (err) {
-        lastError = err;
-        if (!isProductNotFound(err)) {
-          throw err;
-        }
-      }
-    }
-
-    throw lastError;
-  };
-
-  return trySignup();
+  return api.post("/user/signup", payload);
 };
+
+
+

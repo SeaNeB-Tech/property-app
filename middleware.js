@@ -1,63 +1,40 @@
 import { NextResponse } from "next/server";
+const REFRESH_COOKIE_KEYS = [
+  "refresh_token_property",
+  "refresh_token",
+];
 
-const normalizeUrl = (value) => String(value || "").replace(/\/+$/, "");
-const normalizeListingAppUrl = (value) => {
-  const normalized = normalizeUrl(value);
-  if (!normalized) return normalized;
-  try {
-    const parsed = new URL(normalized);
-    if (parsed.port === "8877" || parsed.port === "1002") {
-      parsed.port = "1001";
-      return normalizeUrl(parsed.toString());
-    }
-  } catch {
-    return normalized;
-  }
-  return normalized;
+const hasAnyCookie = (request, names = []) =>
+  names.some((name) => Boolean(String(request.cookies.get(name)?.value || "").trim()));
+
+const hasSessionCookie = (request) => {
+  return hasAnyCookie(request, REFRESH_COOKIE_KEYS);
 };
 
-const LISTING_APP_BASE_URL = normalizeListingAppUrl(
-  process.env.NEXT_PUBLIC_LISTING_APP_URL || "http://159.65.154.221:1001"
-);
-
-const hasAccessTokenCookie = (request) => {
-  const cookies = request.cookies.getAll();
-  return cookies.some((cookie) => {
-    const name = String(cookie?.name || "").toLowerCase();
-    if (!name) return false;
-    return name === "access_token" || name.startsWith("access_token_");
-  });
+const hasOtpInProgressCookie = (request) => {
+  const value = String(request.cookies.get("otp_in_progress")?.value || "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
 };
-
-const AUTH_PAGES = new Set([
-  "/auth/login",
-  "/auth/register",
-  "/auth/otp",
-  "/auth/email-otp",
-]);
 
 export function middleware(request) {
   const pathname = request.nextUrl.pathname;
-  const hasAccessToken = hasAccessTokenCookie(request);
+  const hasSession = hasSessionCookie(request);
+  const otpInProgress = hasOtpInProgressCookie(request);
 
-  if (pathname.startsWith("/dashboard") && !hasAccessToken) {
+  if (pathname.startsWith("/dashboard") && !hasSession) {
     const loginUrl = new URL("/auth/login", request.url);
     loginUrl.searchParams.set("returnTo", request.nextUrl.href);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (pathname === "/auth/business-register" && !hasAccessToken) {
+  if (pathname === "/auth/business-register" && !hasSession) {
     const loginUrl = new URL("/auth/login", request.url);
     loginUrl.searchParams.set("returnTo", request.nextUrl.href);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (AUTH_PAGES.has(pathname) && hasAccessToken) {
-    const target = request.nextUrl.searchParams.get("returnTo");
-    if (target) {
-      return NextResponse.redirect(new URL(target, request.url));
-    }
-    return NextResponse.redirect(new URL(`${LISTING_APP_BASE_URL}/dashboard`));
+  if ((pathname === "/auth/otp" || pathname === "/auth/email-otp") && otpInProgress) {
+    return NextResponse.next();
   }
 
   return NextResponse.next();

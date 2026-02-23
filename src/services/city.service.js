@@ -1,4 +1,4 @@
-import api from "./api";
+import api from "@/lib/api/client";
 
 /**
  * Get city suggestions for autocomplete

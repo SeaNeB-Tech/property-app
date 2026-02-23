@@ -1,19 +1,17 @@
-import api from "@/services/api";
+import api, { setInMemoryAccessToken } from "@/lib/api/client";
 import { authStore } from "./store/authStore";
-import { getDefaultProductKey, setDefaultProductKey } from "@/services/pro.service";
+import { getDefaultProductKey, setDefaultProductKey } from "@/services/product.service";
 import { getCookie } from "@/services/cookie";
 
 const getRefreshProductKeyCandidates = () => {
-  return ["property"];
+  const key = String(getDefaultProductKey() || "").trim().toLowerCase();
+  return key ? [key] : ["property"];
 };
 
 const getCsrfCandidates = () => [
   authStore.getCsrfToken(),
+  getCookie("csrf_token_property"),
   getCookie("csrf_token"),
-  getCookie("csrf-token"),
-  getCookie("XSRF-TOKEN"),
-  getCookie("xsrf-token"),
-  getCookie("_csrf"),
 ].filter(Boolean);
 
 const isRetryableRefreshError = (err) => {
@@ -37,6 +35,29 @@ const isRetryableRefreshError = (err) => {
   );
 };
 
+const readTokenValue = (payload = {}, keys = []) => {
+  const candidates = [
+    payload,
+    payload?.data,
+    payload?.result,
+    payload?.payload,
+    payload?.response,
+    payload?.session,
+    payload?.tokens,
+    payload?.data?.session,
+    payload?.data?.tokens,
+  ];
+
+  for (const container of candidates) {
+    if (!container || typeof container !== "object") continue;
+    for (const key of keys) {
+      const value = String(container?.[key] || "").trim();
+      if (value) return value;
+    }
+  }
+  return "";
+};
+
 export const bootstrapProductAuth = async ({ force = false } = {}) => {
   console.log("\n[bootstrap] Page reloaded - attempting authentication recovery...");
 
@@ -53,75 +74,77 @@ export const bootstrapProductAuth = async ({ force = false } = {}) => {
   }
 
   try {
-    const refreshToken = authStore.getRefreshToken();
-    const csrfToken = getCsrfCandidates()[0] || null;
+    const csrfCandidates = getCsrfCandidates();
+    const csrfAttemptList = csrfCandidates.length > 0 ? csrfCandidates : [null];
+    const csrfToken = csrfAttemptList[0] || null;
     const productKeyCandidates = getRefreshProductKeyCandidates();
 
     console.log("\n   Available tokens:");
     console.log(`     CSRF: ${csrfToken ? "FOUND" : "MISSING"}`);
-    console.log(`     Refresh: ${refreshToken ? "FOUND" : "MISSING"} (also auto-sent via httpOnly cookie)`);
+    console.log("     Refresh: expected via httpOnly cookie");
     console.log(`     Product Keys: ${productKeyCandidates.join(", ")}`);
-
-    if (!csrfToken) {
-      const missingCsrfError = new Error("CSRF token missing, cannot bootstrap session");
-      missingCsrfError.isRetryable = false;
-      throw missingCsrfError;
-    }
 
     let lastErr = null;
 
-    for (const productKey of productKeyCandidates) {
-      try {
-        console.log(`\n   Strategy: POST /auth/refresh with csrf + product_key=${productKey}`);
+    for (const currentCsrf of csrfAttemptList) {
+      for (const productKey of productKeyCandidates) {
+        try {
+          console.log(
+            `\n   Strategy: POST /auth/refresh with${currentCsrf ? "" : "out"} csrf + product_key=${productKey}`
+          );
 
-        const requestBody = { product_key: productKey };
-        if (refreshToken) {
-          requestBody.refresh_token = refreshToken;
-          console.log("     Also including refresh_token in body");
-        }
+          const requestBody = { product_key: productKey };
 
-        const res = await api.post(
-          "/auth/refresh",
-          requestBody,
-          {
-            withCredentials: true,
-            headers: {
-              "x-csrf-token": csrfToken,
-              "Content-Type": "application/json",
-            },
+          const res = await api.post(
+            "/auth/refresh",
+            requestBody,
+            {
+              withCredentials: true,
+              headers: {
+                ...(currentCsrf ? { "x-csrf-token": currentCsrf } : {}),
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          let newAccessToken = readTokenValue(res?.data, ["access_token", "accessToken", "token", "jwt"]);
+          if (!newAccessToken) {
+            const headerToken = String(
+              res?.headers?.authorization ||
+                res?.headers?.Authorization ||
+                res?.headers?.["x-access-token"] ||
+                ""
+            ).trim();
+            if (/^bearer\s+/i.test(headerToken)) {
+              newAccessToken = headerToken.replace(/^bearer\s+/i, "").trim();
+            } else {
+              newAccessToken = headerToken;
+            }
           }
-        );
+          if (!newAccessToken) {
+            throw new Error("No access_token returned from refresh");
+          }
 
-        const newAccessToken = res?.data?.access_token;
-        if (!newAccessToken) {
-          throw new Error("No access_token returned from refresh");
-        }
+          if (currentCsrf) {
+            authStore.setCsrfToken(currentCsrf);
+          }
+          authStore.setAccessToken(newAccessToken);
+          setInMemoryAccessToken(newAccessToken);
 
-        authStore.setAccessToken(newAccessToken);
+          if (productKey !== getDefaultProductKey()) {
+            setDefaultProductKey(productKey);
+          }
 
-        const newCsrf =
-          res?.data?.csrf_token ||
-          res?.headers?.["x-csrf-token"] ||
-          res?.headers?.["csrf-token"] ||
-          res?.headers?.["x-xsrf-token"] ||
-          res?.headers?.["xsrf-token"];
-        if (newCsrf) {
-          authStore.setCsrfToken(newCsrf);
-        }
+          console.log("      SUCCESS: Access token regenerated!");
+          return newAccessToken;
+        } catch (err) {
+          lastErr = err;
+          console.warn("      Failed:", err?.response?.status, err?.response?.data?.error?.code);
 
-        if (productKey !== getDefaultProductKey()) {
-          setDefaultProductKey(productKey);
-        }
-
-        console.log("      SUCCESS: Access token regenerated!");
-        return newAccessToken;
-      } catch (err) {
-        lastErr = err;
-        console.warn("      Failed:", err?.response?.status, err?.response?.data?.error?.code);
-
-        if (!isRetryableRefreshError(err)) {
-          err.isRetryable = false;
-          throw err;
+          if (!isRetryableRefreshError(err)) {
+            err.isRetryable = false;
+            throw err;
+          }
         }
       }
     }
@@ -137,3 +160,5 @@ export const bootstrapProductAuth = async ({ force = false } = {}) => {
     throw error;
   }
 };
+
+
