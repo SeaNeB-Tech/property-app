@@ -1,6 +1,6 @@
 const normalizeUrl = (value) => String(value || "").replace(/\/+$/, "");
-const defaultAuthAppUrl = "http://localhost:3000";
-const defaultListingAppUrl = "http://localhost:8877";
+const defaultAuthAppUrl = "http://159.65.154.221:1002/";
+const defaultListingAppUrl = "http://159.65.154.221:1001/";
 
 export const AUTH_APP_BASE_URL = normalizeUrl(
   process.env.NEXT_PUBLIC_AUTH_APP_URL || defaultAuthAppUrl
