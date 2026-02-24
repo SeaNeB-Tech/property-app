@@ -12,9 +12,11 @@ const formatDob = (dob) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
-const ENV_PRODUCT_KEY = "property";
+const ENV_PRODUCT_KEY =
+  String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim().toLowerCase() || "property";
+const normalizeProductKey = (value) => toText(value).toLowerCase();
 
-export const signupUser = (data = {}) => {
+export const signupUser = async (data = {}) => {
   const countryCode = pickFirst(data.country_code, data.countryCode);
   const mobileNumber = pickFirst(data.mobile_number, data.mobileNumber);
   const placeId = pickFirst(data.place_id, data.placeId);
@@ -35,7 +37,7 @@ export const signupUser = (data = {}) => {
     seaneb_id: toText(pickFirst(data.seaneb_id, data.seanebId)),
     place_id: toText(placeId),
     gender,
-    product_key: toText(getDefaultProductKey()) || ENV_PRODUCT_KEY,
+    product_key: normalizeProductKey(pickFirst(data.product_key, data.productKey, getDefaultProductKey())) || ENV_PRODUCT_KEY,
   };
 
   const email = toText(data.email).toLowerCase();

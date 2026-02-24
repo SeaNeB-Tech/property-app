@@ -83,6 +83,7 @@ const isEssentialCookieName = (name) => {
     key === "refesh_token" ||
     key === "csrf_token" ||
     key === "csrf_token_property" ||
+    key === "post_otp_verified" ||
     key === "otp_context" ||
     key === "otp_in_progress" ||
     false

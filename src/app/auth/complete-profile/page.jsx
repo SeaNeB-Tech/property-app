@@ -20,10 +20,12 @@ import OtpVerificationModal from "@/components/ui/OtpVerificationModal"
 // Services
 import { signupUser } from "@/app/auth/auth-service/signup.service"
 import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.service"
+import { sendOtp, verifyOtp } from "@/app/auth/auth-service/otp.service"
 import api from "@/lib/api/client"
 import { getDefaultProductKey, setDefaultProductKey } from "@/services/product.service"
 import { authStore } from "@/app/auth/auth-service/store/authStore"
 import { refreshAccessToken } from "@/app/auth/auth-service/authservice"
+import { getListingAppUrl } from "@/lib/appUrls"
 import {
   getCookie,
   getJsonCookie,
@@ -37,6 +39,8 @@ const LANGUAGE_STORAGE_KEY = "auth_language"
 
 const emailRegex =
   /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
+const mobileRegex = /^[0-9]{8,15}$/
+const MOBILE_OTP_UNTIL_COOKIE = "complete_mobile_otp_until"
 
 const EMPTY_FORM = {
   firstName: "",
@@ -64,6 +68,31 @@ const isAge13Plus = (dob) => {
   }
 
   return age >= 13
+}
+
+const resolveVerifiedMobile = () => {
+  const verifiedMobile = getJsonCookie("verified_mobile")
+  const ccFromJson = String(verifiedMobile?.country_code || "").trim()
+  const mobileFromJson = String(verifiedMobile?.mobile_number || "").trim()
+  if (ccFromJson && mobileFromJson) {
+    return { country_code: ccFromJson, mobile_number: mobileFromJson }
+  }
+
+  const verifiedFlag = String(getCookie("mobile_verified") || "").trim().toLowerCase()
+  const ccFromCookie = String(getCookie("otp_cc") || "").trim()
+  const mobileFromCookie = String(getCookie("otp_mobile") || "").trim()
+  if ((verifiedFlag === "true" || verifiedFlag === "1" || verifiedFlag === "yes") && ccFromCookie && mobileFromCookie) {
+    return { country_code: ccFromCookie, mobile_number: mobileFromCookie }
+  }
+
+  const otpCtx = getJsonCookie("otp_context")
+  const ccFromCtx = String(otpCtx?.country_code || "").trim()
+  const mobileFromCtx = String(otpCtx?.mobile_number || "").trim()
+  if (ccFromCtx && mobileFromCtx) {
+    return { country_code: ccFromCtx, mobile_number: mobileFromCtx }
+  }
+
+  return null
 }
 
 export default function CompleteProfilePage() {
@@ -95,6 +124,17 @@ export default function CompleteProfilePage() {
   const [emailOtpClearSignal, setEmailOtpClearSignal] = useState(0)
 
   const [mobileVerified, setMobileVerified] = useState(false)
+  const [verifiedMobileLabel, setVerifiedMobileLabel] = useState("")
+  const [mobileDraft, setMobileDraft] = useState("")
+  const [mobileVerifiedData, setMobileVerifiedData] = useState({ country_code: "", mobile_number: "" })
+  const [mobileLoading, setMobileLoading] = useState(false)
+  const [mobileCooldown, setMobileCooldown] = useState(0)
+  const [mobileOtpOpen, setMobileOtpOpen] = useState(false)
+  const [mobileOtp, setMobileOtp] = useState("")
+  const [mobileOtpVerifying, setMobileOtpVerifying] = useState(false)
+  const [mobileOtpResending, setMobileOtpResending] = useState(false)
+  const [mobileOtpError, setMobileOtpError] = useState("")
+  const [mobileOtpClearSignal, setMobileOtpClearSignal] = useState(0)
   const [seanebVerified, setSeanebVerified] = useState(false)
 
   const [submitting, setSubmitting] = useState(false)
@@ -128,6 +168,25 @@ export default function CompleteProfilePage() {
     setForm((prev) => ({ ...prev, [key]: safeValue }))
   }
 
+  const parseMobileParts = (value) => {
+    const raw = String(value || "").trim()
+    if (!raw) return { countryCode: "", mobileNumber: "" }
+
+    const plusMatch = raw.match(/^\+(\d{1,4})\s*([0-9]{8,15})$/)
+    if (plusMatch) {
+      return { countryCode: plusMatch[1], mobileNumber: plusMatch[2] }
+    }
+
+    const compact = raw.replace(/[^\d]/g, "")
+    if (compact.length < 8) return { countryCode: "", mobileNumber: "" }
+
+    const fallbackCountryCode = String(getCookie("otp_cc") || "").trim()
+    return {
+      countryCode: fallbackCountryCode,
+      mobileNumber: compact,
+    }
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return
     if (LANG_MAP[language]) {
@@ -155,7 +214,7 @@ export default function CompleteProfilePage() {
         })
         if (!active) return
         if (Number(res?.status || 0) === 200 && getCookie("profile_completed") === "true") {
-          router.replace("/dashboard")
+          router.replace(getListingAppUrl("/home"))
         }
       } catch {
         // Continue normal onboarding flow when session isn't fully ready.
@@ -169,22 +228,25 @@ export default function CompleteProfilePage() {
   }, [router])
 
   useEffect(() => {
-    const hasCsrf = String(getCookie("csrf_token_property") || "").trim().length > 0
-    if (hasCsrf) {
-      // Existing authenticated users are handled by session redirect guard above.
-      return
+    const resolvedMobile = resolveVerifiedMobile()
+
+    if (resolvedMobile) {
+      const cc = String(resolvedMobile.country_code).trim()
+      const mobile = String(resolvedMobile.mobile_number).trim()
+      setMobileDraft(`+${cc} ${mobile}`)
+      setMobileVerified(false)
+      setMobileVerifiedData({ country_code: "", mobile_number: "" })
+      setVerifiedMobileLabel("")
+      setSubmitError("")
+    } else {
+      setMobileVerified(false)
+      setMobileVerifiedData({ country_code: "", mobile_number: "" })
+      setVerifiedMobileLabel("")
+      const ccFromCookie = String(getCookie("otp_cc") || "").trim()
+      const mobileFromCookie = String(getCookie("otp_mobile") || "").trim()
+      setMobileDraft(ccFromCookie && mobileFromCookie ? `+${ccFromCookie} ${mobileFromCookie}` : "")
     }
 
-    let verified = getCookie("mobile_verified")
-    let mobile = getCookie("otp_mobile")
-    let cc = getCookie("otp_cc")
-
-    if (verified !== "true" || !mobile || !cc) {
-      router.replace("/auth/login")
-      return
-    }
-
-    setMobileVerified(true)
     setMounted(true)
 
     const saved = getJsonCookie("reg_form_draft")
@@ -194,6 +256,11 @@ export default function CompleteProfilePage() {
     if (until) {
       const diff = Math.floor((+until - Date.now()) / 1000)
       if (diff > 0) setEmailCooldown(diff)
+    }
+
+    const mobileUntil = Number(getCookie(MOBILE_OTP_UNTIL_COOKIE) || 0)
+    if (mobileUntil > Date.now()) {
+      setMobileCooldown(Math.floor((mobileUntil - Date.now()) / 1000))
     }
   }, [router])
 
@@ -231,6 +298,22 @@ export default function CompleteProfilePage() {
 
     return () => clearInterval(timer)
   }, [emailCooldown])
+
+  useEffect(() => {
+    if (mobileCooldown <= 0) return
+
+    const timer = setInterval(() => {
+      setMobileCooldown((value) => {
+        if (value <= 1) {
+          removeCookie(MOBILE_OTP_UNTIL_COOKIE)
+          return 0
+        }
+        return value - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [mobileCooldown])
 
   /* ================= EMAIL OTP ================= */
 
@@ -326,6 +409,118 @@ export default function CompleteProfilePage() {
     }
   }
 
+  const handleMobileVerify = async () => {
+    if (mobileVerified || mobileLoading) return
+
+    const { countryCode, mobileNumber } = parseMobileParts(mobileDraft)
+    if (!mobileRegex.test(mobileNumber)) {
+      setSubmitError("Enter a valid mobile number to verify")
+      return
+    }
+    if (!countryCode) {
+      setSubmitError("Country code missing. Enter mobile as +91 9876543210")
+      return
+    }
+
+    if (mobileCooldown > 0) {
+      setMobileOtpOpen(true)
+      setMobileOtpError("")
+      return
+    }
+
+    try {
+      setMobileLoading(true)
+      setSubmitError("")
+      setMobileOtpError("")
+      setMobileVerified(false)
+      setMobileVerifiedData({ country_code: "", mobile_number: "" })
+
+      setJsonCookie(
+        "otp_context",
+        {
+          country_code: countryCode,
+          mobile_number: mobileNumber,
+          purpose: 0,
+          via: "whatsapp",
+          redirect_to: "/auth/complete-profile",
+        },
+        { maxAge: 300, path: "/" }
+      )
+
+      await sendOtp({ via: "whatsapp" })
+
+      const until = Date.now() + 60 * 1000
+      setCookie(MOBILE_OTP_UNTIL_COOKIE, String(until), { maxAge: 60, path: "/" })
+      setMobileCooldown(60)
+      setMobileOtp("")
+      setMobileOtpClearSignal((value) => value + 1)
+      setMobileOtpOpen(true)
+    } catch {
+      setSubmitError("Failed to send mobile OTP. Please try again.")
+    } finally {
+      setMobileLoading(false)
+    }
+  }
+
+  const handleVerifyMobileOtpInline = async () => {
+    if (String(mobileOtp || "").length !== 4 || mobileOtpVerifying) return
+
+    try {
+      setMobileOtpVerifying(true)
+      setMobileOtpError("")
+      await verifyOtp({ otp: mobileOtp })
+
+      const ctx = getJsonCookie("otp_context")
+      const cc = String(ctx?.country_code || "").trim()
+      const mobile = String(ctx?.mobile_number || "").trim()
+      if (cc && mobile) {
+        setCookie("mobile_verified", "true", { maxAge: 60 * 60 * 24 * 7, path: "/" })
+        setCookie("otp_cc", cc, { maxAge: 60 * 60 * 24 * 7, path: "/" })
+        setCookie("otp_mobile", mobile, { maxAge: 60 * 60 * 24 * 7, path: "/" })
+        setJsonCookie("verified_mobile", { country_code: cc, mobile_number: mobile }, { maxAge: 60 * 60 * 24 * 7, path: "/" })
+        setMobileVerified(true)
+        setMobileVerifiedData({ country_code: cc, mobile_number: mobile })
+        setVerifiedMobileLabel(`+${cc} ${mobile}`)
+        setMobileDraft(`+${cc} ${mobile}`)
+      }
+
+      removeCookie(MOBILE_OTP_UNTIL_COOKIE)
+      removeCookie("otp_context")
+      setMobileCooldown(0)
+      setMobileOtpOpen(false)
+      setMobileOtp("")
+      setSubmitError("")
+    } catch (err) {
+      setMobileOtpError(
+        err?.response?.data?.error?.message ||
+          err?.response?.data?.message ||
+          err?.message ||
+          "Invalid OTP"
+      )
+      setMobileOtp("")
+      setMobileOtpClearSignal((value) => value + 1)
+    } finally {
+      setMobileOtpVerifying(false)
+    }
+  }
+
+  const handleResendMobileOtpInline = async () => {
+    if (mobileOtpResending || mobileCooldown > 0) return
+
+    try {
+      setMobileOtpResending(true)
+      setMobileOtpError("")
+      await sendOtp({ via: "whatsapp" })
+      const until = Date.now() + 60 * 1000
+      setCookie(MOBILE_OTP_UNTIL_COOKIE, String(until), { maxAge: 60, path: "/" })
+      setMobileCooldown(60)
+    } catch {
+      setMobileOtpError("Failed to resend OTP")
+    } finally {
+      setMobileOtpResending(false)
+    }
+  }
+
   /* ================= SUBMIT ================= */
 
   const handleSubmit = async () => {
@@ -334,12 +529,11 @@ export default function CompleteProfilePage() {
       return
     }
 
-    const verifiedMobile = getJsonCookie("verified_mobile")
-    const cc = getCookie("otp_cc") || verifiedMobile?.country_code
-    const mobile = getCookie("otp_mobile") || verifiedMobile?.mobile_number
+    const cc = String(mobileVerifiedData?.country_code || "").trim()
+    const mobile = String(mobileVerifiedData?.mobile_number || "").trim()
 
-    if (!cc || !mobile) {
-      router.replace("/auth/login")
+    if (!mobileVerified || !cc || !mobile) {
+      setSubmitError("Mobile OTP not verified. Please verify mobile first.")
       return
     }
 
@@ -390,21 +584,24 @@ export default function CompleteProfilePage() {
       removeCookie("otp_cc")
       removeCookie("otp_mobile")
       removeCookie("mobile_verified")
+      removeCookie(MOBILE_OTP_UNTIL_COOKIE)
       removeCookie("verified_email")
       removeCookie("email_otp_until")
 
-      // Redirect to business option page (user can register business or skip to dashboard)
-      router.replace("/auth/business-option")
+      router.replace(getListingAppUrl("/home"))
     } catch (err) {
       const status = err?.response?.status
-      const message = err?.response?.data?.message || err?.message || "Signup failed"
+      const message =
+        err?.response?.data?.error?.message ||
+        err?.response?.data?.message ||
+        err?.message ||
+        "Signup failed"
 
       console.error("[complete-profile] Signup error:", { status, message })
 
       // Handle user already exists (409)
       if (status === 409) {
-        console.log("[complete-profile] User already exists (409) - redirecting to business option")
-        // User already exists, still show business option
+        console.log("[complete-profile] User already exists (409) - redirecting to home")
         setCookie("profile_completed", "true", {
           maxAge: 60 * 60 * 24 * 7,
           path: "/",
@@ -413,7 +610,7 @@ export default function CompleteProfilePage() {
         removeCookie("otp_context")
         removeCookie("otp_cc")
         removeCookie("otp_mobile")
-        router.replace("/auth/business-option")
+        router.replace(getListingAppUrl("/home"))
         return
       }
 
@@ -450,6 +647,26 @@ export default function CompleteProfilePage() {
 
         {/* Main Form */}
         <div className="grid grid-cols-1 gap-4 mt-6 md:grid-cols-2">
+          <div className="space-y-1.5 md:col-span-2">
+            <MobileField
+              value={mobileVerified ? verifiedMobileLabel : mobileDraft}
+              verified={mobileVerified}
+              loading={mobileLoading}
+              cooldown={mobileCooldown}
+              onChange={(next) => {
+                setMobileDraft(next)
+                setMobileVerified(false)
+                setMobileVerifiedData({ country_code: "", mobile_number: "" })
+                setVerifiedMobileLabel("")
+                removeCookie("mobile_verified")
+                removeCookie("verified_mobile")
+              }}
+              onVerify={() => {
+                void handleMobileVerify()
+              }}
+            />
+          </div>
+
           <Input label={t.firstName} value={form.firstName} onChange={(v) => setField("firstName", v)} />
           <Input label={t.lastName} value={form.lastName} onChange={(v) => setField("lastName", v)} />
 
@@ -544,6 +761,27 @@ export default function CompleteProfilePage() {
         error={emailOtpError}
         clearSignal={emailOtpClearSignal}
       />
+
+      <OtpVerificationModal
+        open={mobileOtpOpen}
+        title="Verify Mobile OTP"
+        subtitle="Enter the 4-digit OTP sent to"
+        targetLabel={mobileDraft}
+        otp={mobileOtp}
+        onOtpChange={setMobileOtp}
+        onClose={() => {
+          setMobileOtpOpen(false)
+          setMobileOtpError("")
+          setMobileOtp("")
+        }}
+        onVerify={handleVerifyMobileOtpInline}
+        onResend={handleResendMobileOtpInline}
+        loading={mobileOtpVerifying}
+        resending={mobileOtpResending}
+        cooldown={mobileCooldown}
+        error={mobileOtpError}
+        clearSignal={mobileOtpClearSignal}
+      />
     </AuthCard1>
   )
 }
@@ -593,6 +831,46 @@ function EmailField({ value, onChange, onVerify, verified, loading, cooldown }) 
       </div>
       <p className={`text-xs ${verified ? "text-emerald-600" : "text-slate-500"}`}>
         {verified ? "Email verified successfully." : "You can continue without email verification."}
+      </p>
+    </div>
+  )
+}
+
+function MobileField({ value, onChange, onVerify, verified, loading, cooldown }) {
+  const buttonLabel = verified ? "Verified" : cooldown > 0 ? "Enter OTP" : "Verify"
+  return (
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium text-slate-800">Mobile Number *</label>
+      <div className="flex items-center gap-2">
+        <input
+          type="tel"
+          className={`h-11 flex-1 rounded-lg border bg-white px-3 text-sm text-slate-900 outline-none transition-all ${
+            verified
+              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+              : "border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+          }`}
+          value={value}
+          disabled={verified}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="+91 9876543210"
+        />
+        <button
+          type="button"
+          onClick={onVerify}
+          disabled={verified || loading}
+          className={`h-11 min-w-[130px] rounded-lg border px-4 text-sm font-semibold transition-all ${
+            verified
+              ? "cursor-not-allowed border-emerald-500 bg-emerald-500 text-white"
+              : "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+          }`}
+        >
+          {loading ? "Sending..." : buttonLabel}
+        </button>
+      </div>
+      <p className={`text-xs ${verified ? "text-emerald-600" : "text-rose-600"}`}>
+        {verified
+          ? "Mobile OTP verified."
+          : "Mobile is required. Verify mobile OTP before submitting profile."}
       </p>
     </div>
   )

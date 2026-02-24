@@ -87,53 +87,12 @@ const getFriendlyVerifyError = (err) => {
   };
 };
 
-const isSafeReturnTo = (value) => {
-  const target = String(value || "").trim();
-  if (!target) return false;
-  if (target.startsWith("/")) return true;
-
-  try {
-    const parsed = new URL(target);
-    if (!/^https?:$/.test(parsed.protocol)) return false;
-    if (typeof window === "undefined") return true;
-    return parsed.hostname === window.location.hostname;
-  } catch {
-    return false;
-  }
-};
-
-const getPostLoginTarget = () => {
-  const queryTarget =
-    typeof window !== "undefined"
-      ? String(new URLSearchParams(window.location.search).get("returnTo") || "").trim()
-      : "";
-  if (isSafeReturnTo(queryTarget)) return queryTarget;
-
-  const cookieTarget = String(getCookie(RETURN_TO_COOKIE) || "").trim();
-  if (isSafeReturnTo(cookieTarget)) return cookieTarget;
-
-  return getListingAppUrl("/dashboard");
-};
-
 const resolveRedirectTarget = (target) => {
   const safeTarget = String(target || "").trim();
-  if (!safeTarget) return getListingAppUrl("/dashboard");
+  if (!safeTarget) return getListingAppUrl("/home");
   if (/^https?:\/\//i.test(safeTarget)) return safeTarget;
   if (safeTarget.startsWith("/dashboard")) return getListingAppUrl(safeTarget);
   return safeTarget;
-};
-
-const isDashboardTarget = (target) => {
-  const safeTarget = String(target || "").trim();
-  if (!safeTarget) return false;
-  try {
-    const parsed = safeTarget.startsWith("/")
-      ? new URL(safeTarget, typeof window !== "undefined" ? window.location.origin : "http://localhost")
-      : new URL(safeTarget);
-    return parsed.pathname.startsWith("/dashboard");
-  } catch {
-    return safeTarget.startsWith("/dashboard");
-  }
 };
 
 export default function OtpPage() {
@@ -158,16 +117,16 @@ export default function OtpPage() {
   const [otpVia, setOtpVia] = useState("whatsapp");
   const verifyInFlightRef = useRef(false);
 
-  const redirectToPostLoginTarget = () => {
-    const target = resolveRedirectTarget(getPostLoginTarget());
+  const redirectToPostLoginTarget = (target = getListingAppUrl("/home")) => {
+    const resolvedTarget = resolveRedirectTarget(target);
     removeCookie(RETURN_TO_COOKIE);
 
-    if (/^https?:\/\//i.test(target)) {
-      window.location.href = target;
+    if (/^https?:\/\//i.test(resolvedTarget)) {
+      window.location.href = resolvedTarget;
       return;
     }
 
-    router.replace(target || "/dashboard");
+    router.replace(resolvedTarget || "/home");
   };
 
   const t = LANG_MAP[language] || eng;
@@ -297,18 +256,6 @@ export default function OtpPage() {
         return;
       }
 
-      const targetAfterOtp = resolveRedirectTarget(getPostLoginTarget());
-      if (isDashboardTarget(targetAfterOtp)) {
-        removeCookie("otp_in_progress");
-        removeCookie("otp_context");
-        setCookie(POST_OTP_VERIFIED_COOKIE, "1", { maxAge: 180, path: "/" });
-        setCookie("profile_completed", "true", {
-          maxAge: 60 * 60 * 24 * 7,
-        });
-        redirectToPostLoginTarget();
-        return;
-      }
-
       if (result?.isExistingUser === true) {
         removeCookie("otp_in_progress");
         removeCookie("otp_context");
@@ -316,7 +263,7 @@ export default function OtpPage() {
         setCookie("profile_completed", "true", {
           maxAge: 60 * 60 * 24 * 7,
         });
-        redirectToPostLoginTarget();
+        redirectToPostLoginTarget(getListingAppUrl("/home"));
         return;
       }
 

@@ -43,7 +43,7 @@ const isSafeReturnTo = (value) => {
 };
 
 const getPostLoginTarget = () => {
-  if (typeof window === "undefined") return getListingAppUrl("/dashboard");
+  if (typeof window === "undefined") return getListingAppUrl("/home");
 
   const queryTarget = String(new URLSearchParams(window.location.search).get("returnTo") || "").trim();
   if (isSafeReturnTo(queryTarget)) return queryTarget;
@@ -51,12 +51,12 @@ const getPostLoginTarget = () => {
   const cookieTarget = String(getCookie(RETURN_TO_COOKIE) || "").trim();
   if (isSafeReturnTo(cookieTarget)) return cookieTarget;
 
-  return getListingAppUrl("/dashboard");
+  return getListingAppUrl("/home");
 };
 
 const resolveRedirectTarget = (target) => {
   const safeTarget = String(target || "").trim();
-  if (!safeTarget) return getListingAppUrl("/dashboard");
+  if (!safeTarget) return getListingAppUrl("/home");
   if (/^https?:\/\//i.test(safeTarget)) return safeTarget;
   if (safeTarget.startsWith("/dashboard")) return getListingAppUrl(safeTarget);
   return safeTarget;

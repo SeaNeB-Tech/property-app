@@ -8,6 +8,7 @@ import { authStore } from "@/app/auth/auth-service/store/authStore"
 import { bootstrapProductAuth } from "@/app/auth/auth-service/auth.bootstrap"
 import AuthCard1 from "@/components/ui/AuthCard1"
 import AuthHeader from "@/components/ui/AuthHeader"
+import { getListingAppUrl } from "@/lib/appUrls"
 
 const LANGUAGE_STORAGE_KEY = "auth_language"
 const SUPPORTED_LANGUAGES = new Set(["eng", "guj", "hindi"])
@@ -65,7 +66,7 @@ export default function BusinessOptionPage() {
 
   const handleSkip = () => {
     setDashboardMode(DASHBOARD_MODE_USER)
-    router.push("/dashboard")
+    router.push(getListingAppUrl("/home"))
   }
 
   if (!isProfileCompleted || !hasSession) return null

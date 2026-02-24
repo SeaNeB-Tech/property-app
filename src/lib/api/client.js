@@ -134,7 +134,12 @@ const refreshAccessToken = async () => {
     const response = await refreshClient.post(
       REFRESH_ENDPOINT,
       { product_key: productKey },
-      { headers, timeout: 7000 }
+      {
+        headers,
+        timeout: 7000,
+        withCredentials: true,
+        credentials: "include",
+      }
     );
 
     const nextAccessToken = readAccessTokenFromResponse(response);

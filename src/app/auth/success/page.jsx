@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import AppHeader from "@/components/ui/AppHeader";
+import { getListingAppUrl } from "@/lib/appUrls";
 
 //  Client-only Lottie (SSR disabled)
 const Lottie = dynamic(() => import("lottie-react"), { ssr: false });
@@ -71,10 +72,10 @@ export default function SuccessPage() {
         </p>
 
         <button
-          onClick={() => router.push("/dashboard")}
+          onClick={() => router.push(getListingAppUrl("/home"))}
           className="w-full bg-gray-700 hover:bg-gray-800 text-white py-3 rounded-lg font-medium transition"
         >
-          Go to Dashboard
+          Go to Home
         </button>
       </div>
     </div>

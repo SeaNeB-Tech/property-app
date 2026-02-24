@@ -11,12 +11,12 @@ const readPortsConfig = () => {
     const raw = fs.readFileSync(portsConfigPath, "utf8");
     const parsed = JSON.parse(raw);
     return {
-      host: String(parsed?.host || "159.65.154.221").trim(),
-      listingPort: String(parsed?.listingPort || "1001").trim(),
-      appPort: String(parsed?.appPort || "1002").trim(),
+      host: String(parsed?.host || "localhost").trim(),
+      listingPort: String(parsed?.listingPort || "8877").trim(),
+      appPort: String(parsed?.appPort || "3000").trim(),
     };
   } catch {
-    return { host: "159.65.154.221", listingPort: "1001", appPort: "1002" };
+    return { host: "localhost", listingPort: "8877", appPort: "3000" };
   }
 };
 
@@ -30,21 +30,7 @@ const normalizedBasePath =
     ? `/${rawBasePath.replace(/^\/+|\/+$/g, "")}`
     : "";
 const normalizeUrl = (value) => String(value || "").replace(/\/+$/, "");
-const normalizeListingAppUrl = (value) => {
-  const normalized = normalizeUrl(value);
-  if (!normalized) return normalized;
-  try {
-    const parsed = new URL(normalized);
-    if (parsed.port === "3000" || parsed.port === "8877" || parsed.port === "1002") {
-      parsed.port = "1001";
-      return normalizeUrl(parsed.toString());
-    }
-  } catch {
-    return normalized;
-  }
-  return normalized;
-};
-const listingAppBaseUrl = normalizeListingAppUrl(
+const listingAppBaseUrl = normalizeUrl(
   process.env.NEXT_PUBLIC_LISTING_APP_URL || defaultListingUrl
 );
 const devApiUrl =
