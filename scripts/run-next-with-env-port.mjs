@@ -4,12 +4,17 @@ import { spawn } from "node:child_process";
 
 const command = process.argv[2] || "dev";
 const envKey = process.argv[3] || "NEXT_PUBLIC_AUTH_APP_URL";
-const fallbackPort = String(process.argv[4] || "1002");
+const fallbackPort = String(process.argv[4] || process.env.PORT || "1002");
 
 const rootDir = process.cwd();
-const envFiles = [".env.local", ".env"];
+const envFiles = [".env"];
 
 const readEnvValue = (key) => {
+  const fromProcess = process.env[key];
+  if (typeof fromProcess === "string" && fromProcess.trim()) {
+    return fromProcess.trim().replace(/^['"]|['"]$/g, "");
+  }
+
   for (const fileName of envFiles) {
     const filePath = path.join(rootDir, fileName);
     if (!fs.existsSync(filePath)) continue;

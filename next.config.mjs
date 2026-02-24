@@ -1,54 +1,42 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const portsConfigPath = path.resolve(__dirname, "..", "deployment-ports.json");
-
-const readPortsConfig = () => {
-  try {
-    const raw = fs.readFileSync(portsConfigPath, "utf8");
-    const parsed = JSON.parse(raw);
-    return {
-      host: String(parsed?.host || "159.65.154.221").trim(),
-      listingPort: String(parsed?.listingPort || "1001").trim(),
-      appPort: String(parsed?.appPort || "1002").trim(),
-    };
-  } catch {
-    return { host: "159.65.154.221", listingPort: "1001", appPort: "1002" };
-  }
-};
-
-const portsConfig = readPortsConfig();
-const defaultListingUrl = `http://${portsConfig.host}:${portsConfig.listingPort}`;
-const defaultAuthUrl = `http://${portsConfig.host}:${portsConfig.appPort}`;
-
 const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const normalizedBasePath =
   rawBasePath && rawBasePath !== "/"
     ? `/${rawBasePath.replace(/^\/+|\/+$/g, "")}`
     : "";
 const normalizeUrl = (value) => String(value || "").replace(/\/+$/, "");
-const listingAppBaseUrl = normalizeUrl(
-  process.env.NEXT_PUBLIC_LISTING_APP_URL || defaultListingUrl
+const isUsableUrl = (value) => {
+  try {
+    const url = new URL(normalizeUrl(value));
+    return Boolean(url.protocol && url.host);
+  } catch {
+    return false;
+  }
+};
+const defaultListingUrl = normalizeUrl(
+  process.env.NEXT_PUBLIC_LISTING_APP_URL || "http://159.65.154.221:1001"
 );
-const devApiUrl =
-  process.env.API_DEV_URL ||
-  process.env.NEXT_PUBLIC_API_DEV_URL ||
-  "https://dev.seaneb.com/api/v1";
-const centralApiUrl =
-  process.env.API_CENTRAL_URL ||
-  process.env.NEXT_PUBLIC_API_CENTRAL_URL ||
-  "https://central-api.seaneb.com/api/v1";
-const envSelectedApiUrl = process.env.NODE_ENV === "development" ? devApiUrl : centralApiUrl;
+const defaultAuthUrl = normalizeUrl(
+  process.env.NEXT_PUBLIC_AUTH_APP_URL || "http://159.65.154.221:1002"
+);
+const listingAppBaseUrl = defaultListingUrl;
+const devApiUrl = process.env.NEXT_PUBLIC_DEV_URL || "";
+const centralApiUrl = process.env.NEXT_PUBLIC_CENTRAL_URL || "";
+const localApiFallbackUrl = "https://dev.seaneb.com/api/v1";
+const nextEnv = String(process.env.NEXT_ENV || "").trim().toLowerCase();
+const primaryApiUrl = nextEnv === "development" ? devApiUrl : centralApiUrl;
+const secondaryApiUrl = nextEnv === "development" ? centralApiUrl : devApiUrl;
+const envSelectedApiUrl = isUsableUrl(primaryApiUrl) ? primaryApiUrl : secondaryApiUrl;
 const apiBaseUrl = (
+  process.env.API_URL ||
   process.env.API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   envSelectedApiUrl
 ).replace(/\/+$/, "");
-const apiHostname = new URL(apiBaseUrl).hostname;
+const safeApiBaseUrl = isUsableUrl(apiBaseUrl)
+  ? apiBaseUrl
+  : normalizeUrl(isUsableUrl(secondaryApiUrl) ? secondaryApiUrl : localApiFallbackUrl);
+const apiHostname = new URL(safeApiBaseUrl).hostname;
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -116,7 +104,7 @@ const nextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: `${apiBaseUrl}/:path*`,
+        destination: `${safeApiBaseUrl}/:path*`,
       },
     ];
   },

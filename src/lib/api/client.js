@@ -1,5 +1,5 @@
 import axios from "axios";
-import { API_BASE_URL } from "@/lib/apiBaseUrl";
+import { API_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/apiBaseUrl";
 import { getAuthAppUrl } from "@/lib/appUrls";
 
 const REFRESH_ENDPOINT = "/auth/refresh";
@@ -8,6 +8,7 @@ const DEFAULT_PRODUCT_KEY = "property";
 let inMemoryAccessToken = "";
 let inMemoryCsrfToken = "";
 let refreshPromise = null;
+const TRANSIENT_BACKEND_STATUSES = new Set([500, 502, 503, 504, 522, 524]);
 
 const getCookieEntries = () => {
   if (typeof document === "undefined") return [];
@@ -120,6 +121,26 @@ const refreshClient = axios.create({
   },
 });
 
+const shouldAttemptBackendFailover = (error, originalConfig = {}) => {
+  if (originalConfig?._backendFailoverAttempted) return false;
+  if (!API_REMOTE_FALLBACK_BASE_URL) return false;
+  const status = Number(error?.response?.status || 0);
+  const networkFailure = !error?.response;
+  return networkFailure || TRANSIENT_BACKEND_STATUSES.has(status);
+};
+
+const retryWithBackendFailover = async (client, error) => {
+  const originalConfig = error?.config || {};
+  if (!shouldAttemptBackendFailover(error, originalConfig)) {
+    throw error;
+  }
+
+  originalConfig._backendFailoverAttempted = true;
+  originalConfig.baseURL = API_REMOTE_FALLBACK_BASE_URL;
+  originalConfig.withCredentials = true;
+  return client(originalConfig);
+};
+
 const refreshAccessToken = async () => {
   const productKey = getProductKey();
   const csrfToken = getCsrfToken();
@@ -153,7 +174,19 @@ const refreshAccessToken = async () => {
     if (nextCsrfToken) setCsrfTokenInMemory(nextCsrfToken);
     return true;
   } catch (err) {
-    lastError = err;
+    try {
+      const response = await retryWithBackendFailover(refreshClient, err);
+      const nextAccessToken = readAccessTokenFromResponse(response);
+      const nextCsrfToken = readCsrfTokenFromResponse(response);
+      if (!nextAccessToken) {
+        throw new Error("Refresh failed: no access token returned");
+      }
+      setAccessTokenInMemory(nextAccessToken);
+      if (nextCsrfToken) setCsrfTokenInMemory(nextCsrfToken);
+      return true;
+    } catch (fallbackErr) {
+      lastError = fallbackErr;
+    }
   }
   throw lastError || new Error("Refresh failed");
 };
@@ -184,6 +217,14 @@ api.interceptors.response.use(
     const status = Number(error?.response?.status || 0);
     const isRefreshRequest = String(originalRequest?.url || "").includes(REFRESH_ENDPOINT);
     const skipRefresh = originalRequest?.skipRefresh === true;
+
+    if (!isRefreshRequest) {
+      try {
+        return await retryWithBackendFailover(api, error);
+      } catch {
+        // Continue with regular auth/401 flow.
+      }
+    }
 
     if (status !== 401 || originalRequest._retry || isRefreshRequest || skipRefresh) {
       return Promise.reject(error);

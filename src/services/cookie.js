@@ -104,14 +104,13 @@ const resolveDomain = (domain) => {
   if (!safeDomain || !isBrowser) return safeDomain;
 
   const host = String(window.location.hostname || "").toLowerCase();
-  const isLocalHost =
-    host === "localhost" ||
+  const isLoopbackHost =
     host === "127.0.0.1" ||
     host === "::1" ||
-    host.endsWith(".localhost");
+    host.endsWith(".local");
 
-  // Domain cookies on localhost often break auth sharing in local multi-port setup.
-  if (isLocalHost) return "";
+  // Domain cookies on loopback hosts often break auth sharing in multi-port setup.
+  if (isLoopbackHost) return "";
   return safeDomain;
 };
 
