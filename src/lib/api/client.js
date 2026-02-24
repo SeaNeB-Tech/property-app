@@ -122,6 +122,8 @@ const refreshClient = axios.create({
 });
 
 const shouldAttemptBackendFailover = (error, originalConfig = {}) => {
+  // Browser must keep auth requests on same-origin /api so localhost cookies are sent.
+  if (typeof window !== "undefined") return false;
   if (originalConfig?._backendFailoverAttempted) return false;
   if (!API_REMOTE_FALLBACK_BASE_URL) return false;
   const status = Number(error?.response?.status || 0);
@@ -188,6 +190,8 @@ const refreshAccessToken = async () => {
       lastError = fallbackErr;
     }
   }
+  // Prevent repeated refresh loops on stale in-memory tokens.
+  setAccessTokenInMemory("");
   throw lastError || new Error("Refresh failed");
 };
 

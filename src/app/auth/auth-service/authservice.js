@@ -192,6 +192,7 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
     "token",
     "jwt",
   ]);
+  const hasImmediateAccessToken = Boolean(accessToken);
 
   if (accessToken) {
     console.log("[auth] OTP verify returned access token in response");
@@ -228,11 +229,32 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
   authStore.setSessionStartTime();
   console.log("[auth] session timer initialized");
 
+  // If OTP verify already returned a usable access token, try confirming session immediately.
+  if (hasImmediateAccessToken) {
+    const immediateSession = await tryFetchSession();
+    if (immediateSession) {
+      removeCookie("otp_in_progress");
+      return {
+        sessionConfirmed: true,
+        isExistingUser: true,
+        requiresRegistration: false,
+      };
+    }
+  }
+
   // Existing users must have CSRF before refresh.
   console.log("[auth] waiting for csrf_token_property before refresh");
   const csrfFromCookie = await waitForCsrfCookie();
   if (!csrfFromCookie) {
     console.warn("[auth] csrf_token_property not available for existing user");
+    if (hasImmediateAccessToken) {
+      removeCookie("otp_in_progress");
+      return {
+        sessionConfirmed: true,
+        isExistingUser: true,
+        requiresRegistration: false,
+      };
+    }
     return {
       sessionConfirmed: false,
       isExistingUser: true,
@@ -247,8 +269,8 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
   } catch (err) {
     console.warn("[auth] refresh failed after OTP:", err?.message || err);
     const fallbackSession = await tryFetchSession();
-    if (fallbackSession) {
-      console.log("[auth] fallback /profile/me succeeded even after refresh failure");
+    if (fallbackSession || hasImmediateAccessToken) {
+      console.log("[auth] session preserved after refresh failure via existing token/profile fallback");
       removeCookie("otp_in_progress");
       return {
         sessionConfirmed: true,
