@@ -104,8 +104,9 @@ const resolveDomain = (domain) => {
   if (!safeDomain || !isBrowser) return safeDomain;
 
   const host = String(window.location.hostname || "").toLowerCase();
+  const isIpv4Loopback = /^127(?:\.\d{1,3}){3}$/.test(host);
   const isLoopbackHost =
-    host === "127.0.0.1" ||
+    isIpv4Loopback ||
     host === "::1" ||
     host.endsWith(".local");
 

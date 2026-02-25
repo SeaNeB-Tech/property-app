@@ -12,38 +12,22 @@ const isUsableUrl = (value) => {
     return false;
   }
 };
-const defaultListingUrl = normalizeUrl(
-  process.env.NEXT_PUBLIC_LISTING_APP_URL || "http://159.65.154.221:1001"
-);
-const defaultAuthUrl = normalizeUrl(
-  process.env.NEXT_PUBLIC_AUTH_APP_URL || "http://159.65.154.221:1002"
-);
-const listingAppBaseUrl = defaultListingUrl;
+const appBaseUrl = normalizeUrl(process.env.NEXT_PUBLIC_APP_URL || "");
+const authAppBaseUrl = normalizeUrl(process.env.NEXT_PUBLIC_AUTH_APP_URL || "");
 const devApiUrl = process.env.NEXT_PUBLIC_DEV_URL || "";
 const centralApiUrl = process.env.NEXT_PUBLIC_CENTRAL_URL || "";
-const localApiFallbackUrl = "https://dev.seaneb.com/api/v1";
 const nextEnv = String(process.env.NEXT_ENV || "").trim().toLowerCase();
-const primaryApiUrl = nextEnv === "development" ? devApiUrl : centralApiUrl;
-const secondaryApiUrl = nextEnv === "development" ? centralApiUrl : devApiUrl;
-const envSelectedApiUrl = isUsableUrl(primaryApiUrl) ? primaryApiUrl : secondaryApiUrl;
-const apiBaseUrl = (
-  process.env.API_URL ||
-  process.env.API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  envSelectedApiUrl
-).replace(/\/+$/, "");
-const safeApiBaseUrl = isUsableUrl(apiBaseUrl)
-  ? apiBaseUrl
-  : normalizeUrl(isUsableUrl(secondaryApiUrl) ? secondaryApiUrl : localApiFallbackUrl);
-const apiHostname = new URL(safeApiBaseUrl).hostname;
+const apiBaseUrl = normalizeUrl(nextEnv === "development" ? devApiUrl : centralApiUrl);
+const fallbackApiBaseUrl = normalizeUrl(nextEnv === "development" ? centralApiUrl : devApiUrl);
+const safeApiBaseUrl = isUsableUrl(apiBaseUrl) ? apiBaseUrl : fallbackApiBaseUrl;
+const apiHostname = isUsableUrl(safeApiBaseUrl) ? new URL(safeApiBaseUrl).hostname : "";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   basePath: normalizedBasePath,
   env: {
-    NEXT_PUBLIC_AUTH_APP_URL: process.env.NEXT_PUBLIC_AUTH_APP_URL || defaultAuthUrl,
-    NEXT_PUBLIC_LISTING_APP_URL: process.env.NEXT_PUBLIC_LISTING_APP_URL || defaultListingUrl,
+    NEXT_PUBLIC_AUTH_APP_URL: process.env.NEXT_PUBLIC_AUTH_APP_URL || authAppBaseUrl,
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || appBaseUrl,
   },
   images: {
     remotePatterns: [
@@ -51,10 +35,14 @@ const nextConfig = {
         protocol: "https",
         hostname: "flagcdn.com",
       },
-      {
-        protocol: "https",
-        hostname: apiHostname,
-      },
+      ...(apiHostname
+        ? [
+            {
+              protocol: "https",
+              hostname: apiHostname,
+            },
+          ]
+        : []),
       {
         protocol: "https",
         hostname: "img.icons8.com",
@@ -62,46 +50,56 @@ const nextConfig = {
     ],
   },
   async redirects() {
+    if (!appBaseUrl) return [];
     return [
       {
         source: "/home",
-        destination: `${listingAppBaseUrl}/home`,
+        destination: `${appBaseUrl}/home`,
         permanent: false,
       },
       {
         source: "/about",
-        destination: `${listingAppBaseUrl}/about`,
+        destination: `${appBaseUrl}/about`,
         permanent: false,
       },
       {
         source: "/contact",
-        destination: `${listingAppBaseUrl}/contact`,
+        destination: `${appBaseUrl}/contact`,
         permanent: false,
       },
       {
         source: "/blogs",
-        destination: `${listingAppBaseUrl}/blogs`,
+        destination: `${appBaseUrl}/blogs`,
         permanent: false,
       },
       {
         source: "/solution",
-        destination: `${listingAppBaseUrl}/solution`,
+        destination: `${appBaseUrl}/solution`,
         permanent: false,
       },
       {
         source: "/partner",
-        destination: `${listingAppBaseUrl}/partner`,
+        destination: `${appBaseUrl}/partner`,
         permanent: false,
       },
       {
         source: "/in/:path*",
-        destination: `${listingAppBaseUrl}/in/:path*`,
+        destination: `${appBaseUrl}/in/:path*`,
         permanent: false,
       },
     ];
   },
   async rewrites() {
+    if (!safeApiBaseUrl) return [];
     return [
+      {
+        source: "/api/auth/send-otp",
+        destination: `${safeApiBaseUrl}/otp/send-otp`,
+      },
+      {
+        source: "/api/auth/verify-otp",
+        destination: `${safeApiBaseUrl}/otp/verify-otp`,
+      },
       {
         source: "/api/:path*",
         destination: `${safeApiBaseUrl}/:path*`,

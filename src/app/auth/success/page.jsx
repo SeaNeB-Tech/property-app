@@ -1,16 +1,15 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import AppHeader from "@/components/ui/AppHeader";
 import { getListingAppUrl } from "@/lib/appUrls";
+import { redirectToOpenerOrSelf } from "@/lib/postLoginRedirect";
 
 //  Client-only Lottie (SSR disabled)
 const Lottie = dynamic(() => import("lottie-react"), { ssr: false });
 
 export default function SuccessPage() {
-  const router = useRouter();
   const [animationData, setAnimationData] = useState(null);
 
   useEffect(() => {
@@ -72,7 +71,7 @@ export default function SuccessPage() {
         </p>
 
         <button
-          onClick={() => router.push(getListingAppUrl("/home"))}
+          onClick={() => redirectToOpenerOrSelf(getListingAppUrl("/home"))}
           className="w-full bg-gray-700 hover:bg-gray-800 text-white py-3 rounded-lg font-medium transition"
         >
           Go to Home

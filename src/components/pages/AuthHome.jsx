@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { getCookie } from "@/services/cookie";
 import { authStore } from "@/app/auth/auth-service/store/authStore";
 import { bootstrapProductAuth } from "@/app/auth/auth-service/auth.bootstrap";
+import { getAuthAppUrl } from "@/lib/appUrls";
 import {
   DASHBOARD_MODE_BUSINESS,
   DASHBOARD_MODE_USER,
@@ -43,7 +44,7 @@ export default function AuthHome() {
       }
       if (!active) return;
       if (!hasProfile && !sessionOk) {
-        router.replace("/auth/login");
+        router.replace(getAuthAppUrl("/auth/login"));
         return;
       }
 

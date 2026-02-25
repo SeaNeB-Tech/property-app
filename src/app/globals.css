@@ -256,6 +256,119 @@ article {
   gap: 0.65rem;
 }
 
+.business-wizard-stepper {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding-top: 0.15rem;
+}
+
+.business-wizard-stepper::before {
+  display: none;
+}
+
+.business-wizard-step-line {
+  display: none;
+}
+
+.business-wizard-step {
+  position: relative;
+  z-index: 2;
+  border: 1px solid #dbeafe;
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.38rem 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.business-wizard-step-index {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.business-wizard-step.active {
+  border-color: #2563eb;
+  color: #0f172a;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.business-wizard-step.done {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.business-wizard-step.done .business-wizard-step-index {
+  background: #166534;
+  color: #fff;
+}
+
+.business-wizard-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.business-wizard-btn {
+  min-width: 140px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.business-wizard-nav .business-wizard-btn,
+.business-wizard-nav > button,
+.business-wizard-nav > .w-full {
+  width: 140px;
+}
+
+.business-wizard-btn--ghost {
+  border-color: #cbd5e1;
+  background: #fff;
+  color: #334155;
+}
+
+.business-wizard-btn--ghost:hover {
+  border-color: #94a3b8;
+}
+
+.business-wizard-btn--primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.business-wizard-btn--primary:hover {
+  background: #1d4ed8;
+}
+
+.business-wizard-btn:disabled {
+  cursor: not-allowed;
+  background: #e2e8f0;
+  border-color: #e2e8f0;
+  color: #94a3b8;
+}
+
 .business-status-pill {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
@@ -429,6 +542,15 @@ article {
 
   .business-status-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .business-wizard-stepper {
+    grid-template-columns: 1fr;
+  }
+
+  .business-wizard-stepper::before,
+  .business-wizard-step-line {
+    display: none;
   }
 }
 

@@ -17,6 +17,7 @@ import { bootstrapProductAuth } from "@/app/auth/auth-service/auth.bootstrap"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/product.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboardMode.service"
+import { getAuthAppUrl } from "@/lib/appUrls"
 import useDebounce from "@/hooks/useDebounce"
 import AuthCard1 from "@/components/ui/AuthCard1"
 import AuthHeader from "@/components/ui/AuthHeader"
@@ -35,6 +36,7 @@ const LANG_MAP = { eng, guj, hindi }
 const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/
 const GST_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/
 const MOBILE_REGEX = /^[0-9]{8,15}$/
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2
 const PURPOSE_BUSINESS_EMAIL_VERIFY = 3
 const DEFAULT_MAIN_CATEGORY_ID = process.env.NEXT_PUBLIC_MAIN_CATEGORY_ID || ""
@@ -90,6 +92,12 @@ const getBusinessSuggestionLabel = (item) =>
 const getBusinessSuggestionPlaceId = (item) =>
   String(item?.place_id || item?.id || "").trim()
 
+const WIZARD_STEPS = [
+  { id: 1, title: "Basic Info" },
+  { id: 2, title: "Contact" },
+  { id: 3, title: "Location & Compliance" },
+]
+
 export default function BusinessRegisterPage() {
   const router = useRouter()
   const [language, setLanguage] = useState(() => {
@@ -133,20 +141,64 @@ export default function BusinessRegisterPage() {
   const [businessSuggestLoading, setBusinessSuggestLoading] = useState(false)
   const [categories, setCategories] = useState([])
   const [productCategoryId, setProductCategoryId] = useState("")
+  const [currentStep, setCurrentStep] = useState(1)
+  const sectionTopRef = useRef(null)
   const lockedProductKeyRef = useRef("")
   const debouncedBusinessName = useDebounce(form.businessName, 300)
 
   const t = LANG_MAP[language]
-  const requiredChecks = [
-    form.businessName.trim().length > 0,
-    form.businessType !== "",
-    mobileVerified,
-    form.businessLocation.trim().length > 0,
-    form.placeId.trim().length > 0,
-    form.agree,
-  ]
-  const completedRequired = requiredChecks.filter(Boolean).length
-  const completionPercent = Math.round((completedRequired / requiredChecks.length) * 100)
+  const isStepThreeReady =
+    form.businessLocation.trim().length > 0 &&
+    form.placeId.trim().length > 0 &&
+    form.agree
+
+  const validateStep = (step) => {
+    if (step === 1) {
+      if (!form.businessName.trim()) return "Enter business name to continue"
+      if (!form.businessType) return "Select business type to continue"
+      if (!form.seanebId.trim()) return "Enter SeaNeB ID to continue"
+      return ""
+    }
+
+    if (step === 2) {
+      if (!form.primaryNumber.trim()) return "Enter primary number to continue"
+      if (!MOBILE_REGEX.test(form.primaryNumber.trim())) return "Enter a valid primary number to continue"
+      if (form.businessEmail.trim() && !EMAIL_REGEX.test(form.businessEmail.trim())) {
+        return "Enter a valid business email or keep it empty"
+      }
+      return ""
+    }
+
+    return ""
+  }
+
+  const goNextStep = () => {
+    const stepError = validateStep(currentStep)
+    if (stepError) {
+      setSubmitError(stepError)
+      return
+    }
+    setSubmitError("")
+    setCurrentStep((prev) => Math.min(prev + 1, WIZARD_STEPS.length))
+  }
+  const goPreviousStep = () => setCurrentStep((prev) => Math.max(prev - 1, 1))
+  const handleStepChange = (stepId) => {
+    if (stepId <= currentStep) {
+      setCurrentStep(stepId)
+      return
+    }
+    const stepError = validateStep(currentStep)
+    if (stepError) {
+      setSubmitError(stepError)
+      return
+    }
+    setSubmitError("")
+    setCurrentStep(stepId)
+  }
+
+  useEffect(() => {
+    sectionTopRef.current?.scrollIntoView({ block: "start", behavior: "smooth" })
+  }, [currentStep])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -170,7 +222,7 @@ export default function BusinessRegisterPage() {
       // Allow dashboard users to open this page even if profile_completed cookie is missing.
       const hasSession = !!authStore.getAccessToken()
       if (profileCompleted !== "true" && !hasSession) {
-        router.replace("/auth/login")
+        router.replace(getAuthAppUrl("/auth/login"))
         return
       }
       if (profileCompleted !== "true" && hasSession) {
@@ -927,41 +979,36 @@ export default function BusinessRegisterPage() {
   if (!mounted) return null
 
   return (
-    <AuthCard1 header={<AuthHeader language={language} setLanguage={setLanguage} />}>
+    <AuthCard1
+      header={<AuthHeader language={language} setLanguage={setLanguage} />}
+      maxWidth={980}
+      scrollBody={false}
+      shellClassName="py-10"
+    >
       <div className="business-register-shell">
         <div className="business-register-top">
           <div className="business-register-header">
             <h1 className="business-register-title">Register Your Business</h1>
             <p className="business-register-subtitle">Set up your branch profile to start listing and managing leads.</p>
           </div>
-          <div className="business-register-progress">
-            <div className="business-register-progress-meta">
-              <span>Form completion</span>
-              <strong>{completionPercent}%</strong>
-            </div>
-            <div className="business-register-progress-track">
-              <span style={{ width: `${completionPercent}%` }} />
-            </div>
+          <div className="business-wizard-stepper">
+            {WIZARD_STEPS.map((step) => {
+              const isActive = step.id === currentStep
+              const isDone = step.id < currentStep
+              return (
+                <button
+                  key={step.id}
+                  type="button"
+                  className={`business-wizard-step ${isActive ? "active" : ""} ${isDone ? "done" : ""} min-h-[38px]`}
+                  onClick={() => handleStepChange(step.id)}
+                >
+                  <span className="business-wizard-step-index">{step.id}</span>
+                  <span className="business-wizard-step-text whitespace-nowrap">{step.title}</span>
+                </button>
+              )
+            })}
           </div>
 
-          <div className="business-status-grid">
-            <div className={`business-status-pill ${mobileVerified ? "verified" : ""}`}>
-              <span>Mobile</span>
-              <strong>{mobileVerified ? "Verified" : "Pending"}</strong>
-            </div>
-            <div className={`business-status-pill ${emailVerified ? "verified" : ""}`}>
-              <span>Email</span>
-              <strong>{form.businessEmail.trim() ? (emailVerified ? "Verified" : "Optional") : "Optional"}</strong>
-            </div>
-            <div className={`business-status-pill ${form.placeId ? "verified" : ""}`}>
-              <span>Location</span>
-              <strong>{form.placeId ? "Selected" : "Pending"}</strong>
-            </div>
-            <div className={`business-status-pill ${branchId ? "verified" : ""}`}>
-              <span>Branch</span>
-              <strong>{branchId ? "Created" : "New"}</strong>
-            </div>
-          </div>
         </div>
 
         {submitError && (
@@ -970,7 +1017,8 @@ export default function BusinessRegisterPage() {
           </div>
         )}
 
-        <form onSubmit={(e) => { e.preventDefault(); handleSubmit() }} className="business-form business-form--pro">
+        <form ref={sectionTopRef} onSubmit={(e) => { e.preventDefault(); handleSubmit() }} className="business-form business-form--pro">
+          {currentStep === 1 && (
           <section className="business-section-card">
             <div className="business-section-head">
               <h2>Business Basics</h2>
@@ -1070,7 +1118,9 @@ export default function BusinessRegisterPage() {
               </div>
             </div>
           </section>
+          )}
 
+          {currentStep === 2 && (
           <section className="business-section-card">
             <div className="business-section-head">
               <h2>Contact Details</h2>
@@ -1156,7 +1206,9 @@ export default function BusinessRegisterPage() {
               </Field>
             </div>
           </section>
+          )}
 
+          {currentStep === 3 && (
           <section className="business-section-card">
             <div className="business-section-head">
               <h2>Branch Address</h2>
@@ -1180,7 +1232,9 @@ export default function BusinessRegisterPage() {
               </Field>
             </div>
           </section>
+          )}
 
+          {currentStep === 3 && (
           <section className="business-section-card">
             <div className="business-section-head">
               <h2>Compliance (Optional)</h2>
@@ -1232,13 +1286,43 @@ export default function BusinessRegisterPage() {
               </Field>
             </div>
           </section>
+          )}
 
-          <div className="business-submit-panel">
-            <div className="checkbox-row">
-              <input type="checkbox" id="agree" checked={form.agree} onChange={(e) => setField("agree", e.target.checked)} />
-              <label htmlFor="agree" className="text-sm cursor-pointer">I agree to the business terms and conditions</label>
+          {currentStep === 3 && (
+            <div className="business-submit-panel">
+              <div className="checkbox-row">
+                <input type="checkbox" id="agree" checked={form.agree} onChange={(e) => setField("agree", e.target.checked)} />
+                <label htmlFor="agree" className="text-sm cursor-pointer">I agree to the business terms and conditions</label>
+              </div>
             </div>
-            <Button label={submitting ? (t.loading || "Registering...") : "Register Business"} disabled={submitting} onClick={handleSubmit} />
+          )}
+
+          <div className="business-wizard-nav pt-1">
+            <button
+              type="button"
+              className="business-wizard-btn business-wizard-btn--ghost inline-flex items-center justify-center"
+              onClick={goPreviousStep}
+              disabled={currentStep === 1}
+            >
+              Previous
+            </button>
+            {currentStep < WIZARD_STEPS.length ? (
+              <button
+                type="button"
+                className="business-wizard-btn business-wizard-btn--primary inline-flex items-center justify-center"
+                onClick={goNextStep}
+                disabled={false}
+              >
+                Next
+              </button>
+            ) : (
+              <Button
+                label={submitting ? (t.loading || "Registering...") : "Register Business"}
+                disabled={submitting || !isStepThreeReady}
+                className="max-w-[220px]"
+                onClick={handleSubmit}
+              />
+            )}
           </div>
         </form>
       </div>

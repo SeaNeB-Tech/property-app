@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
 
 // i18n
 import eng from "@/constants/i18/eng/register.json"
@@ -26,6 +25,7 @@ import { getDefaultProductKey, setDefaultProductKey } from "@/services/product.s
 import { authStore } from "@/app/auth/auth-service/store/authStore"
 import { refreshAccessToken } from "@/app/auth/auth-service/authservice"
 import { getListingAppUrl } from "@/lib/appUrls"
+import { redirectToOpenerOrSelf } from "@/lib/postLoginRedirect"
 import {
   getCookie,
   getJsonCookie,
@@ -41,6 +41,9 @@ const emailRegex =
   /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
 const mobileRegex = /^[0-9]{8,15}$/
 const MOBILE_OTP_UNTIL_COOKIE = "complete_mobile_otp_until"
+const OTP_VIA_WHATSAPP = "whatsapp"
+const OTP_VIA_SMS = "sms"
+const RETURN_TO_COOKIE = "auth_return_to"
 
 const EMPTY_FORM = {
   firstName: "",
@@ -95,8 +98,48 @@ const resolveVerifiedMobile = () => {
   return null
 }
 
+const getErrorMessage = (err, fallback) =>
+  err?.response?.data?.error?.message ||
+  err?.response?.data?.message ||
+  err?.message ||
+  fallback
+
+const isSafeReturnTo = (value) => {
+  const target = String(value || "").trim()
+  if (!target) return false
+  if (target.startsWith("/")) return true
+
+  try {
+    const parsed = new URL(target)
+    if (!/^https?:$/i.test(parsed.protocol)) return false
+    if (typeof window === "undefined") return true
+    return parsed.hostname === window.location.hostname
+  } catch {
+    return false
+  }
+}
+
+const getPostLoginTarget = () => {
+  if (typeof window === "undefined") return ""
+
+  const queryTarget = String(new URLSearchParams(window.location.search).get("returnTo") || "").trim()
+  if (isSafeReturnTo(queryTarget)) return queryTarget
+
+  const cookieTarget = String(getCookie(RETURN_TO_COOKIE) || "").trim()
+  if (isSafeReturnTo(cookieTarget)) return cookieTarget
+
+  return ""
+}
+
+const resolveRedirectTarget = (target) => {
+  const safeTarget = String(target || "").trim()
+  if (!safeTarget) return getListingAppUrl("/home")
+  if (/^https?:\/\//i.test(safeTarget)) return safeTarget
+  if (safeTarget.startsWith("/")) return getListingAppUrl(safeTarget)
+  return getListingAppUrl("/home")
+}
+
 export default function CompleteProfilePage() {
-  const router = useRouter()
   const lockedProductKey = getDefaultProductKey()
 
   const [language, setLanguage] = useState(() => {
@@ -135,10 +178,17 @@ export default function CompleteProfilePage() {
   const [mobileOtpResending, setMobileOtpResending] = useState(false)
   const [mobileOtpError, setMobileOtpError] = useState("")
   const [mobileOtpClearSignal, setMobileOtpClearSignal] = useState(0)
+  const [mobileOtpVia, setMobileOtpVia] = useState(OTP_VIA_WHATSAPP)
   const [seanebVerified, setSeanebVerified] = useState(false)
 
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState("")
+
+  const redirectToPostLoginTarget = () => {
+    const target = resolveRedirectTarget(getPostLoginTarget())
+    removeCookie(RETURN_TO_COOKIE)
+    redirectToOpenerOrSelf(target)
+  }
 
   const setField = (key, value) => {
     let safeValue = value
@@ -214,7 +264,7 @@ export default function CompleteProfilePage() {
         })
         if (!active) return
         if (Number(res?.status || 0) === 200 && getCookie("profile_completed") === "true") {
-          router.replace(getListingAppUrl("/home"))
+          redirectToPostLoginTarget()
         }
       } catch {
         // Continue normal onboarding flow when session isn't fully ready.
@@ -225,7 +275,7 @@ export default function CompleteProfilePage() {
     return () => {
       active = false
     }
-  }, [router])
+  }, [])
 
   useEffect(() => {
     const resolvedMobile = resolveVerifiedMobile()
@@ -262,7 +312,7 @@ export default function CompleteProfilePage() {
     if (mobileUntil > Date.now()) {
       setMobileCooldown(Math.floor((mobileUntil - Date.now()) / 1000))
     }
-  }, [router])
+  }, [])
 
   /* ================= SAVE DRAFT ================= */
 
@@ -441,13 +491,34 @@ export default function CompleteProfilePage() {
           country_code: countryCode,
           mobile_number: mobileNumber,
           purpose: 0,
-          via: "whatsapp",
+          via: mobileOtpVia,
           redirect_to: "/auth/complete-profile",
         },
         { maxAge: 300, path: "/" }
       )
 
-      await sendOtp({ via: "whatsapp" })
+      try {
+        await sendOtp({ via: mobileOtpVia })
+      } catch (primaryErr) {
+        // Fallback to SMS when WhatsApp delivery fails.
+        if (mobileOtpVia === OTP_VIA_WHATSAPP) {
+          setJsonCookie(
+            "otp_context",
+            {
+              country_code: countryCode,
+              mobile_number: mobileNumber,
+              purpose: 0,
+              via: OTP_VIA_SMS,
+              redirect_to: "/auth/complete-profile",
+            },
+            { maxAge: 300, path: "/" }
+          )
+          await sendOtp({ via: OTP_VIA_SMS })
+          setMobileOtpVia(OTP_VIA_SMS)
+        } else {
+          throw primaryErr
+        }
+      }
 
       const until = Date.now() + 60 * 1000
       setCookie(MOBILE_OTP_UNTIL_COOKIE, String(until), { maxAge: 60, path: "/" })
@@ -455,8 +526,8 @@ export default function CompleteProfilePage() {
       setMobileOtp("")
       setMobileOtpClearSignal((value) => value + 1)
       setMobileOtpOpen(true)
-    } catch {
-      setSubmitError("Failed to send mobile OTP. Please try again.")
+    } catch (err) {
+      setSubmitError(getErrorMessage(err, "Failed to send mobile OTP. Please try again."))
     } finally {
       setMobileLoading(false)
     }
@@ -510,12 +581,18 @@ export default function CompleteProfilePage() {
     try {
       setMobileOtpResending(true)
       setMobileOtpError("")
-      await sendOtp({ via: "whatsapp" })
+
+      const nextVia =
+        String(getJsonCookie("otp_context")?.via || mobileOtpVia || OTP_VIA_WHATSAPP).toLowerCase() === OTP_VIA_SMS
+          ? OTP_VIA_SMS
+          : OTP_VIA_WHATSAPP
+
+      await sendOtp({ via: nextVia })
       const until = Date.now() + 60 * 1000
       setCookie(MOBILE_OTP_UNTIL_COOKIE, String(until), { maxAge: 60, path: "/" })
       setMobileCooldown(60)
-    } catch {
-      setMobileOtpError("Failed to resend OTP")
+    } catch (err) {
+      setMobileOtpError(getErrorMessage(err, "Failed to resend OTP"))
     } finally {
       setMobileOtpResending(false)
     }
@@ -588,7 +665,7 @@ export default function CompleteProfilePage() {
       removeCookie("verified_email")
       removeCookie("email_otp_until")
 
-      router.replace(getListingAppUrl("/home"))
+      redirectToPostLoginTarget()
     } catch (err) {
       const status = err?.response?.status
       const message =
@@ -610,7 +687,7 @@ export default function CompleteProfilePage() {
         removeCookie("otp_context")
         removeCookie("otp_cc")
         removeCookie("otp_mobile")
-        router.replace(getListingAppUrl("/home"))
+        redirectToPostLoginTarget()
         return
       }
 
@@ -875,4 +952,5 @@ function MobileField({ value, onChange, onVerify, verified, loading, cooldown })
     </div>
   )
 }
+
 

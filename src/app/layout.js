@@ -1,5 +1,6 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { getAuthAppUrl, getListingAppUrl } from "@/lib/appUrls";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -12,8 +13,21 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
+  metadataBase: new URL(getAuthAppUrl("/")),
   title: "SeaNeB Property Panel",
   description: "SeaNeB Property authentication and panel application",
+  alternates: {
+    canonical: getListingAppUrl("/home"),
+  },
+  robots: {
+    index: false,
+    follow: false,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+    },
+  },
   icons: {
     icon: [
       { url: "/logos/Fav.svg", type: "image/svg+xml" },

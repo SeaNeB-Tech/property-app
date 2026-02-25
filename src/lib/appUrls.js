@@ -1,13 +1,11 @@
 const normalizeUrl = (value) => String(value || "").replace(/\/+$/, "");
-const defaultAuthAppUrl = "http://159.65.154.221:1002/";
-const defaultListingAppUrl = "http://159.65.154.221:1001/";
 
 export const AUTH_APP_BASE_URL = normalizeUrl(
-  process.env.NEXT_PUBLIC_AUTH_APP_URL || defaultAuthAppUrl
+  process.env.NEXT_PUBLIC_AUTH_APP_URL
 );
 
 export const LISTING_APP_BASE_URL = normalizeUrl(
-  process.env.NEXT_PUBLIC_LISTING_APP_URL || defaultListingAppUrl
+  process.env.NEXT_PUBLIC_APP_URL
 );
 
 export const getAuthAppUrl = (path = "/") => {

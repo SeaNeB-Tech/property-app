@@ -11,6 +11,7 @@ import {
 import { getJsonCookie, getCookie, removeCookie } from "@/services/cookie";
 import { authStore } from "./store/authStore";
 import { clearPanelAuthSession } from "@/services/authSession.service";
+import { getListingAppUrl } from "@/lib/appUrls";
 
 const IDENTIFIER_TYPE_MOBILE = 0;
 const PURPOSE_SIGNUP_OR_LOGIN = 0;
@@ -71,13 +72,6 @@ const waitForCsrfCookie = async ({ timeoutMs = AUTH_COOKIE_WAIT_TIMEOUT_MS, poll
 
 const getLatestCsrfCookieValue = () =>
   String(getCookie(CSRF_COOKIE_NAME) || getInMemoryCsrfToken() || "").trim();
-
-const getBasePath = () => {
-  const raw = process.env.NEXT_PUBLIC_BASE_PATH || "";
-  if (!raw || raw === "/") return "";
-  return `/${raw.replace(/^\/+|\/+$/g, "")}`;
-};
-const withBasePath = (path) => `${getBasePath()}${path}`;
 
 const deepTokenValue = (payload = {}, keys = []) => {
   const candidates = [
@@ -391,5 +385,5 @@ export const logout = async () => {
 
   authStore.clearAll();
   clearPanelAuthSession();
-  window.location.href = withBasePath("/auth/login");
+  window.location.href = getListingAppUrl("/home");
 };

@@ -1,5 +1,5 @@
 import axios from "axios";
-import { API_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/apiBaseUrl";
+import { API_BASE_URL, API_REMOTE_CANDIDATE_BASE_URLS, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/apiBaseUrl";
 import { getAuthAppUrl } from "@/lib/appUrls";
 
 const REFRESH_ENDPOINT = "/auth/refresh";
@@ -122,7 +122,7 @@ const refreshClient = axios.create({
 });
 
 const shouldAttemptBackendFailover = (error, originalConfig = {}) => {
-  // Browser must keep auth requests on same-origin /api so localhost cookies are sent.
+  // Browser must keep auth requests on same-origin /api so same-origin cookies are sent.
   if (typeof window !== "undefined") return false;
   if (originalConfig?._backendFailoverAttempted) return false;
   if (!API_REMOTE_FALLBACK_BASE_URL) return false;
@@ -139,6 +139,37 @@ const retryWithBackendFailover = async (client, error) => {
 
   originalConfig._backendFailoverAttempted = true;
   originalConfig.baseURL = API_REMOTE_FALLBACK_BASE_URL;
+  originalConfig.withCredentials = true;
+  return client(originalConfig);
+};
+
+const shouldAttemptBrowserApiFallback = (error, originalConfig = {}) => {
+  if (typeof window === "undefined") return false;
+  if (originalConfig?._browserApiFallbackAttempted) return false;
+  if (!Array.isArray(API_REMOTE_CANDIDATE_BASE_URLS) || API_REMOTE_CANDIDATE_BASE_URLS.length === 0) return false;
+
+  const status = Number(error?.response?.status || 0);
+  if (status !== 404) return false;
+
+  const currentBase = String(originalConfig?.baseURL || API_BASE_URL || "").trim();
+  const isSameOriginApiBase =
+    currentBase === "" ||
+    currentBase === "/api" ||
+    currentBase.startsWith("/api/");
+
+  return isSameOriginApiBase;
+};
+
+const retryWithBrowserApiFallback = async (client, error) => {
+  const originalConfig = error?.config || {};
+  if (!shouldAttemptBrowserApiFallback(error, originalConfig)) {
+    throw error;
+  }
+
+  originalConfig._browserApiFallbackAttempted = true;
+  const remoteBase = API_REMOTE_CANDIDATE_BASE_URLS[0];
+  if (!remoteBase) throw error;
+  originalConfig.baseURL = remoteBase;
   originalConfig.withCredentials = true;
   return client(originalConfig);
 };
@@ -225,6 +256,12 @@ api.interceptors.response.use(
     if (!isRefreshRequest) {
       try {
         return await retryWithBackendFailover(api, error);
+      } catch {
+        // Continue with regular auth/401 flow.
+      }
+
+      try {
+        return await retryWithBrowserApiFallback(api, error);
       } catch {
         // Continue with regular auth/401 flow.
       }

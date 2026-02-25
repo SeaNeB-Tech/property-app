@@ -8,7 +8,7 @@ import { authStore } from "@/app/auth/auth-service/store/authStore"
 import { bootstrapProductAuth } from "@/app/auth/auth-service/auth.bootstrap"
 import AuthCard1 from "@/components/ui/AuthCard1"
 import AuthHeader from "@/components/ui/AuthHeader"
-import { getListingAppUrl } from "@/lib/appUrls"
+import { getAuthAppUrl, getListingAppUrl } from "@/lib/appUrls"
 
 const LANGUAGE_STORAGE_KEY = "auth_language"
 const SUPPORTED_LANGUAGES = new Set(["eng", "guj", "hindi"])
@@ -43,7 +43,7 @@ export default function BusinessOptionPage() {
       if (!active) return
       setHasSession(sessionOk)
       if (!isProfileCompleted || !sessionOk) {
-        router.replace("/auth/login")
+        router.replace(getAuthAppUrl("/auth/login"))
       }
     }
 

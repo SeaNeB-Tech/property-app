@@ -18,7 +18,8 @@ import OtpInput from "@/components/ui/OtpInput";
 import { verifyOtpAndLogin } from "@/app/auth/auth-service/authservice";
 import { sendOtp } from "@/app/auth/auth-service/otp.service";
 import { getJsonCookie, getCookie, setCookie, setJsonCookie, removeCookie } from "@/services/cookie";
-import { getListingAppUrl } from "@/lib/appUrls";
+import { getAuthAppUrl, getListingAppUrl } from "@/lib/appUrls";
+import { redirectToOpenerOrSelf } from "@/lib/postLoginRedirect";
 
 const LANG_MAP = { eng, guj, hindi };
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
@@ -87,13 +88,41 @@ const getFriendlyVerifyError = (err) => {
   };
 };
 
+const isSafeReturnTo = (value) => {
+  const target = String(value || "").trim();
+  if (!target) return false;
+  if (target.startsWith("/")) return true;
+
+  try {
+    const parsed = new URL(target);
+    if (!/^https?:$/i.test(parsed.protocol)) return false;
+    if (typeof window === "undefined") return true;
+    return parsed.hostname === window.location.hostname;
+  } catch {
+    return false;
+  }
+};
+
+const getPostLoginTarget = () => {
+  if (typeof window === "undefined") return "";
+
+  const queryTarget = String(new URLSearchParams(window.location.search).get("returnTo") || "").trim();
+  if (isSafeReturnTo(queryTarget)) return queryTarget;
+
+  const cookieTarget = String(getCookie(RETURN_TO_COOKIE) || "").trim();
+  if (isSafeReturnTo(cookieTarget)) return cookieTarget;
+
+  return "";
+};
+
 const resolveRedirectTarget = (target) => {
   const safeTarget = String(target || "").trim();
   if (!safeTarget) return getListingAppUrl("/home");
   if (/^https?:\/\//i.test(safeTarget)) return safeTarget;
-  if (safeTarget.startsWith("/dashboard")) return getListingAppUrl(safeTarget);
-  return safeTarget;
+  if (safeTarget.startsWith("/")) return getListingAppUrl(safeTarget);
+  return getListingAppUrl("/home");
 };
+
 
 export default function OtpPage() {
   const router = useRouter();
@@ -117,16 +146,19 @@ export default function OtpPage() {
   const [otpVia, setOtpVia] = useState("whatsapp");
   const verifyInFlightRef = useRef(false);
 
-  const redirectToPostLoginTarget = (target = getListingAppUrl("/home")) => {
-    const resolvedTarget = resolveRedirectTarget(target);
+  const redirectToPostLoginTarget = () => {
+    const rawPostLoginTarget = getPostLoginTarget();
+    const postLoginTarget = resolveRedirectTarget(rawPostLoginTarget);
     removeCookie(RETURN_TO_COOKIE);
-
-    if (/^https?:\/\//i.test(resolvedTarget)) {
-      window.location.href = resolvedTarget;
+    if (rawPostLoginTarget) {
+      redirectToOpenerOrSelf(postLoginTarget);
       return;
     }
-
-    router.replace(resolvedTarget || "/home");
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+      return;
+    }
+    router.push("/dashboard");
   };
 
   const t = LANG_MAP[language] || eng;
@@ -144,7 +176,7 @@ export default function OtpPage() {
     const ctx = getJsonCookie("otp_context");
     if (!ctx) {
       removeCookie("otp_in_progress");
-      router.replace("/auth/login");
+      router.replace(getAuthAppUrl("/auth/login"));
       return;
     }
 
@@ -251,7 +283,7 @@ export default function OtpPage() {
         removeCookie("otp_in_progress");
         removeCookie("otp_context");
         setTimeout(() => {
-          router.replace("/auth/login");
+          router.replace(getAuthAppUrl("/auth/login"));
         }, 900);
         return;
       }
@@ -263,7 +295,7 @@ export default function OtpPage() {
         setCookie("profile_completed", "true", {
           maxAge: 60 * 60 * 24 * 7,
         });
-        redirectToPostLoginTarget(getListingAppUrl("/home"));
+        redirectToPostLoginTarget();
         return;
       }
 
@@ -283,7 +315,7 @@ export default function OtpPage() {
         removeCookie("otp_in_progress");
         removeCookie("otp_context");
         setTimeout(() => {
-          router.replace("/auth/login");
+          router.replace(getAuthAppUrl("/auth/login"));
         }, 800);
       }
     } finally {

@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 
 const command = process.argv[2] || "dev";
 const envKey = process.argv[3] || "NEXT_PUBLIC_AUTH_APP_URL";
-const fallbackPort = String(process.argv[4] || process.env.PORT || "1002");
+const explicitPort = String(process.argv[4] || process.env.PORT || "").trim();
 
 const rootDir = process.cwd();
 const envFiles = [".env"];
@@ -27,18 +27,21 @@ const readEnvValue = (key) => {
 };
 
 const rawUrl = readEnvValue(envKey);
-let port = fallbackPort;
+let port = explicitPort;
 
-if (rawUrl) {
+if (!port && rawUrl) {
   try {
     const parsed = new URL(rawUrl);
     if (parsed.port) port = parsed.port;
   } catch {
-    // Ignore malformed URL and keep fallback port.
+    // Ignore malformed URL and let Next.js pick its default port.
   }
 }
 
-const child = spawn("npx", ["next", command, "-p", port], {
+const args = ["next", command];
+if (port) args.push("-p", port);
+
+const child = spawn("npx", args, {
   stdio: "inherit",
   shell: true,
 });
