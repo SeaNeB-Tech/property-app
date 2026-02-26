@@ -39,6 +39,7 @@ const parseCookies = () => {
 const authStore = {
   accessToken: null,
   refreshToken: null,
+  csrfToken: null,
 
   getAccessToken() {
     return this.accessToken || null;
@@ -96,14 +97,19 @@ const authStore = {
 
   getCsrfToken() {
     const cookieToken = String(getCookie("csrf_token_property") || "").trim();
-    return cookieToken || null;
+    if (cookieToken) return cookieToken;
+    return this.csrfToken || null;
   },
 
-  setCsrfToken() {},
+  setCsrfToken(token) {
+    const safeToken = String(token || "").trim();
+    this.csrfToken = safeToken || null;
+  },
 
   clearAll() {
     this.accessToken = null;
     this.refreshToken = null;
+    this.csrfToken = null;
     AUTH_COOKIE_KEYS.forEach((key) => removeCookie(key));
   },
 
@@ -115,7 +121,7 @@ const authStore = {
       memory: {
         accessToken: getLength(this.accessToken),
         refreshToken: getLength(this.refreshToken),
-        csrfToken: 0,
+        csrfToken: getLength(this.csrfToken),
       },
       cookies: {
         access_token: getLength(cookies.access_token),

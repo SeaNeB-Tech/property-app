@@ -1,6 +1,5 @@
 const DEV_API_URL = process.env.NEXT_PUBLIC_DEV_URL || "";
 const CENTRAL_API_URL = process.env.NEXT_PUBLIC_CENTRAL_URL || "";
-const PUBLIC_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
 const normalizeUrl = (value) => String(value || "").trim().replace(/\/+$/, "");
 const isUsableUrl = (value) => {
@@ -27,14 +26,5 @@ export const API_REMOTE_CANDIDATE_BASE_URLS = Array.from(
   new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean))
 );
 
-const normalizedPublicApiBase = String(PUBLIC_API_BASE_URL || "").trim();
-const browserBase =
-  normalizedPublicApiBase && normalizedPublicApiBase !== "/"
-    ? (isUsableUrl(normalizedPublicApiBase)
-        ? normalizeUrl(normalizedPublicApiBase)
-        : normalizedPublicApiBase)
-    : "/api";
-
-// Browser defaults to same-origin /api for cookie-safe auth flow.
-// Can be overridden via NEXT_PUBLIC_API_BASE_URL if needed.
-export const API_BASE_URL = typeof window !== "undefined" ? browserBase : API_REMOTE_BASE_URL;
+// Browser uses same-origin /api for cookie-safe auth flow.
+export const API_BASE_URL = typeof window !== "undefined" ? "/api" : API_REMOTE_BASE_URL;

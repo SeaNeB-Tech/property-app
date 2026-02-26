@@ -15,7 +15,12 @@ export default function OtpInput({ length = 4, onChange, clearSignal = 0 }) {
       if (input) input.value = "";
     });
     emitOtp();
-    inputsRef.current[0]?.focus();
+    const focusFirstInput = () => {
+      inputsRef.current[0]?.focus();
+      inputsRef.current[0]?.select?.();
+    };
+    const frameId = window.requestAnimationFrame(focusFirstInput);
+    return () => window.cancelAnimationFrame(frameId);
   }, [clearSignal, emitOtp]);
 
   const handleChange = (e, index) => {
@@ -80,6 +85,11 @@ export default function OtpInput({ length = 4, onChange, clearSignal = 0 }) {
           ref={(el) => (inputsRef.current[i] = el)}
           type="password"
           maxLength={1}
+          autoFocus={i === 0}
+          inputMode="numeric"
+          autoComplete={i === 0 ? "one-time-code" : "off"}
+          pattern="[0-9]*"
+          aria-label={`OTP digit ${i + 1}`}
           onChange={(e) => handleChange(e, i)}
           onKeyDown={(e) => handleKeyDown(e, i)}
           onPaste={handlePaste}

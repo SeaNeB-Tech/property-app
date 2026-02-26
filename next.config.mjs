@@ -21,9 +21,36 @@ const apiBaseUrl = normalizeUrl(nextEnv === "development" ? devApiUrl : centralA
 const fallbackApiBaseUrl = normalizeUrl(nextEnv === "development" ? centralApiUrl : devApiUrl);
 const safeApiBaseUrl = isUsableUrl(apiBaseUrl) ? apiBaseUrl : fallbackApiBaseUrl;
 const apiHostname = isUsableUrl(safeApiBaseUrl) ? new URL(safeApiBaseUrl).hostname : "";
+const isProduction = process.env.NODE_ENV === "production";
+const connectSrc = ["'self'", safeApiBaseUrl, appBaseUrl, authAppBaseUrl].filter(Boolean).join(" ");
+const imgSrc = ["'self'", "data:", "blob:", "https://flagcdn.com", "https://img.icons8.com"].join(" ");
+const csp = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  `connect-src ${connectSrc}`,
+  `img-src ${imgSrc}`,
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
+].join("; ");
+const securityHeaders = [
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  { key: "X-DNS-Prefetch-Control", value: "off" },
+  { key: "Content-Security-Policy", value: csp },
+  ...(isProduction
+    ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains; preload" }]
+    : []),
+];
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  poweredByHeader: false,
   basePath: normalizedBasePath,
   env: {
     NEXT_PUBLIC_AUTH_APP_URL: process.env.NEXT_PUBLIC_AUTH_APP_URL || authAppBaseUrl,
@@ -83,6 +110,11 @@ const nextConfig = {
         permanent: false,
       },
       {
+        source: "/faq",
+        destination: `${appBaseUrl}/faq`,
+        permanent: false,
+      },
+      {
         source: "/in/:path*",
         destination: `${appBaseUrl}/in/:path*`,
         permanent: false,
@@ -103,6 +135,14 @@ const nextConfig = {
       {
         source: "/api/:path*",
         destination: `${safeApiBaseUrl}/:path*`,
+      },
+    ];
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: securityHeaders,
       },
     ];
   },

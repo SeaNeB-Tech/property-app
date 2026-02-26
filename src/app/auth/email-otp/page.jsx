@@ -14,10 +14,12 @@ import AuthCard from "@/components/ui/AuthCard"
 import AuthHeader from "@/components/ui/AuthHeader"
 import Button from "@/components/ui/Button"
 import OtpInput from "@/components/ui/OtpInput"
+import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay"
 
 // Services
 import { verifyEmailOtp, sendEmailOtp } from "@/app/auth/auth-service/email.service"
 import { getJsonCookie, setCookie, removeCookie, getCookie } from "@/services/cookie"
+import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
 
 const LANG_MAP = { eng, guj, hindi }
 const LANGUAGE_STORAGE_KEY = "auth_language"
@@ -46,7 +48,6 @@ function EmailOtpContent() {
 
   const [otp, setOtp] = useState("")
   const [email, setEmail] = useState("")
-  const [loading, setLoading] = useState(false)
   const [resending, setResending] = useState(false)
   const [infoMessage, setInfoMessage] = useState("")
   const [cooldown, setCooldown] = useState(0)
@@ -54,6 +55,7 @@ function EmailOtpContent() {
   const [otpPurpose, setOtpPurpose] = useState(1)
   const [redirectTo, setRedirectTo] = useState("/auth/complete-profile")
   const [otpClearSignal, setOtpClearSignal] = useState(0)
+  const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition()
 
   const isValid = otp.length === 4
 
@@ -120,41 +122,40 @@ function EmailOtpContent() {
   /* ================= VERIFY OTP ================= */
 
   const handleVerify = async () => {
-    if (!isValid || loading || !email) return
+    if (!isValid || isTransitioning || !email) return
 
-    try {
-      setLoading(true)
-      setInfoMessage("")
+    setInfoMessage("")
 
-      await verifyEmailOtp({ email, otp, purpose: otpPurpose })
+    await runWithTransition(
+      async () => {
+        await verifyEmailOtp({ email, otp, purpose: otpPurpose })
+      },
+      {
+        onSuccess: () => {
+          if (otpPurpose === 3) {
+            setCookie("verified_business_email", email, {
+              maxAge: 60 * 60 * 24 * 7,
+              path: "/",
+            })
+          } else {
+            setCookie("verified_email", email, {
+              maxAge: 60 * 60 * 24 * 7,
+              path: "/",
+            })
+          }
 
-      // Mark email as verified by purpose
-      if (otpPurpose === 3) {
-        setCookie("verified_business_email", email, {
-          maxAge: 60 * 60 * 24 * 7,
-          path: "/",
-        })
-      } else {
-        setCookie("verified_email", email, {
-          maxAge: 60 * 60 * 24 * 7,
-          path: "/",
-        })
+          removeCookie("email_otp_until")
+          removeCookie("otp_context")
+          router.replace(redirectTo)
+        },
+        onError: (err) => {
+          console.error("Email OTP verification failed:", err)
+          setInfoMessage("Invalid OTP. Please try again.")
+          setOtp("")
+          setOtpClearSignal((value) => value + 1)
+        },
       }
-
-      // Clean up ephemeral cookies
-      removeCookie("email_otp_until")
-      removeCookie("otp_context")
-
-      // Return to source page
-      router.replace(redirectTo)
-    } catch (err) {
-      console.error("Email OTP verification failed:", err)
-      setInfoMessage("Invalid OTP. Please try again.")
-      setOtp("")
-      setOtpClearSignal((value) => value + 1)
-    } finally {
-      setLoading(false)
-    }
+    )
   }
 
   /* ================= RESEND OTP ================= */
@@ -185,32 +186,47 @@ function EmailOtpContent() {
   }
 
   if (!mounted) return null
+  if (showTransition) {
+    return (
+      <AuthTransitionOverlay
+        title="Verifying Email OTP..."
+        description="Confirming your email and returning you to the form."
+      />
+    )
+  }
 
   return (
     <AuthCard header={<AuthHeader language={language} setLanguage={setLanguage} />}>
-      <h1 className="text-2xl font-semibold">{t.otpTitle || "Verify Email"}</h1>
-      <p className="text-sm text-gray-500 mt-2">
-        {t.otpSubtitle || "Please enter the 4-digit code sent to"}
-        <br />
-        <span className="text-black font-medium">{email}</span>
-      </p>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          void handleVerify()
+        }}
+      >
+        <h1 className="text-2xl font-semibold">{t.otpTitle || "Verify Email"}</h1>
+        <p className="text-sm text-gray-500 mt-2">
+          {t.otpSubtitle || "Please enter the 4-digit code sent to"}
+          <br />
+          <span className="text-black font-medium">{email}</span>
+        </p>
 
-      <div className="flex justify-center mt-6">
-        <OtpInput length={4} onChange={setOtp} clearSignal={otpClearSignal} />
-      </div>
+        <div className="flex justify-center mt-6">
+          <OtpInput length={4} onChange={setOtp} clearSignal={otpClearSignal} />
+        </div>
 
-      {infoMessage && (
-        <p className="text-sm text-red-500 text-center mt-4">{infoMessage}</p>
-      )}
+        {infoMessage && (
+          <p className="text-sm text-red-500 text-center mt-4">{infoMessage}</p>
+        )}
 
-      <div className="mt-6">
-        <Button
-          label={t.verifyOtp || "Verify OTP"}
-          loading={loading}
-          disabled={!isValid || loading}
-          onClick={handleVerify}
-        />
-      </div>
+        <div className="mt-6">
+          <Button
+            type="submit"
+            label={t.verifyOtp || "Verify OTP"}
+            loading={isTransitioning}
+            disabled={!isValid || isTransitioning}
+          />
+        </div>
+      </form>
 
       <div className="text-center mt-4 text-sm">
         {cooldown > 0 ? (
@@ -218,14 +234,15 @@ function EmailOtpContent() {
             {t.resendIn || "Resend in"} {cooldown}s
           </span>
         ) : (
-          <span
+          <button
+            type="button"
             onClick={handleResend}
             className={`cursor-pointer ${
               resending ? "text-gray-400" : "text-blue-600"
             }`}
           >
             {t.resendOtp || "Resend OTP"}
-          </span>
+          </button>
         )}
       </div>
     </AuthCard>

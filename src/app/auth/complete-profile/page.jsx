@@ -15,6 +15,7 @@ import DatePicker from "@/components/ui/DatePcker"
 import AutoComplete from "@/components/ui/AutoComplete"
 import SeanebIdField from "@/components/ui/SeanebId"
 import OtpVerificationModal from "@/components/ui/OtpVerificationModal"
+import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay"
 
 // Services
 import { signupUser } from "@/app/auth/auth-service/signup.service"
@@ -26,6 +27,7 @@ import { authStore } from "@/app/auth/auth-service/store/authStore"
 import { refreshAccessToken } from "@/app/auth/auth-service/authservice"
 import { getListingAppUrl } from "@/lib/appUrls"
 import { redirectToOpenerOrSelf } from "@/lib/postLoginRedirect"
+import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
 import {
   getCookie,
   getJsonCookie,
@@ -181,8 +183,8 @@ export default function CompleteProfilePage() {
   const [mobileOtpVia, setMobileOtpVia] = useState(OTP_VIA_WHATSAPP)
   const [seanebVerified, setSeanebVerified] = useState(false)
 
-  const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState("")
+  const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition()
 
   const redirectToPostLoginTarget = () => {
     const target = resolveRedirectTarget(getPostLoginTarget())
@@ -614,101 +616,109 @@ export default function CompleteProfilePage() {
       return
     }
 
-    setSubmitting(true)
-    setSubmitError("")
+        setSubmitError("")
 
-    try {
-      const response = await signupUser({
-        country_code: cc,
-        mobile_number: mobile,
-        first_name: form.firstName.trim(),
-        last_name: form.lastName.trim(),
-        email: form.email.trim(),
-        dob: form.dob,
-        place_id: form.placeId,
-        gender: form.gender,
-        seaneb_id: form.seanebId,
-        product_key: lockedProductKey,
-      })
-      setDefaultProductKey(lockedProductKey)
-
-      // ✅ FIX: Capture tokens from signup response
-      const data = response?.data || response || {}
-      
-      // Store tokens if returned in response body
-      if (data.access_token) {
-        authStore.setAccessToken(data.access_token)
-        console.log("[complete-profile] Access token captured from signup response")
-      }
-      
-      if (data.csrf_token) {
-        authStore.setCsrfToken(data.csrf_token)
-        console.log("[complete-profile] CSRF token captured from signup response")
-      }
-
-      // Set session start time for 6-hour session
-      authStore.setSessionStartTime()
-
-      // Mark profile as completed
-      setCookie("profile_completed", "true", {
-        maxAge: 60 * 60 * 24 * 7,
-        path: "/",
-      })
-
-      // Clean up registration cookies
-      removeCookie("reg_form_draft")
-      removeCookie("otp_context")
-      removeCookie("otp_cc")
-      removeCookie("otp_mobile")
-      removeCookie("mobile_verified")
-      removeCookie(MOBILE_OTP_UNTIL_COOKIE)
-      removeCookie("verified_email")
-      removeCookie("email_otp_until")
-
-      redirectToPostLoginTarget()
-    } catch (err) {
-      const status = err?.response?.status
-      const message =
-        err?.response?.data?.error?.message ||
-        err?.response?.data?.message ||
-        err?.message ||
-        "Signup failed"
-
-      console.error("[complete-profile] Signup error:", { status, message })
-
-      // Handle user already exists (409)
-      if (status === 409) {
-        console.log("[complete-profile] User already exists (409) - redirecting to home")
-        setCookie("profile_completed", "true", {
-          maxAge: 60 * 60 * 24 * 7,
-          path: "/",
+    await runWithTransition(
+      async () => {
+        const response = await signupUser({
+          country_code: cc,
+          mobile_number: mobile,
+          first_name: form.firstName.trim(),
+          last_name: form.lastName.trim(),
+          email: form.email.trim(),
+          dob: form.dob,
+          place_id: form.placeId,
+          gender: form.gender,
+          seaneb_id: form.seanebId,
+          product_key: lockedProductKey,
         })
-        removeCookie("reg_form_draft")
-        removeCookie("otp_context")
-        removeCookie("otp_cc")
-        removeCookie("otp_mobile")
-        redirectToPostLoginTarget()
-        return
-      }
+        return response
+      },
+      {
+        onSuccess: (response) => {
+          setDefaultProductKey(lockedProductKey)
 
-      // Handle session expired (401)
-      if (status === 401) {
-        setSubmitError("Session expired. Please login again.")
-        return
-      }
+          const data = response?.data || response || {}
+          if (data.access_token) {
+            authStore.setAccessToken(data.access_token)
+            console.log("[complete-profile] Access token captured from signup response")
+          }
+          if (data.csrf_token) {
+            authStore.setCsrfToken(data.csrf_token)
+            console.log("[complete-profile] CSRF token captured from signup response")
+          }
 
-      // Other errors
-      setSubmitError(message)
-    } finally {
-      setSubmitting(false)
-    }
+          authStore.setSessionStartTime()
+          setCookie("profile_completed", "true", {
+            maxAge: 60 * 60 * 24 * 7,
+            path: "/",
+          })
+
+          removeCookie("reg_form_draft")
+          removeCookie("otp_context")
+          removeCookie("otp_cc")
+          removeCookie("otp_mobile")
+          removeCookie("mobile_verified")
+          removeCookie(MOBILE_OTP_UNTIL_COOKIE)
+          removeCookie("verified_email")
+          removeCookie("email_otp_until")
+
+          redirectToPostLoginTarget()
+        },
+        onError: (err) => {
+          const status = err?.response?.status
+          const message =
+            err?.response?.data?.error?.message ||
+            err?.response?.data?.message ||
+            err?.message ||
+            "Signup failed"
+
+          console.error("[complete-profile] Signup error:", { status, message })
+
+          if (status === 409) {
+            console.log("[complete-profile] User already exists (409) - redirecting to home")
+            setCookie("profile_completed", "true", {
+              maxAge: 60 * 60 * 24 * 7,
+              path: "/",
+            })
+            removeCookie("reg_form_draft")
+            removeCookie("otp_context")
+            removeCookie("otp_cc")
+            removeCookie("otp_mobile")
+            redirectToPostLoginTarget()
+            return
+          }
+
+          if (status === 401) {
+            setSubmitError("Session expired. Please login again.")
+            return
+          }
+
+          setSubmitError(message)
+        },
+      }
+    )
   }
 
   if (!mounted) return null
+  if (showTransition) {
+    return (
+      <AuthTransitionOverlay
+        title="Creating account..."
+        description="Saving your profile and preparing your dashboard."
+      />
+    )
+  }
 
   return (
     <AuthCard1 header={<AuthHeader language={language} setLanguage={setLanguage} />}>
-      <div className="space-y-6">
+      <form
+        className="space-y-6"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void handleSubmit()
+        }}
+      >
         {/* Header */}
         <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-white to-slate-50 p-4 sm:p-5">
           <h1 className="text-2xl font-semibold text-gray-900">{t.completeProfileTitle}</h1>
@@ -805,18 +815,18 @@ export default function CompleteProfilePage() {
 
         {/* Submit Button */}
         <Button
-          label={submitting ? "Creating account..." : t.submit}
+          type="submit"
+          label={isTransitioning ? "Creating account..." : t.submit}
           disabled={
             !mobileVerified ||
             !seanebVerified ||
             !form.placeId ||
             !form.gender ||
             !form.agree ||
-            submitting
+            isTransitioning
           }
-          onClick={handleSubmit}
         />
-      </div>
+      </form>
 
       <OtpVerificationModal
         open={emailOtpOpen}
@@ -952,5 +962,6 @@ function MobileField({ value, onChange, onVerify, verified, loading, cooldown })
     </div>
   )
 }
+
 
 

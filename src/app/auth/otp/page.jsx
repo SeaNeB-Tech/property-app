@@ -13,6 +13,7 @@ import AuthOtpCard from "@/components/ui/AuthOtpCard";
 import AuthHeader from "@/components/ui/AuthHeader";
 import Button from "@/components/ui/Button";
 import OtpInput from "@/components/ui/OtpInput";
+import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay";
 
 // Services
 import { verifyOtpAndLogin } from "@/app/auth/auth-service/authservice";
@@ -20,6 +21,7 @@ import { sendOtp } from "@/app/auth/auth-service/otp.service";
 import { getJsonCookie, getCookie, setCookie, setJsonCookie, removeCookie } from "@/services/cookie";
 import { getAuthAppUrl, getListingAppUrl } from "@/lib/appUrls";
 import { redirectToOpenerOrSelf } from "@/lib/postLoginRedirect";
+import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition";
 
 const LANG_MAP = { eng, guj, hindi };
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
@@ -138,13 +140,13 @@ export default function OtpPage() {
   });
   const [otp, setOtp] = useState("");
   const [mobileLabel, setMobileLabel] = useState("");
-  const [loading, setLoading] = useState(false);
   const [infoMessage, setInfoMessage] = useState("");
   const [cooldown, setCooldown] = useState(0);
   const [resending, setResending] = useState(false);
   const [otpClearSignal, setOtpClearSignal] = useState(0);
   const [otpVia, setOtpVia] = useState("whatsapp");
   const verifyInFlightRef = useRef(false);
+  const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition();
 
   const redirectToPostLoginTarget = () => {
     const rawPostLoginTarget = getPostLoginTarget();
@@ -211,116 +213,115 @@ export default function OtpPage() {
 
 
   const handleVerify = async () => {
-    if (!isValid || loading || verifyInFlightRef.current) return;
+    if (!isValid || isTransitioning || verifyInFlightRef.current) return;
+
+    verifyInFlightRef.current = true;
+    setInfoMessage("");
 
     try {
-      verifyInFlightRef.current = true;
-      setLoading(true);
-      setInfoMessage("");
-      const contextSnapshot =
-        getJsonCookie("otp_context") ||
-        (mobileLabel
-          ? {
-              country_code: String((mobileLabel.split(" ")[0] || "").replace("+", "")).trim(),
-              mobile_number: String(mobileLabel.split(" ").slice(1).join(" ")).trim(),
-              purpose: 0,
-              via: otpVia,
+      await runWithTransition(
+        async () => {
+          const contextSnapshot =
+            getJsonCookie("otp_context") ||
+            (mobileLabel
+              ? {
+                  country_code: String((mobileLabel.split(" ")[0] || "").replace("+", "")).trim(),
+                  mobile_number: String(mobileLabel.split(" ").slice(1).join(" ")).trim(),
+                  purpose: 0,
+                  via: otpVia,
+                }
+              : null);
+
+          if (!contextSnapshot?.country_code || !contextSnapshot?.mobile_number) {
+            throw new Error("OTP context missing");
+          }
+
+          const result = await verifyOtpAndLogin({ otp, context: contextSnapshot });
+          return { result, ctx: getJsonCookie("otp_context") };
+        },
+        {
+          onSuccess: ({ result, ctx }) => {
+            if (ctx?.mobile_number && ctx?.country_code) {
+              setCookie("mobile_verified", "true", { maxAge: 60 * 60 * 24 * 7 });
+              setCookie("otp_mobile", String(ctx.mobile_number), { maxAge: 60 * 60 * 24 * 7 });
+              setCookie("otp_cc", String(ctx.country_code), { maxAge: 60 * 60 * 24 * 7 });
+              setJsonCookie(
+                "verified_mobile",
+                { country_code: ctx.country_code, mobile_number: ctx.mobile_number },
+                { maxAge: 60 * 60 * 24 * 7 }
+              );
             }
-          : null);
 
-      if (!contextSnapshot?.country_code || !contextSnapshot?.mobile_number) {
-        throw new Error("OTP context missing");
-      }
+            if (ctx?.purpose === PURPOSE_BUSINESS_MOBILE_VERIFY) {
+              if (ctx?.mobile_number && ctx?.country_code) {
+                setJsonCookie(
+                  "verified_business_mobile",
+                  {
+                    country_code: String(ctx.country_code),
+                    mobile_number: String(ctx.mobile_number),
+                  },
+                  { maxAge: 60 * 60 * 24 * 7, path: "/" }
+                );
+              }
 
-      const result = await verifyOtpAndLogin({ otp, context: contextSnapshot });
-      console.log("[otp] verify result:", result);
+              const redirectTo = String(ctx?.redirect_to || "/auth/business-register");
+              removeCookie("otp_context");
+              router.replace(redirectTo);
+              return;
+            }
 
-      //  OTP VERIFIED
-      // Backend sets HttpOnly refresh cookie here
-      const ctx = getJsonCookie("otp_context");
+            if (result?.requiresRegistration === true || result?.isExistingUser === false) {
+              removeCookie("otp_in_progress");
+              removeCookie("otp_context");
+              router.replace("/auth/complete-profile");
+              return;
+            }
 
-      // Mark mobile as verified (used by complete-profile guard)
-      if (ctx?.mobile_number && ctx?.country_code) {
-        setCookie("mobile_verified", "true", { maxAge: 60 * 60 * 24 * 7 });
-        setCookie("otp_mobile", String(ctx.mobile_number), { maxAge: 60 * 60 * 24 * 7 });
-        setCookie("otp_cc", String(ctx.country_code), { maxAge: 60 * 60 * 24 * 7 });
-        setJsonCookie(
-          "verified_mobile",
-          { country_code: ctx.country_code, mobile_number: ctx.mobile_number },
-          { maxAge: 60 * 60 * 24 * 7 }
-        );
-      }
+            if (!result?.sessionConfirmed) {
+              setInfoMessage("OTP verified, but session setup failed. Please login again.");
+              removeCookie("otp_in_progress");
+              removeCookie("otp_context");
+              setTimeout(() => {
+                router.replace(getAuthAppUrl("/auth/login"));
+              }, 900);
+              return;
+            }
 
-      if (ctx?.purpose === PURPOSE_BUSINESS_MOBILE_VERIFY) {
-        if (ctx?.mobile_number && ctx?.country_code) {
-          setJsonCookie(
-            "verified_business_mobile",
-            {
-              country_code: String(ctx.country_code),
-              mobile_number: String(ctx.mobile_number),
-            },
-            { maxAge: 60 * 60 * 24 * 7, path: "/" }
-          );
+            if (result?.isExistingUser === true) {
+              removeCookie("otp_in_progress");
+              removeCookie("otp_context");
+              setCookie(POST_OTP_VERIFIED_COOKIE, "1", { maxAge: 180, path: "/" });
+              setCookie("profile_completed", "true", {
+                maxAge: 60 * 60 * 24 * 7,
+              });
+              redirectToPostLoginTarget();
+              return;
+            }
+
+            removeCookie("otp_in_progress");
+            removeCookie("otp_context");
+            router.replace("/auth/complete-profile");
+          },
+          onError: (err) => {
+            console.error("OTP verify failed:", err);
+            const friendly = getFriendlyVerifyError(err);
+            setInfoMessage(friendly.message);
+            if (friendly.clearOtp) {
+              setOtp("");
+              setOtpClearSignal((value) => value + 1);
+            }
+            if (friendly.redirectLogin) {
+              removeCookie("otp_in_progress");
+              removeCookie("otp_context");
+              setTimeout(() => {
+                router.replace(getAuthAppUrl("/auth/login"));
+              }, 800);
+            }
+          },
         }
-
-        const redirectTo = String(ctx?.redirect_to || "/auth/business-register");
-        removeCookie("otp_context");
-        router.replace(redirectTo);
-        return;
-      }
-
-      // NEW USER: do not call refresh/profile from OTP flow; continue onboarding.
-      if (result?.requiresRegistration === true || result?.isExistingUser === false) {
-        removeCookie("otp_in_progress");
-        removeCookie("otp_context");
-        router.replace("/auth/complete-profile");
-        return;
-      }
-
-      // EXISTING USER
-      if (!result?.sessionConfirmed) {
-        setInfoMessage("OTP verified, but session setup failed. Please login again.");
-        removeCookie("otp_in_progress");
-        removeCookie("otp_context");
-        setTimeout(() => {
-          router.replace(getAuthAppUrl("/auth/login"));
-        }, 900);
-        return;
-      }
-
-      if (result?.isExistingUser === true) {
-        removeCookie("otp_in_progress");
-        removeCookie("otp_context");
-        setCookie(POST_OTP_VERIFIED_COOKIE, "1", { maxAge: 180, path: "/" });
-        setCookie("profile_completed", "true", {
-          maxAge: 60 * 60 * 24 * 7,
-        });
-        redirectToPostLoginTarget();
-        return;
-      }
-
-      // Fallback to onboarding if response is unexpected.
-      removeCookie("otp_in_progress");
-      removeCookie("otp_context");
-      router.replace("/auth/complete-profile");
-    } catch (err) {
-      console.error("OTP verify failed:", err);
-      const friendly = getFriendlyVerifyError(err);
-      setInfoMessage(friendly.message);
-      if (friendly.clearOtp) {
-        setOtp("");
-        setOtpClearSignal((value) => value + 1);
-      }
-      if (friendly.redirectLogin) {
-        removeCookie("otp_in_progress");
-        removeCookie("otp_context");
-        setTimeout(() => {
-          router.replace(getAuthAppUrl("/auth/login"));
-        }, 800);
-      }
+      );
     } finally {
       verifyInFlightRef.current = false;
-      setLoading(false);
     }
   };
 
@@ -361,6 +362,15 @@ export default function OtpPage() {
   };
 
 
+  if (showTransition) {
+    return (
+      <AuthTransitionOverlay
+        title="Verifying OTP..."
+        description="Checking your code and preparing your session."
+      />
+    );
+  }
+
   return (
     <AuthOtpCard
       header={
@@ -370,39 +380,46 @@ export default function OtpPage() {
         />
       }
     >
-      <h1 className="text-lg font-semibold text-black text-center">
-        {t.otpTitle || "Verify OTP"}
-      </h1>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleVerify();
+        }}
+      >
+        <h1 className="text-lg font-semibold text-black text-center">
+          {t.otpTitle || "Verify OTP"}
+        </h1>
 
-      <p className="text-sm text-gray-500 text-center mt-1">
-        {t.otpSubtitle || "Please enter the 4-digit code sent to"}{" "}
-        <span className="text-black font-medium">
-          {mobileLabel}
-        </span>
-        <br />
-        <span className="text-xs text-gray-500">
-          via {otpVia === "sms" ? "SMS" : "WhatsApp"}
-        </span>
-      </p>
-
-      <div className="flex justify-center mt-6">
-        <OtpInput length={4} onChange={setOtp} clearSignal={otpClearSignal} />
-      </div>
-
-      {infoMessage && (
-        <p className="text-sm text-red-500 text-center mt-3">
-          {infoMessage}
+        <p className="text-sm text-gray-500 text-center mt-1">
+          {t.otpSubtitle || "Please enter the 4-digit code sent to"}{" "}
+          <span className="text-black font-medium">
+            {mobileLabel}
+          </span>
+          <br />
+          <span className="text-xs text-gray-500">
+            via {otpVia === "sms" ? "SMS" : "WhatsApp"}
+          </span>
         </p>
-      )}
 
-      <div className="mt-6">
-        <Button
-          label={t.verifyOtp || "Verify OTP"}
-          loading={loading}
-          disabled={!isValid || loading}
-          onClick={handleVerify}
-        />
-      </div>
+        <div className="flex justify-center mt-6">
+          <OtpInput length={4} onChange={setOtp} clearSignal={otpClearSignal} />
+        </div>
+
+        {infoMessage && (
+          <p className="text-sm text-red-500 text-center mt-3">
+            {infoMessage}
+          </p>
+        )}
+
+        <div className="mt-6">
+          <Button
+            type="submit"
+            label={t.verifyOtp || "Verify OTP"}
+            loading={isTransitioning}
+            disabled={!isValid || isTransitioning}
+          />
+        </div>
+      </form>
 
       <div className="text-center mt-4 text-sm">
         {cooldown > 0 ? (

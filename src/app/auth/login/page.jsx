@@ -14,12 +14,13 @@ import AuthCard from "@/components/ui/AuthCard";
 import AuthHeader from "@/components/ui/AuthHeader";
 import Button from "@/components/ui/Button";
 import PhoneInput from "@/components/ui/PhoneInput";
+import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay";
 
 // Service
 import { sendOtp } from "@/app/auth/auth-service/otp.service";
 import { clearPreAuthCsrfCookies, getCookie, removeCookie, setCookie, setJsonCookie } from "@/services/cookie";
-import api from "@/lib/api/client";
 import { getListingAppUrl } from "@/lib/appUrls";
+import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition";
 
 const LANG_MAP = { eng, guj, hindi };
 const LANGUAGE_STORAGE_KEY = "auth_language";
@@ -95,8 +96,8 @@ export default function LoginPage() {
   const [mobile, setMobile] = useState("");
   const [country, setCountry] = useState(phoneCodes[0]);
   const [method, setMethod] = useState("whatsapp");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition();
 
   const t = LANG_MAP[language] || eng;
 
@@ -149,43 +150,53 @@ export default function LoginPage() {
   }, [router]);
 
   const handleContinue = useCallback(async () => {
-    if (!isValidMobile || loading) return;
-
-    setLoading(true);
+    if (!isValidMobile || isTransitioning) return;
     setError("");
 
-    try {
-      const dialCode = country?.dialCode?.replace("+", "");
+    await runWithTransition(
+      async () => {
+        const dialCode = country?.dialCode?.replace("+", "");
 
-      if (!dialCode) {
-        throw new Error("Invalid country code");
+        if (!dialCode) {
+          throw new Error("Invalid country code");
+        }
+
+        const context = {
+          country_code: dialCode,
+          mobile_number: mobile,
+          purpose: PURPOSE_LOGIN,
+          via: method,
+        };
+
+        setJsonCookie("otp_context", context, { maxAge: 300 });
+        setCookie("otp_in_progress", "1", { maxAge: 10 * 60, path: "/" });
+
+        await sendOtp({ via: method });
+        const until = Date.now() + 60 * 1000;
+        setCookie("mobile_otp_until", String(until), { maxAge: 60, path: "/" });
+
+        return encodeURIComponent(resolveRedirectTarget(getPostLoginTarget()));
+      },
+      {
+        onSuccess: (returnTo) => {
+          router.push(`/auth/otp?returnTo=${returnTo}`);
+        },
+        onError: (err) => {
+          console.error("sendOtp failed:", err);
+          setError(getFriendlyOtpError(err));
+        },
       }
+    );
+  }, [isValidMobile, isTransitioning, country, mobile, method, router, runWithTransition]);
 
-      const context = {
-        country_code: dialCode,
-        mobile_number: mobile,
-        purpose: PURPOSE_LOGIN,
-        via: method,
-      };
-
-      // store OTP context for next step
-      setJsonCookie("otp_context", context, { maxAge: 300 });
-      setCookie("otp_in_progress", "1", { maxAge: 10 * 60, path: "/" });
-
-      // trigger OTP
-      await sendOtp({ via: method });
-      const until = Date.now() + 60 * 1000;
-      setCookie("mobile_otp_until", String(until), { maxAge: 60, path: "/" });
-
-      const returnTo = encodeURIComponent(resolveRedirectTarget(getPostLoginTarget()));
-      router.push(`/auth/otp?returnTo=${returnTo}`);
-    } catch (err) {
-      console.error("sendOtp failed:", err);
-      setError(getFriendlyOtpError(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [isValidMobile, loading, country, mobile, method, router]);
+  if (showTransition) {
+    return (
+      <AuthTransitionOverlay
+        title="Sending OTP..."
+        description="Preparing secure verification for your login."
+      />
+    );
+  }
 
   return (
     <AuthCard
@@ -196,56 +207,63 @@ export default function LoginPage() {
         />
       }
     >
-      <h1 className="text-xl font-semibold text-black mb-1">
-        {t.login}
-      </h1>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleContinue();
+        }}
+      >
+        <h1 className="text-xl font-semibold text-black mb-1">
+          {t.login}
+        </h1>
 
-      <p className="text-sm text-gray-500 mb-6">
-        {t.subtitle}
-      </p>
-
-      <PhoneInput
-        t={t}
-        mobile={mobile}
-        setMobile={setMobile}
-        country={country}
-        setCountry={setCountry}
-      />
-
-      <div className="flex justify-center mb-6">
-        <div className="flex items-center gap-10">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              checked={method === "whatsapp"}
-              onChange={() => setMethod("whatsapp")}
-            />
-            {t.viaWhatsapp}
-          </label>
-
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              checked={method === "sms"}
-              onChange={() => setMethod("sms")}
-            />
-            {t.viaSms}
-          </label>
-        </div>
-      </div>
-
-      {error && (
-        <p className="text-sm text-red-500 mb-3">
-          {error}
+        <p className="text-sm text-gray-500 mb-6">
+          {t.subtitle}
         </p>
-      )}
 
-      <Button
-        label={t.continue}
-        loading={loading}
-        disabled={!isValidMobile || loading}
-        onClick={handleContinue}
-      />
+        <PhoneInput
+          t={t}
+          mobile={mobile}
+          setMobile={setMobile}
+          country={country}
+          setCountry={setCountry}
+        />
+
+        <div className="flex justify-center mb-6">
+          <div className="flex items-center gap-10">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                checked={method === "whatsapp"}
+                onChange={() => setMethod("whatsapp")}
+              />
+              {t.viaWhatsapp}
+            </label>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                checked={method === "sms"}
+                onChange={() => setMethod("sms")}
+              />
+              {t.viaSms}
+            </label>
+          </div>
+        </div>
+
+        {error && (
+          <p className="text-sm text-red-500 mb-3">
+            {error}
+          </p>
+        )}
+
+        <Button
+          type="submit"
+          label={t.continue}
+          loading={isTransitioning}
+          disabled={!isValidMobile || isTransitioning}
+        />
+      </form>
     </AuthCard>
   );
 }

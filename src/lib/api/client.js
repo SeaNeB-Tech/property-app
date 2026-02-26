@@ -174,7 +174,7 @@ const retryWithBrowserApiFallback = async (client, error) => {
   return client(originalConfig);
 };
 
-const refreshAccessToken = async () => {
+export const refreshAccessToken = async () => {
   const productKey = getProductKey();
   const csrfToken = getCsrfToken();
 

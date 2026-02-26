@@ -1,6 +1,5 @@
 import api from "@/lib/api/client"
 import { authStore } from "@/app/auth/auth-service/store/authStore"
-import { refreshAccessToken } from "@/app/auth/auth-service/authservice"
 import { getDefaultProductKey, getDefaultProductName } from "@/services/product.service"
 import { bootstrapProductAuth } from "@/app/auth/auth-service/auth.bootstrap"
 import {
@@ -84,11 +83,7 @@ const withRecovery = async (requestFn) => {
     return await requestFn()
   } catch (err) {
     if (isAuthError(err)) {
-      try {
-        await refreshAccessToken()
-      } catch {
-        await bootstrapProductAuth({ force: true })
-      }
+      await bootstrapProductAuth({ force: true })
       return requestFn()
     }
 

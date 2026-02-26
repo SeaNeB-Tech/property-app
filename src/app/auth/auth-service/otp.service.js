@@ -12,6 +12,7 @@ import {
 const IDENTIFIER_TYPE_MOBILE = 0;
 const PURPOSE_SIGNUP_OR_LOGIN = 0;
 const DEFAULT_VIA = "whatsapp";
+const FALLBACK_VIA = "sms";
 
 const isProductNotFoundError = (err) =>
   getErrorStatus(err) === 404 && getErrorText(err).includes("product not found");
@@ -56,6 +57,12 @@ const requestWithProductRecovery = async (url, payload) => {
   }
 };
 
+const shouldRetryWithSms = (err, via) => {
+  if (String(via || "").toLowerCase() !== DEFAULT_VIA) return false;
+  const status = Number(err?.response?.status || 0);
+  return status >= 500 || status === 429;
+};
+
 const saveTokensFromVerifyResponse = (res) => {
   const data = res?.data || {};
 
@@ -81,14 +88,31 @@ export const sendOtp = async ({ via } = {}) => {
     { maxAge: 300, path: "/" }
   );
 
-  return requestWithProductRecovery("/otp/send-otp", {
+  const payload = {
     identifier_type: IDENTIFIER_TYPE_MOBILE,
     country_code: String(ctx.country_code).trim(),
     mobile_number: String(ctx.mobile_number).trim(),
     purpose: getPurpose(ctx),
     via: effectiveVia,
     product_key: getDefaultProductKey(),
-  });
+  };
+
+  try {
+    return await requestWithProductRecovery("/otp/send-otp", payload);
+  } catch (err) {
+    if (!shouldRetryWithSms(err, effectiveVia)) throw err;
+
+    const smsPayload = { ...payload, via: FALLBACK_VIA };
+    setJsonCookie(
+      "otp_context",
+      {
+        ...ctx,
+        via: FALLBACK_VIA,
+      },
+      { maxAge: 300, path: "/" }
+    );
+    return requestWithProductRecovery("/otp/send-otp", smsPayload);
+  }
 };
 
 export const verifyOtp = async ({ otp }) => {

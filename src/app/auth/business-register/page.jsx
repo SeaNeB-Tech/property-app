@@ -25,6 +25,8 @@ import Button from "@/components/ui/Button"
 import AutoComplete from "@/components/ui/AutoComplete"
 import SeanebIdField from "@/components/ui/SeanebId"
 import OtpVerificationModal from "@/components/ui/OtpVerificationModal"
+import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay"
+import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
 
 // i18n
 import eng from "@/constants/i18/eng/business_register.json"
@@ -111,8 +113,8 @@ export default function BusinessRegisterPage() {
   })
   const [form, setForm] = useState(EMPTY_FORM)
   const [mounted, setMounted] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState("")
+  const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition()
   const [branchId, setBranchId] = useState("")
   const [panVerified, setPanVerified] = useState(false)
   const [gstVerified, setGstVerified] = useState(false)
@@ -903,80 +905,91 @@ export default function BusinessRegisterPage() {
       return
     }
 
-    setSubmitting(true)
     setSubmitError("")
 
-    try {
-      const response = await registerBusiness({
-        business_name: businessName,
-        display_name: normalizeBusinessLabel(form.displayName?.trim() || businessName),
-        main_category_id: resolvedMainCategoryId,
-        business_type: Number(form.businessType),
-        seaneb_id: form.seanebId.trim(),
-        primary_number: primaryNumber,
-        whatsapp_number: effectiveWhatsappNumber,
-        business_email: businessEmail || undefined,
-        about_branch: form.aboutBranch.trim() || "Head office branch",
-        address: form.businessLocation.trim(),
-        landmark: form.landmark.trim(),
-        place_id: placeId,
-        pan,
-        gstin,
-        product_key: lockedProductKey,
-      })
+    await runWithTransition(
+      async () => {
+        const response = await registerBusiness({
+          business_name: businessName,
+          display_name: normalizeBusinessLabel(form.displayName?.trim() || businessName),
+          main_category_id: resolvedMainCategoryId,
+          business_type: Number(form.businessType),
+          seaneb_id: form.seanebId.trim(),
+          primary_number: primaryNumber,
+          whatsapp_number: effectiveWhatsappNumber,
+          business_email: businessEmail || undefined,
+          about_branch: form.aboutBranch.trim() || "Head office branch",
+          address: form.businessLocation.trim(),
+          landmark: form.landmark.trim(),
+          place_id: placeId,
+          pan,
+          gstin,
+          product_key: lockedProductKey,
+        })
+        return response
+      },
+      {
+        onSuccess: async (response) => {
+          const data = response?.data || response || {}
+          const businessId = data?.business_id || data?.id || ""
+          const createdBranchId = String(data?.branch_id || data?.default_branch_id || "")
+          setBranchId(createdBranchId)
 
-      const data = response?.data || response || {}
-      const businessId = data?.business_id || data?.id || ""
-      const createdBranchId = String(data?.branch_id || data?.default_branch_id || "")
-      setBranchId(createdBranchId)
+          if (createdBranchId && pan && !panVerified && PAN_REGEX.test(pan)) {
+            try {
+              await verifyPanForBranch({ pan, branch_id: createdBranchId })
+              setPanVerified(true)
+              setPanStatusText("PAN verified successfully.")
+              setCookie("verified_pan", pan, { maxAge: 60 * 60 * 24 * 7, path: "/" })
+            } catch {
+              setPanStatusText("PAN could not be verified right now. You can retry from dashboard.")
+            }
+          }
 
-      // Auto-verify PAN/GST after branch creation when user has already entered values.
-      if (createdBranchId && pan && !panVerified && PAN_REGEX.test(pan)) {
-        try {
-          await verifyPanForBranch({ pan, branch_id: createdBranchId })
-          setPanVerified(true)
-          setPanStatusText("PAN verified successfully.")
-          setCookie("verified_pan", pan, { maxAge: 60 * 60 * 24 * 7, path: "/" })
-        } catch {
-          setPanStatusText("PAN could not be verified right now. You can retry from dashboard.")
-        }
+          if (createdBranchId && gstin && !gstVerified && GST_REGEX.test(gstin)) {
+            try {
+              await verifyGstForBranch({ gstin, branch_id: createdBranchId })
+              setGstVerified(true)
+              setGstStatusText("GSTIN verified successfully.")
+              setCookie("verified_gstin", gstin, { maxAge: 60 * 60 * 24 * 7, path: "/" })
+            } catch {
+              setGstStatusText("GSTIN could not be verified right now. You can retry from dashboard.")
+            }
+          }
+
+          setCookie("business_name", businessName, { path: "/" })
+          setCookie("business_type", String(form.businessType), { path: "/" })
+          setCookie("business_location", form.businessLocation, { path: "/" })
+          setCookie("business_id", String(businessId), { path: "/" })
+          setCookie("branch_id", createdBranchId, { path: "/" })
+          setCookie("business_registered", "true", {
+            maxAge: 60 * 60 * 24 * 30,
+            path: "/",
+          })
+          setDashboardMode(DASHBOARD_MODE_BUSINESS)
+
+          setCookie("profile_completed", "true", {
+            maxAge: 60 * 60 * 24 * 30,
+            path: "/",
+          })
+          router.replace("/dashboard/broker")
+        },
+        onError: (err) => {
+          setSubmitError(getErrorMessage(err, "Registration failed"))
+        },
       }
-
-      if (createdBranchId && gstin && !gstVerified && GST_REGEX.test(gstin)) {
-        try {
-          await verifyGstForBranch({ gstin, branch_id: createdBranchId })
-          setGstVerified(true)
-          setGstStatusText("GSTIN verified successfully.")
-          setCookie("verified_gstin", gstin, { maxAge: 60 * 60 * 24 * 7, path: "/" })
-        } catch {
-          setGstStatusText("GSTIN could not be verified right now. You can retry from dashboard.")
-        }
-      }
-
-      setCookie("business_name", businessName, { path: "/" })
-      setCookie("business_type", String(form.businessType), { path: "/" })
-      setCookie("business_location", form.businessLocation, { path: "/" })
-      setCookie("business_id", String(businessId), { path: "/" })
-      setCookie("branch_id", createdBranchId, { path: "/" })
-      setCookie("business_registered", "true", {
-        maxAge: 60 * 60 * 24 * 30,
-        path: "/",
-      })
-      setDashboardMode(DASHBOARD_MODE_BUSINESS)
-
-      setCookie("profile_completed", "true", {
-        maxAge: 60 * 60 * 24 * 30,
-        path: "/",
-      })
-      router.replace("/dashboard/broker")
-    } catch (err) {
-      setSubmitError(getErrorMessage(err, "Registration failed"))
-    } finally {
-      setSubmitting(false)
-    }
+    )
   }
 
   if (!mounted) return null
+  if (showTransition) {
+    return (
+      <AuthTransitionOverlay
+        title="Registering business..."
+        description="Creating your business profile and preparing your dashboard."
+      />
+    )
+  }
 
   return (
     <AuthCard1
@@ -1317,10 +1330,10 @@ export default function BusinessRegisterPage() {
               </button>
             ) : (
               <Button
-                label={submitting ? (t.loading || "Registering...") : "Register Business"}
-                disabled={submitting || !isStepThreeReady}
+                type="submit"
+                label={isTransitioning ? (t.loading || "Registering...") : "Register Business"}
+                disabled={isTransitioning || !isStepThreeReady}
                 className="max-w-[220px]"
-                onClick={handleSubmit}
               />
             )}
           </div>

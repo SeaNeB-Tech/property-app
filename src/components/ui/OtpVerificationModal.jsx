@@ -25,7 +25,13 @@ export default function OtpVerificationModal({
 
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+      <form
+        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onVerify?.();
+        }}
+      >
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
@@ -50,9 +56,9 @@ export default function OtpVerificationModal({
         <div className="mt-5">
           <Button
             label={loading ? "Verifying..." : "Verify OTP"}
+            type="submit"
             loading={loading}
             disabled={!isValid || loading}
-            onClick={onVerify}
           />
         </div>
 
@@ -70,7 +76,7 @@ export default function OtpVerificationModal({
             </button>
           )}
         </div>
-      </div>
+      </form>
     </div>
   );
 }

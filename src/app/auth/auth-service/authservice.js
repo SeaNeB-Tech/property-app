@@ -1,7 +1,8 @@
 // src/services/authservice.js
 
 import api, {
-  getInMemoryCsrfToken,
+  getInMemoryAccessToken,
+  refreshAccessToken as refreshAccessTokenFromClient,
   setInMemoryAccessToken,
   setInMemoryCsrfToken,
 } from "@/lib/api/client";
@@ -19,7 +20,6 @@ const AUTH_COOKIE_WAIT_TIMEOUT_MS = 2000;
 const AUTH_COOKIE_WAIT_POLL_MS = 120;
 const CSRF_COOKIE_NAME = "csrf_token_property";
 const REFRESH_COOKIE_NAME = "refresh_token_property";
-let refreshInFlightPromise = null;
 
 /* ------------------------------------------------ */
 /* 🔐 HELPERS */
@@ -69,9 +69,6 @@ const waitForCsrfCookie = async ({ timeoutMs = AUTH_COOKIE_WAIT_TIMEOUT_MS, poll
   }
   return "";
 };
-
-const getLatestCsrfCookieValue = () =>
-  String(getCookie(CSRF_COOKIE_NAME) || getInMemoryCsrfToken() || "").trim();
 
 const deepTokenValue = (payload = {}, keys = []) => {
   const candidates = [
@@ -297,66 +294,15 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
 /* ------------------------------------------------ */
 
 export const refreshAccessToken = async () => {
-  if (refreshInFlightPromise) {
-    console.log("[auth] refresh already in-flight, reusing promise");
-    return refreshInFlightPromise;
+  console.log("[auth] refresh start");
+  await refreshAccessTokenFromClient();
+  const refreshedToken = String(getInMemoryAccessToken() || "").trim();
+  if (!refreshedToken) {
+    throw new Error("No access token returned");
   }
-
-  refreshInFlightPromise = (async () => {
-    console.log("[auth] refresh start");
-
-    const csrfToken = getLatestCsrfCookieValue();
-    if (!csrfToken) {
-      throw new Error("Missing csrf_token_property cookie");
-    }
-
-    const productKey = String(getDefaultProductKey() || "property").trim() || "property";
-
-    const res = await api.post(
-      "/auth/refresh",
-      { product_key: productKey },
-      {
-        withCredentials: true,
-        skipRefresh: true,
-        skipAuthRedirect: true,
-        headers: {
-          "x-product-key": productKey,
-          "x-csrf-token": csrfToken,
-        },
-      },
-    );
-
-    let newToken = deepTokenValue(res?.data, [
-      "access_token",
-      "accessToken",
-      "token",
-      "jwt",
-    ]);
-
-    if (!newToken) {
-      const headerToken = String(
-        res?.headers?.authorization ||
-          res?.headers?.Authorization ||
-          res?.headers?.["x-access-token"] ||
-          ""
-      ).trim();
-      if (/^bearer\s+/i.test(headerToken)) {
-        newToken = headerToken.replace(/^bearer\s+/i, "").trim();
-      }
-    }
-
-    if (!newToken) throw new Error("No access token returned");
-
-    setAccessTokenEverywhere(newToken);
-    console.log("[auth] refresh success, access token updated in memory");
-    return newToken;
-  })();
-
-  try {
-    return await refreshInFlightPromise;
-  } finally {
-    refreshInFlightPromise = null;
-  }
+  setAccessTokenEverywhere(refreshedToken);
+  console.log("[auth] refresh success, access token updated in memory");
+  return refreshedToken;
 };
 
 /* ------------------------------------------------ */
