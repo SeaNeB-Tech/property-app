@@ -181,6 +181,25 @@ export const redirectToListingWithBridgeToken = async ({
     return false;
   }
 
-  window.location.replace(appendBridgeToken(callbackUrl, bridgeToken));
+  const destination = appendBridgeToken(callbackUrl, bridgeToken);
+
+  // If auth was opened from the listing app in another tab/window, reuse it and close this auth tab.
+  try {
+    const canUseOpener =
+      (normalizedSource === "main-app" || normalizedSource === "main-app-register") &&
+      typeof window.opener !== "undefined" &&
+      window.opener &&
+      !window.opener.closed;
+
+    if (canUseOpener) {
+      window.opener.location.href = destination;
+      window.close();
+      return true;
+    }
+  } catch {
+    // Fallback to same-tab redirect when opener cannot be used due to browser policies.
+  }
+
+  window.location.replace(destination);
   return true;
 };

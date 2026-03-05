@@ -10,11 +10,12 @@ import {
 } from "@/app/auth/auth-service/service.utils";
 
 const IDENTIFIER_TYPE_MOBILE = 0;
-const PURPOSE_SIGNUP_OR_LOGIN = 0;
+const PURPOSE_SIGNUP_OR_LOGIN = 1;
 const DEFAULT_VIA = "whatsapp";
 const FALLBACK_VIA = "sms";
-const OTP_SEND_PATHS = ["/auth/otp/send", "/auth/otp/send-otp", "/otp/send-otp"];
-const OTP_VERIFY_PATHS = ["/auth/otp/verify", "/auth/otp/verify-otp", "/otp/verify-otp"];
+// Same-origin Next proxy routes
+const OTP_SEND_PATHS = ["/otp/send-otp"];
+const OTP_VERIFY_PATHS = ["/auth/verify-otp", "/otp/verify-otp"];
 
 const isProductNotFoundError = (err) =>
   getErrorStatus(err) === 404 && getErrorText(err).includes("product not found");
@@ -116,7 +117,6 @@ export const sendOtp = async ({ via } = {}) => {
     mobile_number: String(ctx.mobile_number).trim(),
     purpose: getPurpose(ctx),
     via: effectiveVia,
-    product_key: getDefaultProductKey(),
   };
 
   try {

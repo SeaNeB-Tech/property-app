@@ -57,7 +57,7 @@ export const clearPanelAuthSession = () => {
 export const logoutPanelSession = async () => {
   let canClearClientState = false;
   try {
-    await authApi.post("/auth/logout", {}, { skipAuthRedirect: true });
+    await authApi.post("/v1/logout", {}, { skipAuthRedirect: true });
     canClearClientState = true;
   } catch (error) {
     const status = Number(error?.response?.status || 0);

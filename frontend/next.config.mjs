@@ -1,8 +1,3 @@
-import { dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
 const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const normalizedBasePath =
   rawBasePath && rawBasePath !== "/"
@@ -148,21 +143,9 @@ const nextConfig = {
     ];
   },
   async rewrites() {
-    if (!safeApiBaseUrl) return [];
-    return [
-      {
-        source: "/api/auth/send-otp",
-        destination: `${safeApiBaseUrl}/otp/send-otp`,
-      },
-      {
-        source: "/api/auth/verify-otp",
-        destination: `${safeApiBaseUrl}/otp/verify-otp`,
-      },
-      {
-        source: "/api/:path*",
-        destination: `${safeApiBaseUrl}/:path*`,
-      },
-    ];
+    // API requests are handled by App Router proxy routes in src/app/api.
+    // Keeping /api rewrites here bypasses those handlers and breaks fallback logic.
+    return [];
   },
   async headers() {
     return [
@@ -173,15 +156,6 @@ const nextConfig = {
     ];
   },
   reactCompiler: true,
-  // explicitly set turbopack root to the project directory so that
-  // Next.js can resolve its own package when compiling files under
-  // src/app. Providing an absolute path avoids the warning shown earlier.
-  turbopack: {
-    // use __dirname to guarantee the path of this config file, which is the
-    // actual project directory. process.cwd() can differ when Next forks
-    // child processes and may still point at a parent directory.
-    root: __dirname
-  }
 };
 
 export default nextConfig;

@@ -11,7 +11,7 @@ const AUTH_COOKIE_WAIT_TIMEOUT_MS = 2000;
 const AUTH_COOKIE_WAIT_POLL_MS = 120;
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const CSRF_COOKIE_NAMES = ["csrf_token_property"];
-const OTP_VERIFY_PATHS = ["/otp/verify-otp", "/auth/otp/verify-otp"];
+const OTP_VERIFY_PATHS = ["/auth/verify-otp", "/otp/verify-otp", "/auth/otp/verify-otp"];
 
 const getFirstCookieValue = (names = []) => {
   for (const name of names) {

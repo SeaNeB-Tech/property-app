@@ -43,7 +43,7 @@ export const signupUser = async (data = {}) => {
   const email = toText(data.email).toLowerCase();
   if (email) payload.email = email;
 
-  return api.post("/user/signup", payload);
+  return api.post("/v1/user/signup", payload);
 };
 
 

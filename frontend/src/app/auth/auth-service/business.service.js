@@ -1,6 +1,7 @@
 import api, { authApi } from "@/lib/api/client"
 import { getDefaultProductKey, getDefaultProductName } from "@/services/dashboard.service"
 import { bootstrapProductAuth } from "@/app/auth/auth-service/auth.bootstrap"
+import { getAccessToken } from "@/lib/auth/tokenStorage"
 import {
   cleanPayload,
   getErrorCode,
@@ -54,7 +55,15 @@ const getProductKeys = () => {
 
 const getAuthHeaders = ({ includeProductKey = false, productKey } = {}) => {
   const headers = {}
-  if (includeProductKey) headers["x-product-key"] = toText(productKey || getDefaultProductKey())
+  const token = getAccessToken()
+  
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`
+  }
+  
+  if (includeProductKey) {
+    headers["x-product-key"] = toText(productKey || getDefaultProductKey())
+  }
 
   return headers
 }
@@ -77,7 +86,7 @@ const withRecovery = async (requestFn) => {
     return await requestFn()
   } catch (err) {
     if (isAuthError(err)) {
-      const recovered = await bootstrapProductAuth()
+      const recovered = await bootstrapProductAuth({ force: true })
       if (!recovered) throw err
       return requestFn()
     }
@@ -101,7 +110,7 @@ export const getBusinessAutocomplete = async (input) => {
   for (const productKey of getProductKeys()) {
     try {
       const res = await withRecovery(() =>
-        businessApi.get("/business/autocomplete", {
+        businessApi.get("/v1/business/autocomplete", {
           params: { input: query },
           headers: getAuthHeaders({ includeProductKey: true, productKey }),
         })
@@ -116,7 +125,7 @@ export const getBusinessAutocomplete = async (input) => {
 
       if (isAuthError(err)) {
         try {
-          const publicRes = await api.get("/business/autocomplete", {
+          const publicRes = await api.get("/v1/business/autocomplete", {
             params: { input: query },
             headers: { "x-product-key": productKey },
           })
@@ -175,7 +184,7 @@ export const registerBusiness = async (data = {}) => {
 
   try {
     return await withRecovery(() =>
-      businessApi.post("/business/create", payload, {
+      businessApi.post("/v1/business/create", payload, {
         headers: getAuthHeaders({ includeProductKey: true, productKey }),
       })
     )
@@ -183,7 +192,7 @@ export const registerBusiness = async (data = {}) => {
     const status = getErrorStatus(err)
     if (status === 404 || status === 405) {
       return withRecovery(() =>
-        businessApi.post("/business/register", payload, {
+        businessApi.post("/v1/business/create", payload, {
           headers: getAuthHeaders({ includeProductKey: true, productKey }),
         })
       )
@@ -218,7 +227,7 @@ export const createBusinessBranch = async (data = {}) => {
   if (gstin) payload.gst = { gstin }
 
   return withRecovery(() =>
-    businessApi.post("/business/create-branch", payload, {
+    businessApi.post("/v1/business/create-branch", payload, {
       headers: getAuthHeaders({ includeProductKey: true }),
     })
   )
@@ -234,7 +243,7 @@ export const verifyPanForBranch = async ({ pan, branch_id }) => {
   try {
     return await withRecovery(() =>
       businessApi.post(
-        "/verification/verify-pan",
+        "/v1/verification/verify-pan",
         {
           pan: finalPan,
           branch_id: branchId,
@@ -258,7 +267,7 @@ export const verifyGstForBranch = async ({ gstin, branch_id }) => {
   try {
     return await withRecovery(() =>
       businessApi.post(
-        "/verification/verify-gst",
+        "/v1/verification/verify-gst",
         {
           gstin: finalGstin,
           branch_id: branchId,
@@ -274,7 +283,7 @@ export const verifyGstForBranch = async ({ gstin, branch_id }) => {
 
 export const getBusinessDetails = async (businessId) => {
   if (!businessId) return Promise.reject(new Error("Business ID is required"))
-  return businessApi.get(`/business/${businessId}`)
+  return businessApi.get(`/v1/business/${businessId}`)
 }
 
 export const updateBusiness = async (businessId, data = {}) => {
@@ -287,14 +296,14 @@ export const updateBusiness = async (businessId, data = {}) => {
     registration_number: pickFirst(data.registration_number, data.registrationNumber),
   })
 
-  return businessApi.put(`/business/${businessId}`, payload)
+  return businessApi.put(`/v1/business/${businessId}`, payload)
 }
 
-export const getBusinessList = async () => businessApi.get("/business/list")
+export const getBusinessList = async () => businessApi.get("/v1/business/list")
 
 export const deleteBusiness = async (businessId) => {
   if (!businessId) return Promise.reject(new Error("Business ID is required"))
-  return businessApi.delete(`/business/${businessId}`)
+  return businessApi.delete(`/v1/business/${businessId}`)
 }
 
 

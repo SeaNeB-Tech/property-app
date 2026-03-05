@@ -12,7 +12,7 @@ export const sendEmailOtp = async ({
   }
 
   try {
-    const response = await api.post("/auth/email/send-otp", {
+    const response = await api.post("/v1/auth/email/send-otp", {
       email: email.trim(),
       purpose,
     });
@@ -32,7 +32,7 @@ export const verifyEmailOtp = async ({
   }
 
   try {
-    const response = await api.post("/auth/email/verify-otp", {
+    const response = await api.post("/v1/auth/email/verify-otp", {
       email: email.trim(),
       otp: String(otp),
       purpose,

@@ -7,6 +7,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let inFlightEnsureSessionPromise = null;
 let lastFailureAt = 0;
 
+const hasCsrfTokenCookie = () => {
+  if (typeof document === "undefined") return false;
+  return document.cookie
+    .split(";")
+    .map((part) => String(part || "").trim())
+    .some((part) => part.startsWith("csrf_token_property="));
+};
+
 const requestMe = async () => {
   return fetch("/api/auth/me", {
     method: "GET",
@@ -29,9 +37,9 @@ const requestRefresh = async () => {
   });
 };
 
-export const ensureSessionReady = async () => {
+export const ensureSessionReady = async ({ force = false } = {}) => {
   const now = Date.now();
-  if (lastFailureAt && now - lastFailureAt < FAILURE_COOLDOWN_MS) {
+  if (!force && lastFailureAt && now - lastFailureAt < FAILURE_COOLDOWN_MS) {
     return false;
   }
 
@@ -47,9 +55,9 @@ export const ensureSessionReady = async () => {
 
     const firstStatus = Number(firstMe.status || 0);
     if ([401, 403].includes(firstStatus)) {
-      // Expected when user is logged out: avoid refresh retries/noise loops.
-      lastFailureAt = Date.now();
-      return false;
+      // Do not gate refresh attempts on JS-readable CSRF cookie presence.
+      // Some deployments issue CSRF as HttpOnly or mint it only on refresh.
+      // Our refresh route can retry without CSRF and will set a readable cookie on success.
     }
 
     if (![401, 403, 500, 502, 503, 504].includes(firstStatus)) {
@@ -116,6 +124,6 @@ export const ensureSessionReady = async () => {
   }
 };
 
-export const bootstrapProductAuth = async () => {
-  return ensureSessionReady();
+export const bootstrapProductAuth = async (options = {}) => {
+  return ensureSessionReady(options);
 };

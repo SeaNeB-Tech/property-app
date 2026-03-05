@@ -17,6 +17,7 @@ import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay";
 
 // Services
 import { sendOtp, verifyOtp } from "@/app/auth/auth-service/otp.service";
+import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap";
 import { getJsonCookie, setCookie, setJsonCookie, removeCookie } from "@/services/auth.service";
 import { getAuthAppUrl } from "@/lib/core/appUrls";
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition";
@@ -247,7 +248,7 @@ export default function OtpPage() {
           return { response, ctx: getJsonCookie("otp_context"), contextSnapshot };
         },
         {
-          onSuccess: ({ response, ctx, contextSnapshot }) => {
+          onSuccess: async ({ response, ctx, contextSnapshot }) => {
             if (ctx?.mobile_number && ctx?.country_code) {
               setCookie("mobile_verified", "true", { maxAge: 60 * 60 * 24 * 7 });
               setCookie("otp_mobile", String(ctx.mobile_number), { maxAge: 60 * 60 * 24 * 7 });
@@ -337,6 +338,10 @@ export default function OtpPage() {
             setCookie("profile_completed", "true", {
               maxAge: 60 * 60 * 24 * 7,
             });
+            const sessionReady = await ensureSessionReady({ force: true });
+            if (!sessionReady) {
+              throw new Error("Session is not ready after OTP verification. Please login again.");
+            }
             notifyAuthChanged();
             setStatus("verified");
             stopTransition();

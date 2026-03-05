@@ -1,8 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
-import { getListingAppUrl } from "@/lib/core/appUrls"
+import { useRouter } from "next/navigation"
 import phoneCodes from "@/constants/phoneCodes.json"
 import {
   getCookie,
@@ -22,7 +21,6 @@ import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.serv
 import { sendOtp } from "@/app/auth/auth-service/otp.service"
 import { verifyOtpAndLogin } from "@/app/auth/auth-service/authservice"
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
-import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
@@ -204,9 +202,6 @@ const redirectToBusinessRegisterLogin = (router) => {
 
 export default function BusinessRegisterPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const sourceParam = String(searchParams.get("source") || "").trim().toLowerCase()
-
   const [language, setLanguage] = useState(() => {
     if (typeof window !== "undefined") {
       const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
@@ -319,25 +314,12 @@ export default function BusinessRegisterPage() {
   useEffect(() => {
     const init = async () => {
       const profileCompleted = getCookie("profile_completed")
+      const hasSession = await ensureSessionReady()
 
-      // Only probe /api/auth/me when we are not intentionally opening the
-      // page from the main application (source=main-app-register). In that
-      // scenario we want to show the business registration form even if the
-      // user hasn't yet logged into the auth app. Probing the session causes a
-      // 401 network error which confused the user and triggered a redirect to
-      // the login page.
-      let hasSession = false
-      if (sourceParam !== "main-app-register") {
-        hasSession = await ensureSessionReady()
-      }
-
-      if (!hasSession && sourceParam !== "main-app-register") {
-        // if session is missing and we aren't in the special bypass mode,
-        // fall back to the normal login redirect flow
+      if (!hasSession) {
         redirectToBusinessRegisterLogin(router)
         return
       }
-
       if (profileCompleted !== "true" && hasSession) {
         setCookie("profile_completed", "true", {
           maxAge: 60 * 60 * 24 * 30,
@@ -349,11 +331,7 @@ export default function BusinessRegisterPage() {
       const hasBusinessCookie = getCookie("business_registered") === "true"
       const existingBranchId = String(getCookie("branch_id") || "").trim()
       if (hasBusinessCookie || existingBranchId) {
-        if (sourceParam === "main-app-register") {
-          router.replace(getListingAppUrl("/dashboard"))
-        } else {
-          router.replace("/dashboard/dealer")
-        }
+        router.replace("/dashboard/dealer")
         return
       }
 
@@ -625,7 +603,7 @@ export default function BusinessRegisterPage() {
   }, [debouncedBusinessName])
 
   const ensureAuthSessionReady = async () => {
-    return ensureSessionReady()
+    return ensureSessionReady({ force: true })
   }
 
   const handleEmailVerify = async () => {
@@ -812,7 +790,7 @@ export default function BusinessRegisterPage() {
       setPanStatusText("PAN verification will be available right after branch creation.")
       return
     }
-    if (sourceParam !== "main-app-register" && !(await ensureAuthSessionReady())) {
+    if (!(await ensureAuthSessionReady())) {
       setSubmitError("Session expired. Please login again.")
       redirectToBusinessRegisterLogin(router)
       return
@@ -846,7 +824,7 @@ export default function BusinessRegisterPage() {
       setGstStatusText("GSTIN verification will be available right after branch creation.")
       return
     }
-    if (sourceParam !== "main-app-register" && !(await ensureAuthSessionReady())) {
+    if (!(await ensureAuthSessionReady())) {
       setSubmitError("Session expired. Please login again.")
       redirectToBusinessRegisterLogin(router)
       return
@@ -944,7 +922,7 @@ export default function BusinessRegisterPage() {
       setSubmitError("You must agree to the terms and conditions")
       return
     }
-    if (sourceParam !== "main-app-register" && !(await ensureAuthSessionReady())) {
+    if (!(await ensureAuthSessionReady())) {
       setSubmitError("Session expired. Please login again.")
       redirectToBusinessRegisterLogin(router)
       return
@@ -1036,35 +1014,11 @@ export default function BusinessRegisterPage() {
           if (!sentSuccessMessage) {
             console.warn("[business-register] Main app handshake did not complete; continuing to dealer dashboard.")
           }
-
-          if (sourceParam === "main-app-register") {
-            // try to send user back to listing app with a bridge token so their
-            // session is primed; if that fails we still navigate to the plain
-            // url as a fallback.
-            try {
-              const redirected = await redirectToListingWithBridgeToken({
-                returnTo: getListingAppUrl("/dashboard"),
-              })
-              if (!redirected) {
-                router.replace(getListingAppUrl("/dashboard"))
-              }
-            } catch {
-              router.replace(getListingAppUrl("/dashboard"))
-            }
-          } else {
-            router.replace("/dashboard/dealer")
-          }
+          router.replace("/dashboard/dealer")
         },
         onError: (err) => {
           const status = Number(err?.response?.status || 0)
           if (status === 401 || status === 403) {
-            if (sourceParam === "main-app-register") {
-              // user cannot submit because there's no auth session; just send
-              // them back to the main listing dashboard where they can login
-              // or try again later. Avoid cycling through login page again.
-              router.replace(getListingAppUrl("/dashboard"))
-              return
-            }
             redirectToBusinessRegisterLogin(router)
             return
           }

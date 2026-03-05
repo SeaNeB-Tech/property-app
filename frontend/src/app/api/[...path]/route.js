@@ -15,9 +15,16 @@ const isUsableUrl = (value) => {
 
 const getApiBaseCandidates = () => {
   const nextEnv = String(process.env.NEXT_ENV || "").trim().toLowerCase();
-  const directApiUrl = normalizeUrl(process.env.NEXT_PUBLIC_API_BASE_URL || "");
+  const directApiUrl = normalizeUrl(
+    process.env.BACKEND_API_URL ||
+      process.env.NEXT_PUBLIC_BACKEND_API_URL ||
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      ""
+  );
   const devApiUrl = normalizeUrl(process.env.NEXT_PUBLIC_DEV_URL || "");
-  const centralApiUrl = normalizeUrl(process.env.NEXT_PUBLIC_CENTRAL_URL || "");
+  const centralApiUrl = normalizeUrl(
+    process.env.NEXT_PUBLIC_CENTRAL_URL || process.env.NEXT_PUBLIC_CENTRAL_API_URL || ""
+  );
 
   const primary = nextEnv === "development" ? devApiUrl : centralApiUrl;
   const fallback = nextEnv === "development" ? centralApiUrl : devApiUrl;
@@ -38,15 +45,6 @@ const normalizeProxyPathSegments = (segments = []) => {
   const apiBaseEndsWithV1 = getApiBaseCandidates().some((base) => /\/api\/v1$/i.test(base));
   const normalizedPath =
     apiBaseEndsWithV1 && String(path[0] || "").toLowerCase() === "v1" ? path.slice(1) : path;
-  const key = normalizedPath.join("/").toLowerCase();
-
-  // Backward-compatible aliases used by some frontend clients.
-  if (key === "auth/send-otp") return ["otp", "send-otp"];
-  if (key === "auth/verify-otp") return ["otp", "verify-otp"];
-  if (key === "auth/otp/send") return ["otp", "send-otp"];
-  if (key === "auth/otp/verify") return ["otp", "verify-otp"];
-  if (key === "auth/otp/send-otp") return ["otp", "send-otp"];
-  if (key === "auth/otp/verify-otp") return ["otp", "verify-otp"];
 
   return normalizedPath;
 };
@@ -162,6 +160,16 @@ const getCookieValueFromHeader = (cookieHeader, key) => {
   return "";
 };
 
+const resolveBearerFromCookies = (cookieHeader) => {
+  const rawToken = getCookieValueFromHeader(cookieHeader, "access_token");
+  if (!rawToken) return "";
+  try {
+    return decodeURIComponent(rawToken);
+  } catch {
+    return rawToken;
+  }
+};
+
 const resolveCsrfHeaderValue = (incomingHeader, cookieHeader) => {
   const fromHeader = String(incomingHeader || "").trim();
   if (fromHeader) return fromHeader;
@@ -177,6 +185,8 @@ const resolveCsrfHeaderValue = (incomingHeader, cookieHeader) => {
 const copyHeadersPreservingSetCookie = (upstreamHeaders) => {
   const nextHeaders = new Headers(upstreamHeaders);
   nextHeaders.delete("content-length");
+  nextHeaders.delete("content-encoding");
+  nextHeaders.delete("transfer-encoding");
   nextHeaders.delete("set-cookie");
 
   const getSetCookie = upstreamHeaders?.getSetCookie;
@@ -379,8 +389,15 @@ const forwardRequest = async (request, targetUrl, bodyText) => {
     String(incomingHeaders.get("x-csrf-token") || "").trim(),
     incomingCookie
   );
+  const existingAuthorization = String(
+    incomingHeaders.get("authorization") || incomingHeaders.get("Authorization") || ""
+  ).trim();
+  const cookieAccessToken = resolveBearerFromCookies(incomingCookie);
   if (resolvedCsrf) {
     incomingHeaders.set("x-csrf-token", resolvedCsrf);
+  }
+  if (!existingAuthorization && cookieAccessToken) {
+    incomingHeaders.set("authorization", `Bearer ${cookieAccessToken}`);
   }
   incomingHeaders.set("x-product-key", PRODUCT_KEY);
 
@@ -410,7 +427,8 @@ const proxyHandler = async (request, { params }) => {
     );
   }
 
-  const pathVariants = buildProxyPathVariants(params?.path || []);
+  const resolvedParams = await params;
+  const pathVariants = buildProxyPathVariants(resolvedParams?.path || []);
   const primaryPathSegments = pathVariants[0] || [];
   const otpLimit = consumeOtpRateLimit({ request, pathSegments: primaryPathSegments });
   if (!otpLimit.allowed) {
