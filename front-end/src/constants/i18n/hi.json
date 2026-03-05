@@ -1,0 +1,116 @@
+{
+  "common": {
+    "languageLabel": "भाषा चुनें",
+    "languageEnglish": "अंग्रेज़ी",
+    "languageGujarati": "गुजराती",
+    "languageHindi": "हिंदी"
+  },
+  "navbar": {
+    "home": "[HI] Home",
+    "about": "[HI] About",
+    "blogs": "[HI] Blogs",
+    "partner": "[HI] Partner",
+    "contact": "[HI] Contact",
+    "solution": "[HI] Solution",
+    "login": "[HI] Login",
+    "logout": "[HI] Logout",
+    "dashboard": "[HI] Dashboard",
+    "registerBusiness": "[HI] Register Business"
+  },
+  "auth": {
+    "login": {
+      "title": "लॉगिन",
+      "subtitle": "आगे बढ़ने के लिए अपना मोबाइल नंबर दर्ज करें",
+      "mobileLabel": "मोबाइल नंबर",
+      "mobilePlaceholder": "मोबाइल नंबर दर्ज करें",
+      "viaWhatsapp": "व्हाट्सएप द्वारा",
+      "viaSms": "एसएमएस द्वारा",
+      "continue": "जारी रखें"
+    },
+    "otp": {
+      "title": "ओटीपी सत्यापित करें",
+      "subtitle": "भेजा गया 4 अंकों का कोड दर्ज करें",
+      "verify": "ओटीपी सत्यापित करें",
+      "resend": "ओटीपी पुनः भेजें",
+      "resendIn": "फिर से भेजने में",
+      "verifying": "सत्यापन चल रहा है..."
+    },
+    "register": {
+      "title": "अपनी प्रोफ़ाइल पूरी करें",
+      "subtitle": "कृपया नीचे दिए गए विवरण भरें",
+      "firstName": "पहला नाम",
+      "lastName": "अंतिम नाम",
+      "email": "ईमेल",
+      "gender": "लिंग",
+      "selectGender": "लिंग चुनें",
+      "dob": "जन्म तिथि",
+      "hometown": "गृहनगर",
+      "seanebId": "SeaNeB आईडी",
+      "agreeText": "मैं नियम व शर्तों और गोपनीयता नीति से सहमत हूं",
+      "submit": "जमा करें"
+    },
+    "businessRegistration": {
+      "title": "[HI] Register Your Business",
+      "subtitle": "[HI] Set up your branch profile to start listing and managing leads.",
+      "step1": "[HI] Basic Info",
+      "step2": "[HI] Contact",
+      "step3": "[HI] Location & Compliance",
+      "sectionBasics": "[HI] Business Basics",
+      "sectionContact": "[HI] Contact Details",
+      "sectionAddress": "[HI] Branch Address",
+      "sectionCompliance": "[HI] Compliance (Optional)",
+      "businessName": "[HI] Business Name *",
+      "displayName": "[HI] Display Name",
+      "category": "[HI] Category *",
+      "businessType": "[HI] Business Type *",
+      "countryCode": "[HI] Country Code *",
+      "primaryNumber": "[HI] Primary Number *",
+      "sendOtpVia": "[HI] Send Mobile OTP Via",
+      "whatsappNumber": "[HI] WhatsApp Number",
+      "businessEmail": "[HI] Business Email (Optional)",
+      "aboutBranch": "[HI] About Branch *",
+      "landmark": "[HI] Landmark",
+      "businessLocation": "[HI] Business Location *",
+      "panOptional": "[HI] PAN (optional)",
+      "gstinOptional": "[HI] GSTIN (optional)",
+      "agreeTerms": "[HI] I agree to the business terms and conditions",
+      "previous": "[HI] Previous",
+      "next": "[HI] Next",
+      "registerBusiness": "[HI] Register Business",
+      "loading": "कृपया प्रतीक्षा करें...",
+      "transitionTitle": "[HI] Registering business...",
+      "transitionDescription": "[HI] Creating your business profile and preparing your dashboard."
+    }
+  },
+  "dashboard": {
+    "menu": {
+      "dashboard": "[HI] Dashboard",
+      "broker": "[HI] Broker Dashboard",
+      "listings": "[HI] Listings",
+      "analytics": "[HI] Analytics",
+      "products": "[HI] Products",
+      "settings": "[HI] Settings",
+      "help": "[HI] Help"
+    }
+  },
+  "validation": {
+    "businessNameRequired": "[HI] Business name is required",
+    "businessTypeRequired": "[HI] Business type is required",
+    "businessLocationRequired": "[HI] Business location is required",
+    "mobileRequired": "[HI] Valid primary number is required",
+    "mobileVerifyRequired": "[HI] Please verify business mobile number before registration",
+    "seanebVerifyRequired": "[HI] Please verify SeaNeB ID before registration",
+    "agreeRequired": "[HI] You must agree to the terms and conditions",
+    "invalidPan": "[HI] Invalid PAN format",
+    "invalidGstin": "[HI] Invalid GSTIN format"
+  },
+  "errors": {
+    "registrationFailed": "[HI] Registration failed",
+    "sendMobileOtpFailed": "[HI] Failed to send mobile OTP. Please try again.",
+    "sendEmailOtpFailed": "[HI] Failed to send business email OTP",
+    "invalidOtp": "[HI] Invalid OTP",
+    "panVerificationFailed": "[HI] PAN verification failed",
+    "gstVerificationFailed": "[HI] GSTIN verification failed",
+    "sessionExpired": "[HI] Session expired. Please login again."
+  }
+}

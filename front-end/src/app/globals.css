@@ -1,0 +1,573 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #111111;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-noto-sans), Arial, Helvetica, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-noto-sans), Arial, Helvetica, sans-serif;
+}
+
+main,
+section,
+article {
+  color: #111111;
+}
+
+/* Auth branding text used by AuthHeader -> BrandLogo */
+.logo-text {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.2;
+}
+
+.logo-subtext {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #6b7280;
+  line-height: 1.2;
+}
+
+/* Shared input styles used by AutoComplete and form fragments */
+.form-input {
+  height: 44px;
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+  color: #111827;
+  padding: 0 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
+}
+
+.autocomplete {
+  position: relative;
+}
+
+.autocomplete-box {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+}
+
+.autocomplete-item {
+  padding: 0.65rem 0.75rem;
+  font-size: 0.875rem;
+  color: #111827;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.autocomplete-item:hover {
+  background: #f8fafc;
+}
+
+.autocomplete-item.loading {
+  color: #6b7280;
+  cursor: default;
+}
+
+/* Custom floating country dropdown in PhoneInput */
+.phone-dropdown {
+  position: fixed;
+  z-index: 9999;
+  max-height: 320px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgba(2, 6, 23, 0.2);
+}
+
+.phone-dropdown input {
+  width: 100%;
+  height: 40px;
+  border: none;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.phone-dropdown ul {
+  max-height: 272px;
+  overflow-y: auto;
+}
+
+.phone-dropdown li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.phone-dropdown li:hover {
+  background: #f8fafc;
+}
+
+/* Shared consent row */
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+/* Shared auth page shell background */
+.auth-shell {
+  background-color: #0b1729;
+  background-image:
+    linear-gradient(135deg, rgba(8, 18, 34, 0.82) 0%, rgba(10, 24, 46, 0.72) 40%, rgba(8, 20, 36, 0.78) 100%),
+    radial-gradient(circle at 12% 12%, rgba(218, 172, 69, 0.28) 0%, rgba(218, 172, 69, 0) 34%),
+    radial-gradient(circle at 86% 18%, rgba(196, 149, 56, 0.24) 0%, rgba(196, 149, 56, 0) 36%),
+    url("/auth/login-hero-bg.png");
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;
+  background-size: cover, 52% 52%, 52% 52%, cover;
+  background-position: center center, left top, right top, center center;
+}
+
+.auth-shell--compact {
+  background-size: cover, 62% 62%, 62% 62%, cover;
+}
+
+.auth-shell--wide {
+  background-size: cover, 50% 50%, 50% 50%, cover;
+}
+
+@media (max-width: 768px) {
+  .auth-shell,
+  .auth-shell--compact,
+  .auth-shell--wide {
+    background-size: cover, 76% 76%, 76% 76%, cover;
+    background-position: center center, left top, right top, center center;
+  }
+}
+
+/* Business registration page */
+.business-register-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.business-register-top {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.business-register-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.business-register-title {
+  margin: 0;
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+.business-register-subtitle {
+  margin: 0;
+  color: #475569;
+  font-size: 0.98rem;
+  line-height: 1.45;
+}
+
+.business-register-progress {
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+  border-radius: 12px;
+  padding: 0.85rem 0.9rem;
+}
+
+.business-register-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.86rem;
+  color: #334155;
+}
+
+.business-register-progress-meta strong {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.business-register-progress-track {
+  margin-top: 0.6rem;
+  height: 8px;
+  width: 100%;
+  border-radius: 999px;
+  background: #dbeafe;
+  overflow: hidden;
+}
+
+.business-register-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb 0%, #3b82f6 100%);
+  transition: width 0.25s ease;
+}
+
+.business-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.business-wizard-stepper {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding-top: 0.15rem;
+}
+
+.business-wizard-stepper::before {
+  display: none;
+}
+
+.business-wizard-step-line {
+  display: none;
+}
+
+.business-wizard-step {
+  position: relative;
+  z-index: 2;
+  border: 1px solid #dbeafe;
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.38rem 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.business-wizard-step-index {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.business-wizard-step.active {
+  border-color: #2563eb;
+  color: #0f172a;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.business-wizard-step.done {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.business-wizard-step.done .business-wizard-step-index {
+  background: #166534;
+  color: #fff;
+}
+
+.business-wizard-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.business-wizard-btn {
+  min-width: 140px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.business-wizard-nav .business-wizard-btn,
+.business-wizard-nav > button,
+.business-wizard-nav > .w-full {
+  width: 140px;
+}
+
+.business-wizard-btn--ghost {
+  border-color: #cbd5e1;
+  background: #fff;
+  color: #334155;
+}
+
+.business-wizard-btn--ghost:hover {
+  border-color: #94a3b8;
+}
+
+.business-wizard-btn--primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.business-wizard-btn--primary:hover {
+  background: #1d4ed8;
+}
+
+.business-wizard-btn:disabled {
+  cursor: not-allowed;
+  background: #e2e8f0;
+  border-color: #e2e8f0;
+  color: #94a3b8;
+}
+
+.business-status-pill {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.business-status-pill span {
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.business-status-pill strong {
+  font-size: 0.84rem;
+  color: #0f172a;
+}
+
+.business-status-pill.verified {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.business-status-pill.verified strong {
+  color: #166534;
+}
+
+.business-form-error {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+}
+
+.business-form-error-text {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.88rem;
+}
+
+.business-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.business-form--pro {
+  gap: 1.1rem;
+}
+
+.business-section-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  padding: 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.business-section-head {
+  margin-bottom: 0.8rem;
+}
+
+.business-section-head h2 {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.business-section-head p {
+  margin: 0.25rem 0 0;
+  font-size: 0.86rem;
+  color: #64748b;
+}
+
+.business-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.business-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.business-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.business-form-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.business-form-input,
+.business-form-select {
+  height: 44px;
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0 0.75rem;
+  font-size: 0.9rem;
+  color: #0f172a;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.business-form-input:focus,
+.business-form-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
+}
+
+.business-form-select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #475569 50%), linear-gradient(135deg, #475569 50%, transparent 50%);
+  background-position: calc(100% - 16px) calc(1em + 1px), calc(100% - 11px) calc(1em + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 2.25rem;
+}
+
+.business-inline-action {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.business-inline-action .business-form-input {
+  flex: 1;
+}
+
+.business-form-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.business-form-error-inline {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #dc2626;
+}
+
+.business-verify-note {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: #334155;
+}
+
+.business-submit-panel {
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+  border-radius: 14px;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+@media (max-width: 1024px) {
+  .business-register-title {
+    font-size: 1.8rem;
+  }
+
+  .business-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .business-wizard-stepper {
+    grid-template-columns: 1fr;
+  }
+
+  .business-wizard-stepper::before,
+  .business-wizard-step-line {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .business-register-title {
+    font-size: 1.55rem;
+  }
+
+  .business-grid--2 {
+    grid-template-columns: 1fr;
+  }
+
+  .business-inline-action {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .business-inline-action > button {
+    width: 100%;
+  }
+}

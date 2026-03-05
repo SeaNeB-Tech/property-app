@@ -1,0 +1,121 @@
+const PRODUCT_KEY =
+  String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
+const FAILURE_COOLDOWN_MS = 5000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+let inFlightEnsureSessionPromise = null;
+let lastFailureAt = 0;
+
+const requestMe = async () => {
+  return fetch("/api/auth/me", {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+};
+
+const requestRefresh = async () => {
+  return fetch("/api/auth/refresh", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      product_key: PRODUCT_KEY,
+    }),
+  });
+};
+
+export const ensureSessionReady = async () => {
+  const now = Date.now();
+  if (lastFailureAt && now - lastFailureAt < FAILURE_COOLDOWN_MS) {
+    return false;
+  }
+
+  if (inFlightEnsureSessionPromise) {
+    return inFlightEnsureSessionPromise;
+  }
+
+  inFlightEnsureSessionPromise = (async () => {
+  try {
+    // Try direct profile probe first (handles still-valid access cookie quickly).
+    const firstMe = await requestMe();
+    if (firstMe.ok) return true;
+
+    const firstStatus = Number(firstMe.status || 0);
+    if ([401, 403].includes(firstStatus)) {
+      // Expected when user is logged out: avoid refresh retries/noise loops.
+      lastFailureAt = Date.now();
+      return false;
+    }
+
+    if (![401, 403, 500, 502, 503, 504].includes(firstStatus)) {
+      console.warn("[auth.bootstrap] /api/auth/me failed", { status: firstStatus });
+      lastFailureAt = Date.now();
+      return false;
+    }
+
+    // Retry refresh flow a few times to tolerate transient upstream failures.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const refreshResponse = await requestRefresh();
+      if (!refreshResponse.ok) {
+        const refreshStatus = Number(refreshResponse.status || 0);
+        const canRetry = [500, 502, 503, 504, 429].includes(refreshStatus);
+        if (canRetry && attempt < 2) {
+          await sleep(200 * (attempt + 1));
+          continue;
+        }
+        if ([401, 403].includes(refreshStatus)) {
+          // Expected when refresh cookie/session is missing or expired.
+          lastFailureAt = Date.now();
+          return false;
+        }
+        console.warn("[auth.bootstrap] /api/auth/refresh failed", {
+          status: refreshStatus,
+          attempt: attempt + 1,
+        });
+        lastFailureAt = Date.now();
+        return false;
+      }
+
+      const retryMeResponse = await requestMe();
+      if (retryMeResponse.ok) return true;
+
+      const retryStatus = Number(retryMeResponse.status || 0);
+      const shouldRetry = [401, 403, 500, 502, 503, 504].includes(retryStatus) && attempt < 2;
+      if (shouldRetry) {
+        await sleep(200 * (attempt + 1));
+        continue;
+      }
+
+      console.warn("[auth.bootstrap] /api/auth/me retry failed", {
+        status: retryStatus,
+        attempt: attempt + 1,
+      });
+      lastFailureAt = Date.now();
+      return false;
+    }
+    lastFailureAt = Date.now();
+    return false;
+  } catch (error) {
+    console.warn("[auth.bootstrap] ensureSessionReady error", {
+      message: error?.message || "unknown_error",
+    });
+    lastFailureAt = Date.now();
+    return false;
+  }
+  })();
+
+  try {
+    return await inFlightEnsureSessionPromise;
+  } finally {
+    inFlightEnsureSessionPromise = null;
+  }
+};
+
+export const bootstrapProductAuth = async () => {
+  return ensureSessionReady();
+};

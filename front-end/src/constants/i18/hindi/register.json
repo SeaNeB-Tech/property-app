@@ -1,0 +1,17 @@
+{
+  "completeProfileTitle": "अपनी प्रोफ़ाइल पूरी करें",
+  "completeProfileSubtitle": "कृपया नीचे दिए गए विवरण भरें",
+  "firstName": "पहला नाम",
+  "lastName": "अंतिम नाम",
+  "email": "ईमेल",
+  "gender": "लिंग",
+  "selectGender": "लिंग चुनें",
+  "dob": "जन्म तिथि",
+  "hometown": "गृहनगर",
+  "seanebId": "SeaNeB आईडी",
+  "agreeText": "मैं नियम व शर्तों और गोपनीयता नीति से सहमत हूं",
+  "submit": "जमा करें",
+  "successTitle": "पंजीकरण सफल हुआ",
+  "successSubtitle": "आपकी प्रोफ़ाइल सफलतापूर्वक पूरी हो गई है।",
+  "goToDashboard": "डैशबोर्ड पर जाएं"
+}
