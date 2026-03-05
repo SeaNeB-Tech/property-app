@@ -1,3 +1,8 @@
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const normalizedBasePath =
   rawBasePath && rawBasePath !== "/"
@@ -168,6 +173,15 @@ const nextConfig = {
     ];
   },
   reactCompiler: true,
+  // explicitly set turbopack root to the project directory so that
+  // Next.js can resolve its own package when compiling files under
+  // src/app. Providing an absolute path avoids the warning shown earlier.
+  turbopack: {
+    // use __dirname to guarantee the path of this config file, which is the
+    // actual project directory. process.cwd() can differ when Next forks
+    // child processes and may still point at a parent directory.
+    root: __dirname
+  }
 };
 
 export default nextConfig;
