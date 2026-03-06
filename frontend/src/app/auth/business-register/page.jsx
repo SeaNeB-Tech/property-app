@@ -32,6 +32,7 @@ import Button from "@/components/ui/Button"
 import AutoComplete from "@/components/ui/AutoComplete"
 import SeanebIdField from "@/components/ui/SeanebId"
 import OtpVerificationModal from "@/components/ui/OtpVerificationModal"
+import TermsConditionsModal from "@/components/ui/TermsConditionsModal"
 import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay"
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
 
@@ -51,6 +52,9 @@ const PURPOSE_BUSINESS_EMAIL_VERIFY = 3
 const DEFAULT_MAIN_CATEGORY_ID = process.env.NEXT_PUBLIC_MAIN_CATEGORY_ID || ""
 const OTP_VIA_WHATSAPP = "whatsapp"
 const OTP_VIA_SMS = "sms"
+const RESEND_COOLDOWN_SECONDS = 60
+const VERIFIED_EDIT_COOLDOWN_SECONDS = 60
+const TERMS_TEXT_PATH = "/legal/terms-conditions-property.txt"
 const LANGUAGE_STORAGE_KEY = "auth_language"
 
 const EMPTY_FORM = {
@@ -222,8 +226,10 @@ export default function BusinessRegisterPage() {
   const [verifyingGst, setVerifyingGst] = useState(false)
   const [emailVerified, setEmailVerified] = useState(false)
   const [emailLoading, setEmailLoading] = useState(false)
+  const [emailEditCooldown, setEmailEditCooldown] = useState(0)
   const [mobileVerified, setMobileVerified] = useState(false)
   const [mobileLoading, setMobileLoading] = useState(false)
+  const [mobileEditCooldown, setMobileEditCooldown] = useState(0)
   const [mobileOtpVia, setMobileOtpVia] = useState(OTP_VIA_WHATSAPP)
   const [selectedCountry, setSelectedCountry] = useState(() => {
     const fromSession = getResolvedCountryCode()
@@ -235,8 +241,10 @@ export default function BusinessRegisterPage() {
   const [otpValue, setOtpValue] = useState("")
   const [otpVerifying, setOtpVerifying] = useState(false)
   const [otpResending, setOtpResending] = useState(false)
+  const [otpResendCooldown, setOtpResendCooldown] = useState(0)
   const [otpError, setOtpError] = useState("")
   const [otpClearSignal, setOtpClearSignal] = useState(0)
+  const [termsModalOpen, setTermsModalOpen] = useState(false)
   const [seanebVerified, setSeanebVerified] = useState(false)
   const [panStatusText, setPanStatusText] = useState("")
   const [gstStatusText, setGstStatusText] = useState("")
@@ -248,6 +256,7 @@ export default function BusinessRegisterPage() {
   const [currentStep, setCurrentStep] = useState(1)
   const sectionTopRef = useRef(null)
   const lockedProductKeyRef = useRef("")
+  const suppressNextBusinessAutocompleteRef = useRef(false)
   const debouncedBusinessName = useDebounce(form.businessName, 300)
 
   const t = LANG_MAP[language]
@@ -259,6 +268,7 @@ export default function BusinessRegisterPage() {
   const validateStep = (step) => {
     if (step === 1) {
       if (!form.businessName.trim()) return "Enter business name to continue"
+      if (!form.displayName.trim()) return "Enter display name to continue"
       if (!form.businessType) return "Select business type to continue"
       if (!form.seanebId.trim()) return "Enter SeaNeB ID to continue"
       return ""
@@ -312,6 +322,23 @@ export default function BusinessRegisterPage() {
   }, [language])
 
   useEffect(() => {
+    if (!otpModalOpen || otpResendCooldown <= 0) return
+    const timer = window.setInterval(() => {
+      setOtpResendCooldown((prev) => (prev > 0 ? prev - 1 : 0))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [otpModalOpen, otpResendCooldown])
+
+  useEffect(() => {
+    if (emailEditCooldown <= 0 && mobileEditCooldown <= 0) return
+    const timer = window.setInterval(() => {
+      setEmailEditCooldown((prev) => (prev > 0 ? prev - 1 : 0))
+      setMobileEditCooldown((prev) => (prev > 0 ? prev - 1 : 0))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [emailEditCooldown, mobileEditCooldown])
+
+  useEffect(() => {
     const init = async () => {
       const profileCompleted = getCookie("profile_completed")
       const hasSession = await ensureSessionReady()
@@ -331,7 +358,7 @@ export default function BusinessRegisterPage() {
       const hasBusinessCookie = getCookie("business_registered") === "true"
       const existingBranchId = String(getCookie("branch_id") || "").trim()
       if (hasBusinessCookie || existingBranchId) {
-        router.replace("/dashboard/dealer")
+        router.replace("/dashboard/broker")
         return
       }
 
@@ -526,17 +553,7 @@ export default function BusinessRegisterPage() {
     if (key === "primaryNumber") {
       setMobileVerified(false)
       removeCookie("verified_business_mobile")
-      setForm((prev) => {
-        const prevPrimary = String(prev.primaryNumber || "").trim()
-        const prevWhatsapp = String(prev.whatsappNumber || "").trim()
-        const nextPrimary = String(safeValue || "").trim()
-        const shouldSyncWhatsapp = !prevWhatsapp || prevWhatsapp === prevPrimary
-        return {
-          ...prev,
-          primaryNumber: safeValue,
-          ...(shouldSyncWhatsapp ? { whatsappNumber: nextPrimary } : {}),
-        }
-      })
+      setForm((prev) => ({ ...prev, primaryNumber: safeValue }))
       return
     }
     if (key === "seanebId") {
@@ -576,6 +593,11 @@ export default function BusinessRegisterPage() {
   useEffect(() => {
     let active = true
     const query = debouncedBusinessName?.trim()
+
+    if (suppressNextBusinessAutocompleteRef.current) {
+      suppressNextBusinessAutocompleteRef.current = false
+      return
+    }
 
     if (!query || query.length < 2) {
       setBusinessSuggestions([])
@@ -632,6 +654,7 @@ export default function BusinessRegisterPage() {
       setOtpClearSignal((value) => value + 1)
       setOtpModalType("email")
       setOtpModalTarget(email)
+      setOtpResendCooldown(RESEND_COOLDOWN_SECONDS)
       setOtpModalOpen(true)
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to send business email OTP"))
@@ -675,12 +698,13 @@ export default function BusinessRegisterPage() {
         { maxAge: 300, path: "/" }
       )
 
-      await sendOtp({ via: mobileOtpVia })
+      await sendOtp({ via: mobileOtpVia, disableFallback: true })
 
       setOtpValue("")
       setOtpClearSignal((value) => value + 1)
       setOtpModalType("mobile")
       setOtpModalTarget(`${mobileOtpVia === OTP_VIA_SMS ? "SMS" : "WhatsApp"}: +${countryCode} ${mobile}`)
+      setOtpResendCooldown(RESEND_COOLDOWN_SECONDS)
       setOtpModalOpen(true)
     } catch (err) {
       setSubmitError("Failed to send mobile OTP. Please try again.")
@@ -714,6 +738,7 @@ export default function BusinessRegisterPage() {
           path: "/",
         })
         setEmailVerified(true)
+        setEmailEditCooldown(VERIFIED_EDIT_COOLDOWN_SECONDS)
       } else if (otpModalType === "mobile") {
         await verifyOtpAndLogin({ otp: otpValue })
         const ctx = getJsonCookie("otp_context")
@@ -728,6 +753,7 @@ export default function BusinessRegisterPage() {
           )
         }
         setMobileVerified(true)
+        setMobileEditCooldown(VERIFIED_EDIT_COOLDOWN_SECONDS)
       }
 
       removeCookie("otp_context")
@@ -741,8 +767,27 @@ export default function BusinessRegisterPage() {
     }
   }
 
+  const formatCooldown = (seconds) => {
+    const safe = Math.max(0, Number(seconds) || 0)
+    const mins = String(Math.floor(safe / 60)).padStart(2, "0")
+    const secs = String(safe % 60).padStart(2, "0")
+    return `${mins}:${secs}`
+  }
+
+  const handleEnableMobileEdit = () => {
+    if (mobileEditCooldown > 0) return
+    setMobileVerified(false)
+    removeCookie("verified_business_mobile")
+  }
+
+  const handleEnableEmailEdit = () => {
+    if (emailEditCooldown > 0) return
+    setEmailVerified(false)
+    removeCookie("verified_business_email")
+  }
+
   const handleResendInlineOtp = async () => {
-    if (otpResending) return
+    if (otpResending || otpResendCooldown > 0) return
 
     try {
       setOtpResending(true)
@@ -768,8 +813,9 @@ export default function BusinessRegisterPage() {
           },
           { maxAge: 300, path: "/" }
         )
-        await sendOtp({ via: channel })
+        await sendOtp({ via: channel, disableFallback: true })
       }
+      setOtpResendCooldown(RESEND_COOLDOWN_SECONDS)
     } catch (err) {
       setOtpError("Failed to resend OTP. Please try again.")
     } finally {
@@ -847,6 +893,7 @@ export default function BusinessRegisterPage() {
 
   const handleSubmit = async () => {
     const businessName = normalizeBusinessLabel(form.businessName)
+    const displayName = normalizeBusinessLabel(form.displayName)
     const businessType = form.businessType
     const placeId = form.placeId.trim()
     const primaryNumber = form.primaryNumber.trim()
@@ -858,6 +905,10 @@ export default function BusinessRegisterPage() {
 
     if (!businessName) {
       setSubmitError("Business name is required")
+      return
+    }
+    if (!displayName) {
+      setSubmitError("Display name is required")
       return
     }
     const lockedProductKey = String(lockedProductKeyRef.current || getDefaultProductKey() || "").trim()
@@ -934,7 +985,7 @@ export default function BusinessRegisterPage() {
       async () => {
         const response = await registerBusiness({
           business_name: businessName,
-          display_name: normalizeBusinessLabel(form.displayName?.trim() || businessName),
+          display_name: displayName,
           main_category_id: resolvedMainCategoryId,
           business_type: Number(form.businessType),
           seaneb_id: form.seanebId.trim(),
@@ -1012,9 +1063,9 @@ export default function BusinessRegisterPage() {
           const sentSuccessMessage = notifyMainAppBusinessRegisterSuccess()
           notifyAuthChanged()
           if (!sentSuccessMessage) {
-            console.warn("[business-register] Main app handshake did not complete; continuing to dealer dashboard.")
+            console.warn("[business-register] Main app handshake did not complete; continuing to broker dashboard.")
           }
-          router.replace("/dashboard/dealer")
+          router.replace("/dashboard/broker")
         },
         onError: (err) => {
           const status = Number(err?.response?.status || 0)
@@ -1122,6 +1173,7 @@ export default function BusinessRegisterPage() {
                               key={placeId || `${label}-${index}`}
                               className="autocomplete-item"
                               onMouseDown={() => {
+                                suppressNextBusinessAutocompleteRef.current = true
                                 setForm((prev) => ({
                                   ...prev,
                                   businessName: normalizeBusinessLabel(label),
@@ -1139,7 +1191,7 @@ export default function BusinessRegisterPage() {
                 </div>
               </Field>
 
-              <Field label="Display Name">
+              <Field label="Display Name *">
                 <input type="text" className="business-form-input" value={form.displayName} onChange={(e) => setField("displayName", e.target.value)} />
               </Field>
 
@@ -1210,17 +1262,21 @@ export default function BusinessRegisterPage() {
                     type="text"
                     className={`business-form-input ${mobileVerified ? "border-emerald-300 bg-emerald-50" : ""}`}
                     value={form.primaryNumber}
+                    disabled={mobileVerified}
                     onChange={(e) => setField("primaryNumber", e.target.value.replace(/\D/g, ""))}
                   />
                   <button
                     type="button"
-                    onClick={handleMobileVerify}
-                    disabled={!form.primaryNumber.trim() || mobileVerified || mobileLoading}
+                    onClick={mobileVerified ? handleEnableMobileEdit : handleMobileVerify}
+                    disabled={mobileLoading || (!mobileVerified && !form.primaryNumber.trim()) || (mobileVerified && mobileEditCooldown > 0)}
                     className="h-11 min-w-[110px] rounded-lg border border-blue-600 bg-blue-600 px-4 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
                   >
-                    {mobileLoading ? "Sending..." : mobileVerified ? "Verified" : "Verify"}
+                    {mobileLoading ? "Sending..." : mobileVerified ? "Edit" : "Verify"}
                   </button>
                 </div>
+                {mobileVerified && mobileEditCooldown > 0 && (
+                  <p className="business-verify-note">Try to edit in {formatCooldown(mobileEditCooldown)}</p>
+                )}
               </Field>
 
               <Field label="Send Mobile OTP Via">
@@ -1273,13 +1329,16 @@ export default function BusinessRegisterPage() {
                   />
                   <button
                     type="button"
-                    onClick={handleEmailVerify}
-                    disabled={!form.businessEmail.trim() || emailVerified || emailLoading}
+                    onClick={emailVerified ? handleEnableEmailEdit : handleEmailVerify}
+                    disabled={emailLoading || (!emailVerified && !form.businessEmail.trim()) || (emailVerified && emailEditCooldown > 0)}
                     className="h-11 min-w-[110px] rounded-lg border border-blue-600 bg-blue-600 px-4 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
                   >
-                    {emailLoading ? "Sending..." : emailVerified ? "Verified" : "Verify"}
+                    {emailLoading ? "Sending..." : emailVerified ? "Edit" : "Verify"}
                   </button>
                 </div>
+                {emailVerified && emailEditCooldown > 0 && (
+                  <p className="business-verify-note">Try to edit in {formatCooldown(emailEditCooldown)}</p>
+                )}
               </Field>
             </div>
           </section>
@@ -1369,7 +1428,16 @@ export default function BusinessRegisterPage() {
             <div className="business-submit-panel">
               <div className="checkbox-row">
                 <input type="checkbox" id="agree" checked={form.agree} onChange={(e) => setField("agree", e.target.checked)} />
-                <label htmlFor="agree" className="text-sm cursor-pointer">I agree to the business terms and conditions</label>
+                <label htmlFor="agree" className="text-sm cursor-pointer">
+                  I agree to the business{" "}
+                  <button
+                    type="button"
+                    onClick={() => setTermsModalOpen(true)}
+                    className="text-blue-600 underline"
+                  >
+                    terms and conditions
+                  </button>
+                </label>
               </div>
             </div>
           )}
@@ -1416,9 +1484,14 @@ export default function BusinessRegisterPage() {
         onResend={handleResendInlineOtp}
         loading={otpVerifying}
         resending={otpResending}
-        cooldown={0}
+        cooldown={otpResendCooldown}
         error={otpError}
         clearSignal={otpClearSignal}
+      />
+      <TermsConditionsModal
+        open={termsModalOpen}
+        onClose={() => setTermsModalOpen(false)}
+        textPath={TERMS_TEXT_PATH}
       />
     </AuthCard1>
   )

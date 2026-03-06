@@ -16,6 +16,7 @@ import DatePicker from "@/components/ui/DatePcker"
 import AutoComplete from "@/components/ui/AutoComplete"
 import SeanebIdField from "@/components/ui/SeanebId"
 import OtpVerificationModal from "@/components/ui/OtpVerificationModal"
+import TermsConditionsModal from "@/components/ui/TermsConditionsModal"
 import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay"
 
 // Services
@@ -41,6 +42,7 @@ const LANG_MAP = { eng, guj, hindi }
 const LANGUAGE_STORAGE_KEY = "auth_language"
 const RETURN_TO_COOKIE = "auth_return_to"
 const OTP_PURPOSE_SIGNUP_OR_LOGIN = 0
+const TERMS_TEXT_PATH = "/legal/terms-conditions-property.txt"
 const LISTING_APP_ORIGIN = (() => {
   try {
     return new URL(String(process.env.NEXT_PUBLIC_APP_URL || "").trim()).origin
@@ -165,6 +167,7 @@ export default function CompleteProfilePage() {
   const [emailOtpResending, setEmailOtpResending] = useState(false)
   const [emailOtpError, setEmailOtpError] = useState("")
   const [emailOtpClearSignal, setEmailOtpClearSignal] = useState(0)
+  const [termsModalOpen, setTermsModalOpen] = useState(false)
 
   const [mobileVerifiedData, setMobileVerifiedData] = useState({ country_code: "", mobile_number: "" })
   const [verifiedMobileLabel, setVerifiedMobileLabel] = useState("")
@@ -622,7 +625,16 @@ export default function CompleteProfilePage() {
             checked={form.agree}
             onChange={(e) => setField("agree", e.target.checked)}
           />
-          <label htmlFor="agree-checkbox" className="text-sm cursor-pointer">{t.agreeText}</label>
+          <label htmlFor="agree-checkbox" className="text-sm cursor-pointer">
+            {t.agreeText}{" "}
+            <button
+              type="button"
+              onClick={() => setTermsModalOpen(true)}
+              className="text-blue-600 underline"
+            >
+              Terms & Conditions
+            </button>
+          </label>
         </div>
 
         <Button
@@ -661,6 +673,11 @@ export default function CompleteProfilePage() {
         cooldown={0}
         error={emailOtpError}
         clearSignal={emailOtpClearSignal}
+      />
+      <TermsConditionsModal
+        open={termsModalOpen}
+        onClose={() => setTermsModalOpen(false)}
+        textPath={TERMS_TEXT_PATH}
       />
     </AuthCard1>
   )

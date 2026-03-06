@@ -114,7 +114,7 @@ const saveTokensFromVerifyResponse = (res) => {
   }
 };
 
-export const sendOtp = async ({ via } = {}) => {
+export const sendOtp = async ({ via, disableFallback = false } = {}) => {
   const ctx = getOtpContext();
   const effectiveVia = String(via || ctx.via || DEFAULT_VIA).toLowerCase() === "sms" ? "sms" : "whatsapp";
 
@@ -138,6 +138,7 @@ export const sendOtp = async ({ via } = {}) => {
   try {
     return await postFirstAvailablePath(OTP_SEND_PATHS, payload);
   } catch (err) {
+    if (disableFallback) throw err;
     if (!shouldRetryWithSms(err, effectiveVia)) throw err;
 
     const smsPayload = { ...payload, via: FALLBACK_VIA };
