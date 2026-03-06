@@ -11,6 +11,7 @@ const AUTH_ENTRY_PATHS = new Set([
   "/auth/home",
   "/auth/business-option",
 ]);
+const SIGNUP_OTP_PROOF_COOKIE = "signup_otp_verified";
 
 const hasAnyCookie = (request, names = []) =>
   names.some((name) => Boolean(String(request.cookies.get(name)?.value || "").trim()));
@@ -72,6 +73,7 @@ const hasValidatedSession = async (request) => {
 export async function middleware(request) {
   const pathname = request.nextUrl.pathname;
   let hasSession = hasSessionCookie(request);
+  const hasSignupOtpProof = Boolean(String(request.cookies.get(SIGNUP_OTP_PROOF_COOKIE)?.value || "").trim());
   const shouldProbeSession =
     pathname.startsWith("/dashboard") ||
     AUTH_ENTRY_PATHS.has(pathname) ||
@@ -93,7 +95,7 @@ export async function middleware(request) {
     return redirectForAuthenticatedAuthPage(request);
   }
 
-  if (pathname === "/auth/complete-profile" && !hasSession) {
+  if (pathname === "/auth/complete-profile" && !hasSession && !hasSignupOtpProof) {
     const loginUrl = new URL("/auth/login", request.url);
     loginUrl.searchParams.set("returnTo", request.nextUrl.href);
     return NextResponse.redirect(loginUrl);

@@ -2,11 +2,33 @@ import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
+const ACCESS_COOKIE_KEYS = ["access_token", "accessToken", "token"];
+const REFRESH_COOKIE_KEYS = [
+  "refresh_token_property",
+  "refresh_token",
+  "refreshToken",
+  "refreshToken_property",
+  "property_refresh_token",
+];
+const CSRF_COOKIE_KEYS = ["csrf_token_property", "csrf_token", "x-csrf-token", "x-xsrf-token"];
 
 const buildUpstreamCandidates = () =>
   Array.from(new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean))).map(
     (base) => String(base).replace(/\/+$/, "")
   );
+
+const shouldUseSecureCookies = (request) => {
+  const forwardedProto = String(request?.headers?.get?.("x-forwarded-proto") || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+
+  const protocol = String(request?.nextUrl?.protocol || "").trim().toLowerCase();
+  if (protocol) return protocol === "https:";
+
+  return process.env.NODE_ENV === "production";
+};
 
 const getCookieValueFromHeader = (cookieHeader, key) => {
   const source = String(cookieHeader || "");
@@ -18,6 +40,14 @@ const getCookieValueFromHeader = (cookieHeader, key) => {
     const name = part.slice(0, idx).trim();
     if (name !== key) continue;
     return part.slice(idx + 1).trim();
+  }
+  return "";
+};
+
+const getFirstCookieValueFromHeader = (cookieHeader, keys = []) => {
+  for (const key of keys) {
+    const value = String(getCookieValueFromHeader(cookieHeader, key) || "").trim();
+    if (value) return value;
   }
   return "";
 };
@@ -48,7 +78,14 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
 
 const readTokenFromPayload = (payload = {}, headers = null) => {
   const data = payload?.data || {};
-  const tokenObj = data?.token || payload?.token || {};
+  const tokenObj =
+    data?.token ||
+    payload?.token ||
+    payload?.session?.token ||
+    payload?.data?.session?.token ||
+    payload?.result?.token ||
+    payload?.payload?.token ||
+    {};
   const headerAuth = String(
     headers?.get("authorization") || headers?.get("Authorization") || ""
   ).trim();
@@ -73,7 +110,14 @@ const readTokenFromPayload = (payload = {}, headers = null) => {
 
 const readRefreshTokenFromPayload = (payload = {}) => {
   const data = payload?.data || {};
-  const tokenObj = data?.token || payload?.token || {};
+  const tokenObj =
+    data?.token ||
+    payload?.token ||
+    payload?.session?.token ||
+    payload?.data?.session?.token ||
+    payload?.result?.token ||
+    payload?.payload?.token ||
+    {};
   return String(
     payload?.refreshToken ||
       payload?.refresh_token ||
@@ -97,6 +141,13 @@ const readCsrfFromPayload = (payload = {}, headers = null) => {
       headers?.get("x-xsrf-token") ||
       ""
   ).trim();
+};
+
+const readExpiresInFromPayload = (payload = {}) => {
+  const data = payload?.data || {};
+  const value = payload?.expiresIn ?? payload?.expires_in ?? data?.expiresIn ?? data?.expires_in;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
 };
 
 const parseSetCookieValue = (setCookieLine) => {
@@ -131,8 +182,10 @@ const extractCookieValuesFromUpstream = (upstreamHeaders) => {
   return values;
 };
 
-const setAuthCookies = (response, { accessToken, refreshToken, csrfToken } = {}) => {
-  const secure = process.env.NODE_ENV === "production";
+const setAuthCookies = (
+  response,
+  { accessToken, refreshToken, csrfToken, expiresIn = null, secure = false } = {}
+) => {
   if (accessToken) {
     response.cookies.set({
       name: "access_token",
@@ -141,6 +194,7 @@ const setAuthCookies = (response, { accessToken, refreshToken, csrfToken } = {})
       sameSite: "lax",
       secure,
       path: "/",
+      ...(expiresIn != null ? { maxAge: Math.max(1, Math.floor(expiresIn)) } : {}),
     });
   }
   if (refreshToken) {
@@ -183,7 +237,7 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [], setCookiesF
 
   const incomingCookie = String(request.headers.get("cookie") || "").trim();
   const incomingCsrf = String(request.headers.get("x-csrf-token") || "").trim();
-  const cookieAccessToken = getCookieValueFromHeader(incomingCookie, "access_token");
+  const cookieAccessToken = getFirstCookieValueFromHeader(incomingCookie, ACCESS_COOKIE_KEYS);
 
   let lastResponse = null;
   let resolvedResponse = null;
@@ -261,17 +315,40 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [], setCookiesF
   if (setCookiesFromUpstream) {
     const upstreamCookieValues = extractCookieValuesFromUpstream(responseToReturn.headers);
     const accessToken =
-      readTokenFromPayload(payloadJson || {}, responseToReturn.headers) || upstreamCookieValues.access_token || "";
+      readTokenFromPayload(payloadJson || {}, responseToReturn.headers) ||
+      getFirstCookieValueFromHeader(
+        Object.entries(upstreamCookieValues)
+          .map(([k, v]) => `${k}=${v}`)
+          .join("; "),
+        ACCESS_COOKIE_KEYS
+      ) ||
+      "";
     const refreshToken =
       readRefreshTokenFromPayload(payloadJson || {}) ||
-      upstreamCookieValues.refresh_token_property ||
-      upstreamCookieValues.refresh_token ||
+      getFirstCookieValueFromHeader(
+        Object.entries(upstreamCookieValues)
+          .map(([k, v]) => `${k}=${v}`)
+          .join("; "),
+        REFRESH_COOKIE_KEYS
+      ) ||
       "";
     const csrfToken =
       readCsrfFromPayload(payloadJson || {}, responseToReturn.headers) ||
-      upstreamCookieValues.csrf_token_property ||
+      getFirstCookieValueFromHeader(
+        Object.entries(upstreamCookieValues)
+          .map(([k, v]) => `${k}=${v}`)
+          .join("; "),
+        CSRF_COOKIE_KEYS
+      ) ||
       "";
-    setAuthCookies(res, { accessToken, refreshToken, csrfToken });
+    const expiresIn = readExpiresInFromPayload(payloadJson || {});
+    setAuthCookies(res, {
+      accessToken,
+      refreshToken,
+      csrfToken,
+      expiresIn,
+      secure: shouldUseSecureCookies(request),
+    });
   }
 
   return res;

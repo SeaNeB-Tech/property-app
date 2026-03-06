@@ -3,11 +3,56 @@
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+const LISTING_APP_ORIGIN = (() => {
+  try {
+    return new URL(String(process.env.NEXT_PUBLIC_APP_URL || "").trim()).origin;
+  } catch {
+    return "";
+  }
+})();
+
+const ALLOWED_SOURCE_ORIGINS = Array.from(
+  new Set(
+    String(process.env.NEXT_PUBLIC_ALLOWED_RETURN_ORIGINS || "")
+      .split(",")
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .map((origin) => {
+        try {
+          return new URL(origin).origin;
+        } catch {
+          return "";
+        }
+      })
+      .filter(Boolean)
+      .concat(LISTING_APP_ORIGIN ? [LISTING_APP_ORIGIN] : [])
+  )
+);
+
 const resolveSafeSource = (value) => {
   const source = String(value || "").trim();
   if (!source) return "/dashboard";
-  if (!source.startsWith("/") || source.startsWith("//")) return "/dashboard";
-  return source;
+  if (source.startsWith("/") && !source.startsWith("//")) return source;
+
+  try {
+    const parsed = new URL(source);
+    if (!/^https?:$/i.test(parsed.protocol)) return "/dashboard";
+    if (ALLOWED_SOURCE_ORIGINS.length && !ALLOWED_SOURCE_ORIGINS.includes(parsed.origin)) {
+      return "/dashboard";
+    }
+    return parsed.toString();
+  } catch {
+    return "/dashboard";
+  }
+};
+
+const redirectToSource = (router, source) => {
+  const target = String(source || "").trim() || "/dashboard";
+  if (/^https?:\/\//i.test(target)) {
+    window.location.replace(target);
+    return;
+  }
+  router.replace(target);
 };
 
 export default function SsoCallbackContent() {
@@ -20,7 +65,7 @@ export default function SsoCallbackContent() {
       const source = resolveSafeSource(params.get("source"));
 
       if (!bridgeToken) {
-        router.replace(source);
+        redirectToSource(router, source);
         return;
       }
 
@@ -37,11 +82,11 @@ export default function SsoCallbackContent() {
       });
 
       if (!res.ok) {
-        router.replace(source);
+        redirectToSource(router, source);
         return;
       }
 
-      router.replace(source);
+      redirectToSource(router, source);
     }
 
     void exchange();

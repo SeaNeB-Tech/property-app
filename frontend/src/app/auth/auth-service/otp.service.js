@@ -2,6 +2,7 @@ import api from "@/lib/api/client";
 import { authStore } from "./store/authStore";
 import { getDefaultProductKey, getDefaultProductName } from "@/services/dashboard.service";
 import { getJsonCookie, setJsonCookie } from "@/services/auth.service";
+import { setInMemoryAccessToken, setInMemoryCsrfToken } from "@/lib/api/client";
 import {
   getErrorStatus,
   getErrorText,
@@ -10,7 +11,7 @@ import {
 } from "@/app/auth/auth-service/service.utils";
 
 const IDENTIFIER_TYPE_MOBILE = 0;
-const PURPOSE_SIGNUP_OR_LOGIN = 1;
+const PURPOSE_SIGNUP_OR_LOGIN = 0;
 const DEFAULT_VIA = "whatsapp";
 const FALLBACK_VIA = "sms";
 // Same-origin Next proxy routes
@@ -93,9 +94,24 @@ const shouldRetryWithSms = (err, via) => {
 };
 
 const saveTokensFromVerifyResponse = (res) => {
-  // Cookie-only auth: backend owns access/refresh token cookies.
-  // Frontend should not read or store token values from responses.
-  authStore.setSessionStartTime();
+  // Extract tokens from the OTP verification response and save them
+  const payload = res?.data || {};
+  const accessToken = payload?.accessToken || payload?.access_token || payload?.token;
+  const refreshToken = payload?.refreshToken || payload?.refresh_token;
+  const csrfToken = payload?.csrfToken || payload?.csrf_token || payload?.csrf;
+
+  if (accessToken || refreshToken || csrfToken) {
+    authStore.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      csrf_token: csrfToken,
+    });
+    if (accessToken) setInMemoryAccessToken(accessToken);
+    if (csrfToken) setInMemoryCsrfToken(csrfToken);
+  } else {
+    // Fallback: just set session start time if no tokens in response
+    authStore.setSessionStartTime();
+  }
 };
 
 export const sendOtp = async ({ via } = {}) => {

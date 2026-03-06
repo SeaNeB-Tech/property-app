@@ -11,6 +11,19 @@ const REFRESH_COOKIE_KEYS = [
   "property_refresh_token",
 ];
 
+const shouldUseSecureCookies = (request) => {
+  const forwardedProto = String(request?.headers?.get?.("x-forwarded-proto") || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+
+  const protocol = String(request?.nextUrl?.protocol || "").trim().toLowerCase();
+  if (protocol) return protocol === "https:";
+
+  return process.env.NODE_ENV === "production";
+};
+
 const getCookieValueFromHeader = (cookieHeader, key) => {
   const source = String(cookieHeader || "");
   if (!source) return "";
@@ -158,7 +171,12 @@ const toCookieHeader = (request, refreshCookieValue) => {
   return `${incomingCookie}; ${REFRESH_COOKIE_NAME}=${refreshCookieValue}`;
 };
 
-const setCookieByPayload = (response, payloadJson = {}, upstreamHeaders = null) => {
+const setCookieByPayload = (
+  response,
+  payloadJson = {},
+  upstreamHeaders = null,
+  secure = false
+) => {
   const expiresIn = readExpiresInFromPayload(payloadJson);
   const accessToken = readTokenFromPayload(payloadJson, upstreamHeaders);
   const refreshToken = readRefreshTokenFromPayload(payloadJson);
@@ -170,7 +188,7 @@ const setCookieByPayload = (response, payloadJson = {}, upstreamHeaders = null) 
       value: accessToken,
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure,
       path: "/",
       ...(expiresIn != null ? { maxAge: Math.max(1, Math.floor(expiresIn)) } : {}),
     });
@@ -182,7 +200,7 @@ const setCookieByPayload = (response, payloadJson = {}, upstreamHeaders = null) 
       value: refreshToken,
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure,
       path: "/",
     });
   }
@@ -193,7 +211,7 @@ const setCookieByPayload = (response, payloadJson = {}, upstreamHeaders = null) 
       value: csrfToken,
       httpOnly: false,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure,
       path: "/",
     });
   }
@@ -356,7 +374,7 @@ export async function POST(request) {
         headers: responseHeaders,
       }
     );
-    setCookieByPayload(response, payloadJson, upstreamResponse.headers);
+    setCookieByPayload(response, payloadJson, upstreamResponse.headers, shouldUseSecureCookies(request));
     return response;
   }
 

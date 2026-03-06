@@ -2,9 +2,24 @@ import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
+const ACCESS_COOKIE_KEYS = ["access_token", "accessToken", "token"];
+const CSRF_COOKIE_KEYS = ["csrf_token_property", "csrf_token"];
 
 const getBaseCandidates = () =>
   Array.from(new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean)));
+
+const shouldUseSecureCookies = (request) => {
+  const forwardedProto = String(request?.headers?.get?.("x-forwarded-proto") || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+
+  const protocol = String(request?.nextUrl?.protocol || "").trim().toLowerCase();
+  if (protocol) return protocol === "https:";
+
+  return process.env.NODE_ENV === "production";
+};
 
 const getPathCandidates = () => ["/auth/me", "/profile/me"];
 const REFRESH_PATH_CANDIDATES = ["/auth/refresh"];
@@ -19,6 +34,14 @@ const getCookieValueFromHeader = (cookieHeader, key) => {
     const name = part.slice(0, idx).trim();
     if (name !== key) continue;
     return part.slice(idx + 1).trim();
+  }
+  return "";
+};
+
+const getFirstCookieValueFromHeader = (cookieHeader, keys = []) => {
+  for (const key of keys) {
+    const value = getCookieValueFromHeader(cookieHeader, key);
+    if (String(value || "").trim()) return String(value || "").trim();
   }
   return "";
 };
@@ -78,6 +101,120 @@ const parseSetCookieValue = (setCookieLine) => {
     name: firstPart.slice(0, eq).trim(),
     value: firstPart.slice(eq + 1).trim(),
   };
+};
+
+const readAccessTokenFromPayload = (payload = {}, headers = null) => {
+  const data = payload?.data || {};
+  const tokenObj =
+    data?.token ||
+    payload?.token ||
+    payload?.session?.token ||
+    payload?.data?.session?.token ||
+    payload?.result?.token ||
+    payload?.payload?.token ||
+    {};
+  const headerAuth = String(
+    headers?.get("authorization") || headers?.get("Authorization") || ""
+  ).trim();
+  const responseHeaderToken = /^bearer\s+/i.test(headerAuth)
+    ? headerAuth.replace(/^bearer\s+/i, "").trim()
+    : headerAuth;
+
+  return String(
+    payload?.accessToken ||
+      payload?.access_token ||
+      data?.accessToken ||
+      data?.access_token ||
+      tokenObj?.accessToken ||
+      tokenObj?.access_token ||
+      tokenObj?.token ||
+      tokenObj?.jwt ||
+      payload?.jwt ||
+      data?.jwt ||
+      responseHeaderToken ||
+      ""
+  ).trim();
+};
+
+const readRefreshTokenFromPayload = (payload = {}) => {
+  const data = payload?.data || {};
+  const tokenObj =
+    data?.token ||
+    payload?.token ||
+    payload?.session?.token ||
+    payload?.data?.session?.token ||
+    payload?.result?.token ||
+    payload?.payload?.token ||
+    {};
+  return String(
+    payload?.refreshToken ||
+      payload?.refresh_token ||
+      data?.refreshToken ||
+      data?.refresh_token ||
+      tokenObj?.refreshToken ||
+      tokenObj?.refresh_token ||
+      ""
+  ).trim();
+};
+
+const readCsrfFromPayload = (payload = {}, headers = null) => {
+  const data = payload?.data || {};
+  return String(
+    payload?.csrfToken ||
+      payload?.csrf_token ||
+      data?.csrfToken ||
+      data?.csrf_token ||
+      headers?.get("x-csrf-token") ||
+      headers?.get("csrf-token") ||
+      headers?.get("x-xsrf-token") ||
+      ""
+  ).trim();
+};
+
+const readExpiresInFromPayload = (payload = {}) => {
+  const data = payload?.data || {};
+  const value = payload?.expiresIn ?? payload?.expires_in ?? data?.expiresIn ?? data?.expires_in;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const setAuthCookiesByPayload = (response, payload = {}, headers = null, secure = false) => {
+  const accessToken = readAccessTokenFromPayload(payload, headers);
+  const refreshToken = readRefreshTokenFromPayload(payload);
+  const csrfToken = readCsrfFromPayload(payload, headers);
+  const expiresIn = readExpiresInFromPayload(payload);
+
+  if (accessToken) {
+    response.cookies.set({
+      name: "access_token",
+      value: accessToken,
+      httpOnly: true,
+      sameSite: "lax",
+      secure,
+      path: "/",
+      ...(expiresIn != null ? { maxAge: Math.max(1, Math.floor(expiresIn)) } : {}),
+    });
+  }
+  if (refreshToken) {
+    response.cookies.set({
+      name: "refresh_token_property",
+      value: refreshToken,
+      httpOnly: true,
+      sameSite: "lax",
+      secure,
+      path: "/",
+    });
+  }
+  if (csrfToken) {
+    response.cookies.set({
+      name: "csrf_token_property",
+      value: csrfToken,
+      httpOnly: false,
+      sameSite: "lax",
+      secure,
+      path: "/",
+    });
+  }
 };
 
 const applySetCookiesToJar = (jar, upstreamHeaders) => {
@@ -192,7 +329,7 @@ export async function GET(request) {
   const incomingAuthorization = String(
     request.headers.get("authorization") || request.headers.get("Authorization") || ""
   ).trim();
-  const accessTokenFromCookie = getCookieValueFromHeader(incomingCookie, "access_token");
+  const accessTokenFromCookie = getFirstCookieValueFromHeader(incomingCookie, ACCESS_COOKIE_KEYS);
   const initialCookieJar = parseCookieHeader(incomingCookie);
 
   let lastResponse = null;
@@ -233,14 +370,21 @@ export async function GET(request) {
           if (refreshResponse?.ok) {
             const responseHeaders = new Headers();
             appendSetCookieHeaders(responseHeaders, refreshResponse.headers);
+            const refreshPayload = await refreshResponse.clone().json().catch(() => ({}));
 
             const refreshedCookieJar = new Map(initialCookieJar);
             applySetCookiesToJar(refreshedCookieJar, refreshResponse.headers);
+            const accessFromPayload = readAccessTokenFromPayload(refreshPayload, refreshResponse.headers);
+            const refreshFromPayload = readRefreshTokenFromPayload(refreshPayload);
+            const csrfFromPayload = readCsrfFromPayload(refreshPayload, refreshResponse.headers);
+            if (accessFromPayload) refreshedCookieJar.set("access_token", accessFromPayload);
+            if (refreshFromPayload) refreshedCookieJar.set("refresh_token_property", refreshFromPayload);
+            if (csrfFromPayload) refreshedCookieJar.set("csrf_token_property", csrfFromPayload);
             const mergedCookieHeader = toCookieHeader(refreshedCookieJar);
             const csrfAfterRefresh =
-              getCookieValueFromHeader(mergedCookieHeader, "csrf_token_property") || incomingCsrf;
+              getFirstCookieValueFromHeader(mergedCookieHeader, CSRF_COOKIE_KEYS) || incomingCsrf;
             const accessAfterRefresh =
-              getCookieValueFromHeader(mergedCookieHeader, "access_token") || accessTokenFromCookie;
+              getFirstCookieValueFromHeader(mergedCookieHeader, ACCESS_COOKIE_KEYS) || accessTokenFromCookie;
 
             const retryProfile = await requestProfile({
               base,
@@ -251,7 +395,14 @@ export async function GET(request) {
               accessTokenFromCookie: accessAfterRefresh,
             });
 
-            return copyResponse(retryProfile, responseHeaders);
+            const response = await copyResponse(retryProfile, responseHeaders);
+            setAuthCookiesByPayload(
+              response,
+              refreshPayload,
+              refreshResponse.headers,
+              shouldUseSecureCookies(request)
+            );
+            return response;
           }
         }
 

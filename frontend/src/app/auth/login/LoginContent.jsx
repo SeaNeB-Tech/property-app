@@ -28,7 +28,9 @@ const LANG_MAP = { eng, guj, hindi };
 const LANGUAGE_STORAGE_KEY = "auth_language";
 const RETURN_TO_COOKIE = "auth_return_to";
 const POST_OTP_VERIFIED_COOKIE = "post_otp_verified";
-const PURPOSE_LOGIN = 1;
+// Use shared signup/login purpose so first OTP can continue directly into complete-profile
+// without requiring a second mobile OTP verification.
+const PURPOSE_LOGIN = 0;
 const MAIN_APP_REGISTER_SOURCE = "main-app-register";
 const LISTING_APP_ORIGIN = (() => {
   try {
@@ -161,24 +163,39 @@ export default function LoginContent() {
   }, [returnToParam]);
 
   useEffect(() => {
-    if (!returnToParam || !isSafeReturnTo(returnToParam)) return;
-    if (source === MAIN_APP_REGISTER_SOURCE) return;
-
     let active = true;
     const tryContinueWithExistingSession = async () => {
+      const otpInProgress = String(getCookie("otp_in_progress") || "").trim().toLowerCase();
+      const postOtpVerified = String(getCookie(POST_OTP_VERIFIED_COOKIE) || "").trim().toLowerCase();
+      const csrfHint = String(getCookie("csrf_token_property") || "").trim();
+      const shouldPreserveForOtpFlow =
+        otpInProgress === "1" ||
+        otpInProgress === "true" ||
+        otpInProgress === "yes" ||
+        postOtpVerified === "1" ||
+        postOtpVerified === "true" ||
+        postOtpVerified === "yes";
+      if (shouldPreserveForOtpFlow) return;
+      if (!csrfHint) return;
+
       try {
         const hasSession = await ensureSessionReady();
         if (!active) return;
         if (hasSession) {
-          if (isCrossOriginAbsoluteTarget(returnToParam)) {
+          const target = (() => {
+            if (returnToParam && isSafeReturnTo(returnToParam)) return returnToParam;
+            return resolveRedirectTarget(getPostLoginTarget());
+          })();
+
+          if (isCrossOriginAbsoluteTarget(target)) {
             const redirected = await redirectToListingWithBridgeToken({
-              returnTo: returnToParam,
+              returnTo: target,
               source,
             });
             if (!active) return;
             if (redirected) return;
           }
-          router.replace(returnToParam);
+          router.replace(target);
         }
       } catch {
         // Keep login page visible as fallback.

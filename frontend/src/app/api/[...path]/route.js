@@ -277,6 +277,7 @@ const readExpiresInFromPayload = (payload = {}) => {
 };
 
 const buildSetCookieHeader = ({
+  secure = false,
   name,
   value,
   httpOnly = false,
@@ -287,11 +288,24 @@ const buildSetCookieHeader = ({
   if (!safeName || !safeValue) return "";
   const parts = [`${safeName}=${safeValue}`, "Path=/", "SameSite=Lax"];
   if (httpOnly) parts.push("HttpOnly");
-  if (process.env.NODE_ENV === "production") parts.push("Secure");
+  if (secure) parts.push("Secure");
   if (typeof maxAge === "number" && Number.isFinite(maxAge) && maxAge > 0) {
     parts.push(`Max-Age=${Math.floor(maxAge)}`);
   }
   return parts.join("; ");
+};
+
+const shouldUseSecureCookies = (request) => {
+  const forwardedProto = String(request?.headers?.get?.("x-forwarded-proto") || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+
+  const protocol = String(request?.nextUrl?.protocol || "").trim().toLowerCase();
+  if (protocol) return protocol === "https:";
+
+  return process.env.NODE_ENV === "production";
 };
 
 const shouldHydrateAuthCookies = (segments = []) => {
@@ -308,8 +322,9 @@ const shouldHydrateAuthCookies = (segments = []) => {
   );
 };
 
-const toProxyResponse = async (upstreamResponse, pathSegments = []) => {
+const toProxyResponse = async (upstreamResponse, pathSegments = [], request = null) => {
   const responseHeaders = copyHeadersPreservingSetCookie(upstreamResponse.headers);
+  const secure = shouldUseSecureCookies(request);
 
   if (!shouldHydrateAuthCookies(pathSegments)) {
     return new Response(upstreamResponse.body, {
@@ -343,6 +358,7 @@ const toProxyResponse = async (upstreamResponse, pathSegments = []) => {
     const accessToken = readAccessTokenFromPayload(payload, upstreamResponse.headers);
     if (accessToken) {
       const cookie = buildSetCookieHeader({
+        secure,
         name: "access_token",
         value: accessToken,
         httpOnly: true,
@@ -354,6 +370,7 @@ const toProxyResponse = async (upstreamResponse, pathSegments = []) => {
     const refreshToken = readRefreshTokenFromPayload(payload);
     if (refreshToken) {
       const cookie = buildSetCookieHeader({
+        secure,
         name: "refresh_token_property",
         value: refreshToken,
         httpOnly: true,
@@ -364,6 +381,7 @@ const toProxyResponse = async (upstreamResponse, pathSegments = []) => {
     const csrfToken = readCsrfTokenFromPayload(payload, upstreamResponse.headers);
     if (csrfToken) {
       const cookie = buildSetCookieHeader({
+        secure,
         name: "csrf_token_property",
         value: csrfToken,
         httpOnly: false,
@@ -464,7 +482,7 @@ const proxyHandler = async (request, { params }) => {
         lastResponse = response;
 
         if (!shouldTryNextBase(response)) {
-          return toProxyResponse(response, pathSegments);
+          return toProxyResponse(response, pathSegments, request);
         }
       } catch (err) {
         lastError = err instanceof Error ? err : new Error("Proxy request failed");
@@ -474,7 +492,7 @@ const proxyHandler = async (request, { params }) => {
   }
 
   if (lastResponse) {
-    return toProxyResponse(lastResponse, lastPathSegments);
+    return toProxyResponse(lastResponse, lastPathSegments, request);
   }
 
   return Response.json(

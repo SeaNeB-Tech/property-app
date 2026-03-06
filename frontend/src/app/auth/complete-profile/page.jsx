@@ -40,6 +40,7 @@ import {
 const LANG_MAP = { eng, guj, hindi }
 const LANGUAGE_STORAGE_KEY = "auth_language"
 const RETURN_TO_COOKIE = "auth_return_to"
+const OTP_PURPOSE_SIGNUP_OR_LOGIN = 0
 const LISTING_APP_ORIGIN = (() => {
   try {
     return new URL(String(process.env.NEXT_PUBLIC_APP_URL || "").trim()).origin
@@ -257,10 +258,50 @@ export default function CompleteProfilePage() {
     const proofCc = String(signupOtpProof?.country_code || "").trim()
     const proofMobile = String(signupOtpProof?.mobile_number || "").trim()
     const proofPurpose = Number(signupOtpProof?.purpose ?? -1)
-    const hasValidProof =
+    const hasAcceptedProofPurpose =
+      proofPurpose === OTP_PURPOSE_SIGNUP_OR_LOGIN || proofPurpose === 1
+    let hasValidProof =
       proofCc === cc &&
       proofMobile === mobile &&
-      proofPurpose === 0
+      hasAcceptedProofPurpose
+
+    if (!hasValidProof) {
+      const postOtpVerified = String(getCookie("post_otp_verified") || "").trim().toLowerCase()
+      const hasPostOtpMarker =
+        postOtpVerified === "1" || postOtpVerified === "true" || postOtpVerified === "yes"
+      if (hasPostOtpMarker) {
+        setJsonCookie(
+          "signup_otp_verified",
+          {
+            country_code: cc,
+            mobile_number: mobile,
+            purpose: OTP_PURPOSE_SIGNUP_OR_LOGIN,
+            verified_at: Date.now(),
+          },
+          { maxAge: 60 * 60 * 24 * 7, path: "/" }
+        )
+        hasValidProof = true
+      }
+    }
+
+    if (!hasValidProof) {
+      const mobileVerifiedMarker = String(getCookie("mobile_verified") || "").trim().toLowerCase()
+      const hasMobileVerifiedMarker =
+        mobileVerifiedMarker === "1" || mobileVerifiedMarker === "true" || mobileVerifiedMarker === "yes"
+      if (hasMobileVerifiedMarker && cc && mobile) {
+        setJsonCookie(
+          "signup_otp_verified",
+          {
+            country_code: cc,
+            mobile_number: mobile,
+            purpose: OTP_PURPOSE_SIGNUP_OR_LOGIN,
+            verified_at: Date.now(),
+          },
+          { maxAge: 60 * 60 * 24 * 7, path: "/" }
+        )
+        hasValidProof = true
+      }
+    }
 
     if (!hasValidProof) {
       setMounted(false)
@@ -381,6 +422,18 @@ export default function CompleteProfilePage() {
   }
 
   const handleSubmit = async () => {
+    const firstName = String(form.firstName || "").trim()
+    const lastName = String(form.lastName || "").trim()
+    const seanebId = String(form.seanebId || "").trim()
+
+    if (!firstName || !lastName) {
+      setSubmitError("First name and last name are required.")
+      return
+    }
+    if (!seanebId) {
+      setSubmitError("Seaneb ID is required.")
+      return
+    }
     if (!isAge13Plus(form.dob)) {
       alert("User must be at least 13 years old")
       return
@@ -576,6 +629,10 @@ export default function CompleteProfilePage() {
           type="submit"
           label={isTransitioning ? "Creating account..." : t.submit}
           disabled={
+            !String(form.firstName || "").trim() ||
+            !String(form.lastName || "").trim() ||
+            !String(form.seanebId || "").trim() ||
+            !String(form.dob || "").trim() ||
             !seanebVerified ||
             !form.placeId ||
             !form.gender ||

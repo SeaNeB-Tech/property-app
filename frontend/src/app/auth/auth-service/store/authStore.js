@@ -64,11 +64,22 @@ const authStore = {
   },
 
   getSessionStartTime() {
-    return null;
+    if (typeof window === "undefined") return null;
+    try {
+      const stored = window.sessionStorage.getItem("auth_session_start");
+      return stored ? new Date(stored) : null;
+    } catch {
+      return null;
+    }
   },
 
   setSessionStartTime() {
-    return null;
+    if (typeof window === "undefined") return;
+    try {
+      window.sessionStorage.setItem("auth_session_start", new Date().toISOString());
+    } catch {
+      // Ignore storage errors
+    }
   },
 
   setSession({ access_token, refresh_token, csrf_token }) {

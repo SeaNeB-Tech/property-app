@@ -26,6 +26,7 @@ import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect";
 
 const LANG_MAP = { eng, guj, hindi };
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
+const PURPOSE_SIGNUP_OR_LOGIN = 0;
 const LANGUAGE_STORAGE_KEY = "auth_language";
 const POST_OTP_VERIFIED_COOKIE = "post_otp_verified";
 const MAIN_APP_LOGIN_SOURCE = "main-app";
@@ -306,26 +307,22 @@ export default function OtpPage() {
               isExistingUserField === true ||
               userExistsField === true ||
               profileCompletedField === true;
-            const { source } = readFlowContextFromUrl();
-            const isRegisterFlowFromMainApp = source === MAIN_APP_REGISTER_SOURCE;
             const requiresRegistration =
-              requiresRegistrationField === true
-                ? true
-                : isRegisterFlowFromMainApp
-                  ? false
-                  : !isExistingUser;
+              requiresRegistrationField === true ? true : !isExistingUser;
 
             if (requiresRegistration) {
+              // Treat the first successful login OTP as signup-mobile verification proof.
               setJsonCookie(
                 "signup_otp_verified",
                 {
                   country_code: String(contextSnapshot.country_code),
                   mobile_number: String(contextSnapshot.mobile_number),
-                  purpose: Number(contextSnapshot.purpose || 0),
+                  purpose: PURPOSE_SIGNUP_OR_LOGIN,
                   verified_at: Date.now(),
                 },
-                { maxAge: 15 * 60, path: "/" }
+                { maxAge: 60 * 60 * 24 * 7, path: "/" }
               );
+              setCookie(POST_OTP_VERIFIED_COOKIE, "1", { maxAge: 60 * 60 * 24 * 7, path: "/" });
               removeCookie("otp_in_progress");
               removeCookie("otp_context");
               router.replace("/auth/complete-profile");

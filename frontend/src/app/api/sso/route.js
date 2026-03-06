@@ -50,9 +50,15 @@ export async function POST(request) {
     bodyPayload = {};
   }
 
+  console.log("[SSO Mint] Starting bridge token mint", { bodyPayload });
+
   const cookieHeader = String(request.headers.get("cookie") || "").trim();
   const upstreamCandidates = buildUpstreamCandidates();
   if (upstreamCandidates.length === 0) {
+    console.error("[SSO Mint] No upstream candidates configured", {
+      API_REMOTE_BASE_URL,
+      API_REMOTE_FALLBACK_BASE_URL,
+    });
     return NextResponse.json(
       {
         error: {
@@ -64,8 +70,11 @@ export async function POST(request) {
     );
   }
 
+  console.log("[SSO Mint] Upstream candidates:", upstreamCandidates);
+
   let lastResponse = null;
   for (const upstreamUrl of upstreamCandidates) {
+    console.log(`[SSO Mint] Trying upstream: ${upstreamUrl}`);
     const headers = new Headers();
     headers.set("content-type", "application/json");
     headers.set("x-product-key", PRODUCT_KEY);
@@ -78,6 +87,8 @@ export async function POST(request) {
         String(bodyPayload?.target_product_key || "").trim() || PRODUCT_KEY,
     });
 
+    console.log(`[SSO Mint] Request body:`, JSON.parse(body));
+
     try {
       const upstreamResponse = await fetch(upstreamUrl, {
         method: "POST",
@@ -89,6 +100,8 @@ export async function POST(request) {
 
       lastResponse = upstreamResponse;
       const status = Number(upstreamResponse.status || 0);
+      console.log(`[SSO Mint] Upstream response: ${upstreamUrl} -> ${status}`);
+
       if (status === 404 || status === 405) continue;
 
       const responseHeaders = new Headers();
@@ -97,11 +110,13 @@ export async function POST(request) {
       appendSetCookieHeaders(responseHeaders, upstreamResponse.headers);
 
       const payloadText = await upstreamResponse.text();
+      console.log(`[SSO Mint] Response payload:`, payloadText);
       return new NextResponse(payloadText, {
         status,
         headers: responseHeaders,
       });
-    } catch {
+    } catch (error) {
+      console.error(`[SSO Mint] Error trying upstream ${upstreamUrl}:`, error.message);
       // try next candidate
     }
   }

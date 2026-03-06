@@ -10,6 +10,7 @@ axios.defaults.headers.common["x-product-key"] = DEFAULT_PRODUCT_KEY;
 axios.defaults.withCredentials = true;
 
 let inMemoryCsrfToken = "";
+let inMemoryAccessToken = "";
 let refreshPromise = null;
 const TRANSIENT_BACKEND_STATUSES = new Set([500, 502, 503, 504, 522, 524]);
 const CSRF_COOKIE_NAMES = ["csrf_token_property"];
@@ -40,12 +41,17 @@ const getCsrfToken = () =>
   String(
     getFirstCookieValue(CSRF_COOKIE_NAMES) || inMemoryCsrfToken || ""
   ).trim();
+const getAccessToken = () =>
+  String(getFirstCookieValue(["access_token"]) || inMemoryAccessToken || "").trim();
 const getProductKey = () => {
   return DEFAULT_PRODUCT_KEY;
 };
 
 const setCsrfTokenInMemory = (token) => {
   inMemoryCsrfToken = String(token || "").trim();
+};
+const setAccessTokenInMemory = (token) => {
+  inMemoryAccessToken = String(token || "").trim();
 };
 
 const shouldInvalidateClientSession = (error) => {
@@ -82,10 +88,13 @@ const redirectToAuthLogin = () => {
 const readCsrfTokenFromResponse = (response) => {
   const data = response?.data || {};
   const fromBody =
+    data?.csrf_token_property ||
     data?.csrf_token ||
     data?.csrfToken ||
+    data?.data?.csrf_token_property ||
     data?.data?.csrf_token ||
     data?.data?.csrfToken ||
+    data?.result?.csrf_token_property ||
     data?.result?.csrf_token ||
     data?.result?.csrfToken ||
     "";
@@ -98,6 +107,28 @@ const readCsrfTokenFromResponse = (response) => {
   ).trim();
 
   return String(fromBody || fromHeader || "").trim();
+};
+
+const readAccessTokenFromResponse = (response) => {
+  const data = response?.data || {};
+  const tokenObj =
+    data?.token ||
+    data?.tokens ||
+    data?.data?.token ||
+    data?.data?.tokens ||
+    data?.result?.token ||
+    {};
+  return String(
+    data?.access_token ||
+      data?.accessToken ||
+      data?.token ||
+      data?.jwt ||
+      tokenObj?.access_token ||
+      tokenObj?.accessToken ||
+      tokenObj?.token ||
+      tokenObj?.jwt ||
+      ""
+  ).trim();
 };
 
 const api = axios.create({
@@ -231,10 +262,14 @@ export const apiRequest = async (config = {}) => {
   nextConfig.headers = stripAuthorizationHeader({ ...(config?.headers || {}) });
 
   const csrfToken = getCsrfToken();
+  const accessToken = getAccessToken();
   const productKey = getProductKey();
 
   if (csrfToken && !nextConfig.headers["x-csrf-token"]) {
     nextConfig.headers["x-csrf-token"] = csrfToken;
+  }
+  if (accessToken && !nextConfig.headers.authorization && !nextConfig.headers.Authorization) {
+    nextConfig.headers.authorization = `Bearer ${accessToken}`;
   }
   nextConfig.headers["x-product-key"] = productKey;
 
@@ -258,9 +293,13 @@ api.interceptors.request.use((config) => {
   config.headers = stripAuthorizationHeader(config.headers || {});
 
   const csrfToken = getCsrfToken();
+  const accessToken = getAccessToken();
   const productKey = getProductKey();
 
   if (csrfToken) config.headers["x-csrf-token"] = csrfToken;
+  if (accessToken && !config.headers.authorization && !config.headers.Authorization) {
+    config.headers.authorization = `Bearer ${accessToken}`;
+  }
   config.headers["x-product-key"] = productKey;
 
   return config;
@@ -268,6 +307,8 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => {
+    const accessToken = readAccessTokenFromResponse(response);
+    if (accessToken) setAccessTokenInMemory(accessToken);
     const nextCsrfToken = readCsrfTokenFromResponse(response);
     if (nextCsrfToken) setCsrfTokenInMemory(nextCsrfToken);
     return response;
@@ -315,10 +356,11 @@ api.interceptors.response.use(
 
 export default api;
 export const clearInMemoryAccessToken = () => {
+  setAccessTokenInMemory("");
   setCsrfTokenInMemory("");
 };
-export const setInMemoryAccessToken = () => "";
-export const getInMemoryAccessToken = () => "";
+export const setInMemoryAccessToken = (token) => setAccessTokenInMemory(token);
+export const getInMemoryAccessToken = () => String(inMemoryAccessToken || "").trim();
 export const setInMemoryCsrfToken = (token) => setCsrfTokenInMemory(token);
 export const getInMemoryCsrfToken = () => String(inMemoryCsrfToken || "").trim();
 
