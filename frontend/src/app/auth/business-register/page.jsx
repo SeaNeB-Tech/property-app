@@ -26,7 +26,6 @@ import { setAccessToken as setInMemoryAccessToken } from "@/lib/auth/tokenStorag
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
-import { getListingAppUrl } from "@/lib/core/appUrls"
 import useDebounce from "@/hooks/useDebounce"
 import AuthCard1 from "@/components/ui/AuthCard1"
 import AuthHeader from "@/components/ui/AuthHeader"
@@ -38,7 +37,6 @@ import TermsConditionsModal from "@/components/ui/TermsConditionsModal"
 import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay"
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
 import { setAuthFlowContext } from "@/lib/auth/flowContext"
-import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect"
 
 // i18n
 import eng from "@/constants/i18/eng/business_register.json"
@@ -151,32 +149,6 @@ const WIZARD_STEPS = [
 ]
 
 const getOtpChannelLabel = (via) => (via === OTP_VIA_SMS ? "SMS" : "WhatsApp")
-
-const notifyMainAppBusinessRegisterSuccess = () => {
-  if (typeof window === "undefined") return
-  const configuredMainOrigin = String(process.env.NEXT_PUBLIC_APP_ORIGIN || "").trim()
-  if (!configuredMainOrigin) {
-    console.warn("[business-register] NEXT_PUBLIC_APP_ORIGIN is missing; skipping cross-tab success message.")
-    return false
-  }
-
-  if (!window.opener) {
-    console.warn("[business-register] window.opener is not available; skipping cross-tab success message.")
-    return false
-  }
-
-  try {
-    console.log("[business-register] Sending auth success message to opener")
-    window.opener.postMessage(
-      { type: "SEANEB_BUSINESS_REGISTER_SUCCESS" },
-      configuredMainOrigin
-    )
-    return true
-  } catch {
-    console.warn("[business-register] postMessage failed; continuing local redirect flow.")
-    return false
-  }
-}
 
 const redirectToBusinessRegisterLogin = (router) => {
   const returnTo = "/auth/business-register"
@@ -1128,18 +1100,7 @@ export default function BusinessRegisterPage() {
             }
           }
 
-          const sentSuccessMessage = notifyMainAppBusinessRegisterSuccess()
           notifyAuthChanged()
-          if (!sentSuccessMessage) {
-            const redirected = await redirectToListingWithBridgeToken({
-              returnTo: getListingAppUrl("/dashboard/broker"),
-              source: "main-app-register",
-            })
-            if (redirected) {
-              return
-            }
-            console.warn("[business-register] Main app handshake did not complete; falling back to local broker redirect.")
-          }
           router.replace("/dashboard/broker")
         },
         onError: (err) => {
@@ -1184,15 +1145,7 @@ export default function BusinessRegisterPage() {
                   path: "/",
                 })
 
-                const sentSuccessMessage = notifyMainAppBusinessRegisterSuccess()
                 notifyAuthChanged()
-                if (!sentSuccessMessage) {
-                  const redirected = await redirectToListingWithBridgeToken({
-                    returnTo: getListingAppUrl("/dashboard/broker"),
-                    source: "main-app-register",
-                  })
-                  if (redirected) return
-                }
                 router.replace("/dashboard/broker")
                 return
               } catch (fallbackErr) {

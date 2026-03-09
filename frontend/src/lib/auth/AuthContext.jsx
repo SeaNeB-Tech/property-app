@@ -6,6 +6,33 @@ import { API } from "@/lib/config/apiPaths";
 import { notifyAuthChanged, subscribeAuthState } from "@/services/auth.service";
 
 const AuthContext = createContext(null);
+const PUBLIC_AUTH_PATHS = new Set([
+  "/auth/login",
+  "/auth/otp",
+  "/auth/email-otp",
+  "/auth/complete-profile",
+  "/auth/business-register",
+  "/auth/business-option",
+  "/auth/home",
+  "/auth/success",
+]);
+
+const hasAuthCookieHints = () => {
+  if (typeof document === "undefined") return false;
+  const cookieSource = String(document.cookie || "");
+  return (
+    cookieSource.includes("refresh_token_property=") ||
+    cookieSource.includes("csrf_token_property=") ||
+    cookieSource.includes("post_otp_verified=") ||
+    cookieSource.includes("signup_otp_verified=")
+  );
+};
+
+const shouldSkipPublicAuthProbe = () => {
+  if (typeof window === "undefined") return false;
+  const path = String(window.location.pathname || "").trim();
+  return PUBLIC_AUTH_PATHS.has(path) && !hasAuthCookieHints();
+};
 
 export function AuthProvider({ children }) {
   const [status, setStatus] = useState("logged_out");
@@ -24,6 +51,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   const restoreSession = useCallback(async () => {
+    if (shouldSkipPublicAuthProbe()) {
+      setUser(null);
+      setStatus("logged_out");
+      return false;
+    }
+
     setStatus("restoring");
 
     const fetchProfile = async () =>

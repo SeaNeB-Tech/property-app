@@ -71,12 +71,37 @@ const isAuthCookieName = (name) => {
     key.startsWith("auth_session_")
   );
 };
+const REAL_COOKIE_KEYS = new Set([
+  "refresh_token_property",
+  "csrf_token_property",
+  "profile_completed",
+  "post_otp_verified",
+  "signup_otp_verified",
+  "auth_return_to",
+  "business_registered",
+  "business_id",
+  "branch_id",
+  "business_name",
+  "business_type",
+  "business_location",
+  "mobile_verified",
+  "otp_cc",
+  "otp_mobile",
+  "otp_in_progress",
+  "otp_context",
+  "verified_mobile",
+  "verified_business_mobile",
+  "verified_business_email",
+  "verified_email",
+  "verified_pan",
+  "verified_gstin",
+  "user_email",
+  "seaneb_id",
+]);
+
 const isEssentialCookieName = (name) => {
   const key = String(name || "").trim().toLowerCase();
-  return (
-    key === "refresh_token_property" ||
-    key === "csrf_token_property"
-  );
+  return REAL_COOKIE_KEYS.has(key);
 };
 
 const isBlockedAuthCookieWrite = (name) => {
@@ -128,19 +153,6 @@ const emitCookieChange = (name) => {
 const usesRealCookie = (name) => isEssentialCookieName(name);
 
 const getStorageKey = (name) => `${STORAGE_PREFIX}${String(name || "").trim()}`;
-
-const clearLegacyNonAuthCookies = () => {
-  if (!isBrowser) return;
-  const legacyKeys = ["business_registered", "business_id", "branch_id"];
-  for (const key of legacyKeys) {
-    // Use direct clear here because helper is defined later in this module.
-    document.cookie = `${encodeURIComponent(key)}=; path=/; max-age=0; SameSite=Lax`;
-  }
-};
-
-if (isBrowser) {
-  clearLegacyNonAuthCookies();
-}
 
 const setVolatileValue = (name, value) => {
   const key = getStorageKey(name);

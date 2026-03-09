@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
-import { getListingAppUrl } from "@/lib/core/appUrls";
+import BrokerDashboardShell from "@/components/dashboard/BrokerDashboardShell";
 
 export default function BrokerDashboardPage() {
-  redirect(getListingAppUrl("/dashboard/broker"));
+  return <BrokerDashboardShell />;
 }

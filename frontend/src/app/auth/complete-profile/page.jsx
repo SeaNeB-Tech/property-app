@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 
 // i18n
@@ -181,8 +181,14 @@ export default function CompleteProfilePage() {
   const [submitError, setSubmitError] = useState("")
   const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition()
 
-  const redirectToPostLoginTarget = async ({ sourcePayload = null } = {}) => {
+  const redirectToPostLoginTarget = useCallback(async ({ sourcePayload = null } = {}) => {
     const target = resolveRedirectTarget(getPostLoginTarget())
+    if (target === "/dashboard" || target.startsWith("/dashboard/")) {
+      removeCookie(RETURN_TO_COOKIE)
+      clearAuthFlowContext()
+      router.replace(target)
+      return true
+    }
     try {
       const redirected = await redirectToListingWithBridgeToken({
         returnTo: target,
@@ -203,7 +209,7 @@ export default function CompleteProfilePage() {
       )
       return false
     }
-  }
+  }, [router])
 
   const setField = (key, value) => {
     let safeValue = value
@@ -253,7 +259,7 @@ export default function CompleteProfilePage() {
     if (hasCsrf && isProfileDone) {
       void redirectToPostLoginTarget()
     }
-  }, [])
+  }, [redirectToPostLoginTarget])
 
   useEffect(() => {
     const resolvedMobile = resolveVerifiedMobile()

@@ -115,6 +115,11 @@ const readAccessTokenFromResponse = (response) => {
     data?.data?.tokens ||
     data?.result?.token ||
     {};
+  const headerAuth = String(
+    response?.headers?.["authorization"] || response?.headers?.["Authorization"] || ""
+  ).trim();
+  const headerToken = /^Bearer\s+/i.test(headerAuth) ? headerAuth.replace(/^Bearer\s+/i, "").trim() : headerAuth;
+
   return String(
     data?.access_token ||
       data?.accessToken ||
@@ -124,6 +129,7 @@ const readAccessTokenFromResponse = (response) => {
       tokenObj?.accessToken ||
       tokenObj?.token ||
       tokenObj?.jwt ||
+      headerToken ||
       ""
   ).trim();
 };

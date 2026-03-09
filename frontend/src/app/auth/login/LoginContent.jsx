@@ -95,7 +95,7 @@ const resolveRedirectTarget = (target) => {
   const safeTarget = String(target || "").trim();
   if (!safeTarget) return getListingAppUrl("/home");
   if (/^https?:\/\//i.test(safeTarget)) return safeTarget;
-  if (safeTarget.startsWith("/dashboard")) return getListingAppUrl(safeTarget);
+  if (safeTarget.startsWith("/dashboard")) return safeTarget;
   return safeTarget;
 };
 

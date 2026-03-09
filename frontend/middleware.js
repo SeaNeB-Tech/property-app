@@ -12,6 +12,11 @@ const AUTH_ENTRY_PATHS = new Set([
   "/auth/business-option",
 ]);
 const SIGNUP_OTP_PROOF_COOKIE = "signup_otp_verified";
+const BUSINESS_HINT_COOKIE_KEYS = [
+  "business_registered",
+  "business_id",
+  "branch_id",
+];
 
 const toBool = (value) => {
   if (value === true) return true;
@@ -64,6 +69,16 @@ const hasAnyCookie = (request, names = []) =>
 
 const hasSessionCookie = (request) => {
   return hasAnyCookie(request, REFRESH_COOKIE_KEYS);
+};
+
+const hasBusinessHintCookie = (request) => {
+  const businessRegistered = String(request.cookies.get("business_registered")?.value || "")
+    .trim()
+    .toLowerCase();
+  if (businessRegistered === "true" || businessRegistered === "1" || businessRegistered === "yes") {
+    return true;
+  }
+  return hasAnyCookie(request, BUSINESS_HINT_COOKIE_KEYS.filter((key) => key !== "business_registered"));
 };
 
 const getSafeInternalReturnPath = (request) => {
@@ -134,7 +149,7 @@ const getValidatedSessionState = async (request) => {
 export async function middleware(request) {
   const pathname = request.nextUrl.pathname;
   let hasSession = hasSessionCookie(request);
-  let hasBusiness = false;
+  let hasBusiness = hasBusinessHintCookie(request);
   const hasSignupOtpProof = Boolean(String(request.cookies.get(SIGNUP_OTP_PROOF_COOKIE)?.value || "").trim());
   const shouldProbeSession =
     pathname.startsWith("/dashboard") ||
@@ -144,7 +159,7 @@ export async function middleware(request) {
   if (shouldProbeSession) {
     const sessionState = await getValidatedSessionState(request);
     hasSession = sessionState.authenticated;
-    hasBusiness = sessionState.hasBusiness;
+    hasBusiness = sessionState.hasBusiness || (hasSession && hasBusinessHintCookie(request));
   }
 
   if (pathname.startsWith("/dashboard") && !hasSession) {

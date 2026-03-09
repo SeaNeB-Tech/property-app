@@ -1,6 +1,9 @@
 "use client";
 
-export default function DealerDashboardHeader() {
+export default function DashboardHeader({
+  title = "Business Dashboard",
+  subtitle = "Manage your business profile and registration details.",
+}) {
   const returnToMainApp = () => {
     const mainUrl = String(process.env.NEXT_PUBLIC_APP_URL || "").trim();
 
@@ -12,13 +15,16 @@ export default function DealerDashboardHeader() {
   };
 
   return (
-    <header className="border-b border-slate-200 bg-white px-4 py-3">
-      <div className="mx-auto flex max-w-5xl items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-900">Dealer Dashboard</h1>
+    <header className="border-b border-slate-200 bg-white px-4 py-4">
+      <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-900">{title}</h1>
+          <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+        </div>
         <button
           type="button"
           onClick={returnToMainApp}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+          className="inline-flex h-11 items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-medium text-white transition hover:bg-slate-700"
         >
           Visit Website
         </button>
