@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import phoneCodes from "@/constants/phoneCodes.json";
 
 // i18n
@@ -19,10 +19,17 @@ import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay";
 // Service
 import { sendOtp } from "@/app/auth/auth-service/otp.service";
 import { clearPreAuthCsrfCookies, getCookie, removeCookie, setCookie, setJsonCookie } from "@/services/auth.service";
-import { getAuthAppUrl, getListingAppUrl } from "@/lib/core/appUrls";
+import { getListingAppUrl } from "@/lib/core/appUrls";
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition";
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap";
 import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect";
+import {
+  getAuthFlowContext,
+  ingestAuthFlowContextFromWindowName,
+  ingestAuthFlowContextFromUrl,
+  setAuthFlowContext,
+  stripAuthFlowParamsFromAddressBar,
+} from "@/lib/auth/flowContext";
 
 const LANG_MAP = { eng, guj, hindi };
 const LANGUAGE_STORAGE_KEY = "auth_language";
@@ -75,10 +82,8 @@ const isSafeReturnTo = (value) => {
 };
 
 const getPostLoginTarget = () => {
-  if (typeof window === "undefined") return getListingAppUrl("/home");
-
-  const queryTarget = String(new URLSearchParams(window.location.search).get("returnTo") || "").trim();
-  if (isSafeReturnTo(queryTarget)) return queryTarget;
+  const flowTarget = String(getAuthFlowContext()?.returnTo || "").trim();
+  if (isSafeReturnTo(flowTarget)) return flowTarget;
 
   const cookieTarget = String(getCookie(RETURN_TO_COOKIE) || "").trim();
   if (isSafeReturnTo(cookieTarget)) return cookieTarget;
@@ -126,7 +131,6 @@ const getFriendlyOtpError = (err) => {
 
 export default function LoginContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [language, setLanguage] = useState(() => {
     if (typeof window !== "undefined") {
@@ -141,9 +145,14 @@ export default function LoginContent() {
   const [country, setCountry] = useState(phoneCodes[0]);
   const [method, setMethod] = useState("whatsapp");
   const [error, setError] = useState("");
+  const [flowContext] = useState(() => {
+    if (typeof window === "undefined") return getAuthFlowContext();
+    ingestAuthFlowContextFromWindowName();
+    return ingestAuthFlowContextFromUrl();
+  });
   const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition();
-  const source = String(searchParams?.get("source") || "").trim().toLowerCase();
-  const returnToParam = String(searchParams?.get("returnTo") || "").trim();
+  const source = String(flowContext?.source || "").trim().toLowerCase();
+  const returnToParam = String(flowContext?.returnTo || "").trim();
 
   const t = LANG_MAP[language] || eng;
 
@@ -155,6 +164,10 @@ export default function LoginContent() {
       window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
     }
   }, [language]);
+
+  useEffect(() => {
+    stripAuthFlowParamsFromAddressBar();
+  }, []);
 
   useEffect(() => {
     const returnTo = returnToParam;
@@ -270,12 +283,12 @@ export default function LoginContent() {
           return resolveRedirectTarget(getPostLoginTarget());
         })();
 
-        return encodeURIComponent(resolvedReturnTo);
+        return resolvedReturnTo;
       },
       {
         onSuccess: (returnTo) => {
-          const sourceSuffix = source ? `&source=${encodeURIComponent(source)}` : "";
-          router.replace(`/auth/otp?returnTo=${returnTo}${sourceSuffix}`);
+          setAuthFlowContext({ source, returnTo: String(returnTo || "").trim() });
+          router.replace("/auth/otp");
         },
         onError: (err) => {
           console.error("sendOtp failed:", err);

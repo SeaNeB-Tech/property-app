@@ -2,6 +2,7 @@ import axios from "axios";
 import { API_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
 import { getAuthAppUrl } from "@/lib/core/appUrls";
 import { getCookie as getCookieShared } from "@/lib/auth/cookieManager";
+import { setAuthFlowContext } from "@/lib/auth/flowContext";
 
 const REFRESH_ENDPOINT = "/auth/refresh";
 const DEFAULT_PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
@@ -73,16 +74,13 @@ const shouldRetryRefresh = (error) => {
 const redirectToAuthLogin = () => {
   if (typeof window === "undefined") return;
   const currentUrl = new URL(window.location.href);
-  const returnTo = encodeURIComponent(`${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+  const returnTo = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
   const sourceFromQuery = String(currentUrl.searchParams.get("source") || "").trim().toLowerCase();
   const isBusinessRegisterRoute = currentUrl.pathname.startsWith("/auth/business-register");
   const source = sourceFromQuery || (isBusinessRegisterRoute ? "main-app-register" : "");
 
-  const loginPath = source
-    ? `/auth/login?source=${encodeURIComponent(source)}&returnTo=${returnTo}`
-    : `/auth/login?returnTo=${returnTo}`;
-
-  window.location.href = getAuthAppUrl(loginPath);
+  setAuthFlowContext({ source, returnTo });
+  window.location.href = getAuthAppUrl("/auth/login");
 };
 
 const readCsrfTokenFromResponse = (response) => {

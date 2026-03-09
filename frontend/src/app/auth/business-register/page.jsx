@@ -35,6 +35,7 @@ import OtpVerificationModal from "@/components/ui/OtpVerificationModal"
 import TermsConditionsModal from "@/components/ui/TermsConditionsModal"
 import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay"
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
+import { setAuthFlowContext } from "@/lib/auth/flowContext"
 
 // i18n
 import eng from "@/constants/i18/eng/business_register.json"
@@ -198,10 +199,12 @@ const notifyMainAppBusinessRegisterSuccess = () => {
 }
 
 const redirectToBusinessRegisterLogin = (router) => {
-  const returnTo = "/auth/business-register?source=main-app-register"
-  router.replace(
-    `/auth/login?source=main-app-register&returnTo=${encodeURIComponent(returnTo)}`
-  )
+  const returnTo = "/auth/business-register"
+  setAuthFlowContext({
+    source: "main-app-register",
+    returnTo,
+  })
+  router.replace("/auth/login")
 }
 
 export default function BusinessRegisterPage() {

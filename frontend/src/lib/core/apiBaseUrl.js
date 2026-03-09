@@ -32,5 +32,5 @@ export const API_REMOTE_BASE_URL = API_REMOTE_CANDIDATES[0] || "";
 export const API_REMOTE_FALLBACK_BASE_URL = API_REMOTE_CANDIDATES[1] || "";
 export const API_REMOTE_CANDIDATE_BASE_URLS = API_REMOTE_CANDIDATES;
 
-// In browser, use same-origin proxy (/api) so SameSite=Lax cookies work on localhost.
+// In browser, use same-origin proxy (/api) so SameSite=Lax cookies work in local development.
 export const API_BASE_URL = typeof window !== "undefined" ? "/api" : API_REMOTE_BASE_URL;

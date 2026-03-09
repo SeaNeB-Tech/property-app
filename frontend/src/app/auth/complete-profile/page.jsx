@@ -31,6 +31,12 @@ import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect"
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
 import { notifyAuthChanged } from "@/services/auth.service"
 import {
+  clearAuthFlowContext,
+  getAuthFlowContext,
+  ingestAuthFlowContextFromUrl,
+  stripAuthFlowParamsFromAddressBar,
+} from "@/lib/auth/flowContext"
+import {
   getCookie,
   getJsonCookie,
   setCookie,
@@ -121,10 +127,8 @@ const isSafeReturnTo = (value) => {
 }
 
 const getPostLoginTarget = () => {
-  if (typeof window === "undefined") return ""
-
-  const queryTarget = String(new URLSearchParams(window.location.search).get("returnTo") || "").trim()
-  if (isSafeReturnTo(queryTarget)) return queryTarget
+  const flowTarget = String(getAuthFlowContext()?.returnTo || "").trim()
+  if (isSafeReturnTo(flowTarget)) return flowTarget
 
   const cookieTarget = String(getCookie(RETURN_TO_COOKIE) || "").trim()
   if (isSafeReturnTo(cookieTarget)) return cookieTarget
@@ -188,6 +192,7 @@ export default function CompleteProfilePage() {
         throw new Error("Unable to redirect. Please try again.")
       }
       removeCookie(RETURN_TO_COOKIE)
+      clearAuthFlowContext()
       return true
     } catch (err) {
       setSubmitError(
@@ -234,6 +239,11 @@ export default function CompleteProfilePage() {
       window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
     }
   }, [language])
+
+  useEffect(() => {
+    ingestAuthFlowContextFromUrl()
+    stripAuthFlowParamsFromAddressBar()
+  }, [])
 
   useEffect(() => {
     const hasCsrf = hasCsrfCookie()

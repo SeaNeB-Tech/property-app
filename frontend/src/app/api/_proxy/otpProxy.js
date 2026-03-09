@@ -382,7 +382,7 @@ export const proxyOtpVerify = async (request) => {
 };
 
 // Legacy/simple endpoints used by existing rewrites: /api/auth/send-otp and /api/auth/verify-otp
-// We expose these so the browser can hit same-origin endpoints that mint cookies for localhost.
+// We expose these so the browser can hit same-origin endpoints that mint cookies in local development.
 export const proxySendOtpLegacy = async (request) => {
   return proxyJsonPost({
     request,

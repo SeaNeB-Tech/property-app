@@ -23,6 +23,12 @@ import { getAuthAppUrl } from "@/lib/core/appUrls";
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition";
 import { notifyAuthChanged } from "@/services/auth.service";
 import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect";
+import {
+  clearAuthFlowContext,
+  getAuthFlowContext,
+  ingestAuthFlowContextFromUrl,
+  stripAuthFlowParamsFromAddressBar,
+} from "@/lib/auth/flowContext";
 
 const LANG_MAP = { eng, guj, hindi };
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
@@ -120,17 +126,6 @@ const readBoolFromPayload = (payload = {}, keys = []) => {
   return null;
 };
 
-const readFlowContextFromUrl = () => {
-  if (typeof window === "undefined") {
-    return { source: "", returnTo: "" };
-  }
-  const queryParams = new URLSearchParams(window.location.search);
-  return {
-    source: String(queryParams.get("source") || "").trim().toLowerCase(),
-    returnTo: String(queryParams.get("returnTo") || "").trim(),
-  };
-};
-
 export default function OtpPage() {
   const router = useRouter();
   const [status, setStatus] = useState("verifying");
@@ -154,13 +149,18 @@ export default function OtpPage() {
   const verifyInFlightRef = useRef(false);
   const { isTransitioning, showTransition, runWithTransition, stopTransition } = useAuthSubmitTransition();
 
+  useEffect(() => {
+    ingestAuthFlowContextFromUrl();
+    stripAuthFlowParamsFromAddressBar();
+  }, []);
+
   const handleOtpSuccess = async ({ sourcePayload = null } = {}) => {
-    const { source, returnTo } = readFlowContextFromUrl();
+    const { source, returnTo } = getAuthFlowContext();
 
     try {
       const fallbackReturnTo =
         source === MAIN_APP_REGISTER_SOURCE
-          ? "/auth/business-register?source=main-app-register"
+          ? "/auth/business-register"
           : source === MAIN_APP_LOGIN_SOURCE
             ? "/home"
             : "/dashboard";
@@ -172,6 +172,7 @@ export default function OtpPage() {
       if (!redirected) {
         throw new Error("Unable to redirect. Please try again.");
       }
+      clearAuthFlowContext();
     } catch (err) {
       setStatus("error");
       setInfoMessage(

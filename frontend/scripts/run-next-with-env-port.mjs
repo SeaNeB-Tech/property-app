@@ -34,12 +34,29 @@ if (!port && rawUrl) {
     const parsed = new URL(rawUrl);
     if (parsed.port) port = parsed.port;
   } catch {
-    // Ignore malformed URL and let Next.js pick its default port.
+    // Handled by validation below.
   }
 }
 
+const isValidPort = (value) => {
+  const num = Number(value);
+  return Number.isInteger(num) && num >= 1 && num <= 65535;
+};
+
+if (!port) {
+  console.error(
+    `[run-next-with-env-port] Missing port. Set PORT or include an explicit port in ${envKey}.`
+  );
+  process.exit(1);
+}
+
+if (!isValidPort(port)) {
+  console.error(`[run-next-with-env-port] Invalid port: "${port}".`);
+  process.exit(1);
+}
+
 const args = ["next", command];
-if (port) args.push("-p", port);
+args.push("-p", port);
 
 const child = spawn("npx", args, {
   stdio: "inherit",

@@ -29,7 +29,7 @@ const ALLOWED_RETURN_ORIGINS = Array.from(
 const PRIMARY_LISTING_ORIGIN = ALLOWED_RETURN_ORIGINS[0] || LISTING_APP_ORIGIN || "";
 const SOURCE_TO_TARGET_PATH = {
   "main-app": "/home",
-  "main-app-register": "/auth/business-register?source=main-app-register",
+  "main-app-register": "/auth/business-register",
 };
 
 const readBridgeTokenFromPayload = (payload = {}) => {
