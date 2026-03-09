@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
+import Image from "next/image"
 import phoneCodes from "@/constants/phoneCodes.json"
 import {
   getCookie,
@@ -21,6 +22,7 @@ import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.serv
 import { sendOtp } from "@/app/auth/auth-service/otp.service"
 import { verifyOtpAndLogin } from "@/app/auth/auth-service/authservice"
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
+import { setAccessToken as setInMemoryAccessToken } from "@/lib/auth/tokenStorage"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
@@ -130,6 +132,14 @@ const getCountryByCode = (value) => {
   return phoneCodes.find((country) => normalizeCountryCode(country?.dialCode) === normalized) || null
 }
 
+const COUNTRY_OPTIONS = phoneCodes
+  .map((country) => ({
+    name: String(country?.name || "").trim() || "Unknown",
+    dialCode: String(country?.dialCode || "").trim(),
+    flag: String(country?.flag || "").trim(),
+  }))
+  .filter((country) => country.dialCode)
+
 const DEFAULT_COUNTRY =
   getCountryByCode("91") ||
   phoneCodes[0] || { name: "India", dialCode: "+91" }
@@ -139,6 +149,9 @@ const WIZARD_STEPS = [
   { id: 2, title: "Contact" },
   { id: 3, title: "Location & Compliance" },
 ]
+
+const getOtpChannelLabel = (via) => (via === OTP_VIA_SMS ? "SMS" : "WhatsApp")
+
 const notifyMainAppBusinessRegisterSuccess = () => {
   if (typeof window === "undefined") return
   const configuredMainOrigin = String(process.env.NEXT_PUBLIC_APP_ORIGIN || "").trim()
@@ -200,7 +213,7 @@ export default function BusinessRegisterPage() {
   const [mobileVerified, setMobileVerified] = useState(false)
   const [mobileLoading, setMobileLoading] = useState(false)
   const [mobileEditCooldown, setMobileEditCooldown] = useState(0)
-  const [mobileOtpVia, setMobileOtpVia] = useState(OTP_VIA_WHATSAPP)
+  const [mobileOtpVia, setMobileOtpVia] = useState(OTP_VIA_SMS)
   const [selectedCountry, setSelectedCountry] = useState(() => {
     const fromSession = getResolvedCountryCode()
     return getCountryByCode(fromSession) || DEFAULT_COUNTRY
@@ -230,6 +243,8 @@ export default function BusinessRegisterPage() {
   const debouncedBusinessName = useDebounce(form.businessName, 300)
 
   const t = LANG_MAP[language]
+  const currentStepMeta = WIZARD_STEPS.find((step) => step.id === currentStep) || WIZARD_STEPS[0]
+  const completionPercent = Math.round((currentStep / WIZARD_STEPS.length) * 100)
   const isStepThreeReady =
     form.businessLocation.trim().length > 0 &&
     form.placeId.trim().length > 0 &&
@@ -633,49 +648,55 @@ export default function BusinessRegisterPage() {
     }
   }
 
-  const handleMobileVerify = async () => {
+  const sendBusinessMobileOtp = async (via = OTP_VIA_SMS) => {
     const mobile = form.primaryNumber.trim()
-    if (!mobile || mobileLoading || mobileVerified) return
+    const channel = via === OTP_VIA_WHATSAPP ? OTP_VIA_WHATSAPP : OTP_VIA_SMS
     const selectedCountryCode = normalizeCountryCode(selectedCountry?.dialCode)
+
+    if (!mobile || mobileLoading || mobileVerified) return false
 
     if (!MOBILE_REGEX.test(mobile)) {
       setSubmitError("Enter a valid primary number to verify")
-      return
+      return false
     }
 
     const countryCode = selectedCountryCode || getResolvedCountryCode()
 
     if (!countryCode) {
       setSubmitError("Please select country code.")
-      return
+      return false
     }
 
     setCookie("otp_cc", countryCode, { maxAge: 60 * 60 * 24 * 7, path: "/" })
+    setJsonCookie(
+      "otp_context",
+      {
+        country_code: countryCode,
+        mobile_number: mobile,
+        via: channel,
+        purpose: PURPOSE_BUSINESS_MOBILE_VERIFY,
+        redirect_to: "/auth/business-register",
+      },
+      { maxAge: 300, path: "/" }
+    )
 
+    await sendOtp({ via: channel, disableFallback: true })
+
+    setMobileOtpVia(channel)
+    setOtpValue("")
+    setOtpClearSignal((value) => value + 1)
+    setOtpModalType("mobile")
+    setOtpModalTarget(`+${countryCode} ${mobile}`)
+    setOtpResendCooldown(RESEND_COOLDOWN_SECONDS)
+    setOtpModalOpen(true)
+    return true
+  }
+
+  const handleMobileVerify = async () => {
     try {
       setMobileLoading(true)
       setSubmitError("")
-
-      setJsonCookie(
-        "otp_context",
-        {
-          country_code: countryCode,
-          mobile_number: mobile,
-          via: mobileOtpVia,
-          purpose: PURPOSE_BUSINESS_MOBILE_VERIFY,
-          redirect_to: "/auth/business-register",
-        },
-        { maxAge: 300, path: "/" }
-      )
-
-      await sendOtp({ via: mobileOtpVia, disableFallback: true })
-
-      setOtpValue("")
-      setOtpClearSignal((value) => value + 1)
-      setOtpModalType("mobile")
-      setOtpModalTarget(`${mobileOtpVia === OTP_VIA_SMS ? "SMS" : "WhatsApp"}: +${countryCode} ${mobile}`)
-      setOtpResendCooldown(RESEND_COOLDOWN_SECONDS)
-      setOtpModalOpen(true)
+      await sendBusinessMobileOtp(OTP_VIA_SMS)
     } catch (err) {
       setSubmitError("Failed to send mobile OTP. Please try again.")
     } finally {
@@ -756,7 +777,7 @@ export default function BusinessRegisterPage() {
     removeCookie("verified_business_email")
   }
 
-  const handleResendInlineOtp = async () => {
+  const handleResendInlineOtp = async (channelOverride) => {
     if (otpResending || otpResendCooldown > 0) return
 
     try {
@@ -767,23 +788,8 @@ export default function BusinessRegisterPage() {
         const email = form.businessEmail.trim()
         await sendEmailOtp({ email, purpose: PURPOSE_BUSINESS_EMAIL_VERIFY })
       } else if (otpModalType === "mobile") {
-        const ctx = getJsonCookie("otp_context")
-        const channel = String(ctx?.via || mobileOtpVia || OTP_VIA_WHATSAPP).toLowerCase() === OTP_VIA_SMS
-          ? OTP_VIA_SMS
-          : OTP_VIA_WHATSAPP
-        setMobileOtpVia(channel)
-        setJsonCookie(
-          "otp_context",
-          {
-            ...(ctx || {}),
-            via: channel,
-            country_code:
-              String(ctx?.country_code || "").trim() ||
-              normalizeCountryCode(selectedCountry?.dialCode),
-          },
-          { maxAge: 300, path: "/" }
-        )
-        await sendOtp({ via: channel, disableFallback: true })
+        const channel = channelOverride === OTP_VIA_WHATSAPP ? OTP_VIA_WHATSAPP : OTP_VIA_SMS
+        await sendBusinessMobileOtp(channel)
       }
       setOtpResendCooldown(RESEND_COOLDOWN_SECONDS)
     } catch (err) {
@@ -975,6 +981,47 @@ export default function BusinessRegisterPage() {
       {
         onSuccess: async (response) => {
           const data = response?.data || response || {}
+          // Attempt to hydrate any access token returned in response headers or body.
+          try {
+            const headers = response?.headers || {}
+            const headerCandidates = [
+              headers?.authorization,
+              headers?.Authorization,
+              headers["authorization"],
+              headers["Authorization"],
+              headers["x-access-token"],
+              headers["x-access_token"],
+              headers["x-access-token"],
+              headers["access-token"],
+              headers["access_token"],
+              headers["x-auth-token"],
+            ]
+            let headerAuth = ""
+            for (const h of headerCandidates) {
+              if (!h) continue
+              headerAuth = String(h || "").trim()
+              if (headerAuth) break
+            }
+
+            const headerToken = headerAuth && /^Bearer\s+/i.test(headerAuth)
+              ? headerAuth.replace(/^Bearer\s+/i, "").trim()
+              : headerAuth
+
+            const bodyToken = String(
+              data?.access_token || data?.accessToken || data?.token || data?.jwt || ""
+            ).trim()
+
+            const finalToken = headerToken || bodyToken || ""
+            if (finalToken) {
+              try {
+                setInMemoryAccessToken(finalToken)
+              } catch (e) {
+                // ignore
+              }
+            }
+          } catch (e) {
+            // ignore token extraction errors
+          }
           const businessId = data?.business_id || data?.id || ""
           const createdBranchId = String(data?.branch_id || data?.default_branch_id || "")
           setBranchId(createdBranchId)
@@ -1016,6 +1063,70 @@ export default function BusinessRegisterPage() {
             maxAge: 60 * 60 * 24 * 30,
             path: "/",
           })
+          // Try to hydrate client session (refresh access token into memory)
+          let sessionHydrated = false
+          try {
+            sessionHydrated = await ensureSessionReady({ force: true })
+          } catch (e) {
+            console.warn("[business-register] ensureSessionReady failed after registration:", e)
+            sessionHydrated = false
+          }
+
+          // If initial hydration failed, attempt a manual /api/auth/refresh request
+          // which may return an access token in headers or body that our bootstrap
+          // flow missed due to timing or CSRF differences.
+          if (!sessionHydrated) {
+            try {
+              const productKey = String(getDefaultProductKey() || "property").trim()
+              const refreshResp = await fetch("/api/auth/refresh", {
+                method: "POST",
+                credentials: "include",
+                cache: "no-store",
+                headers: {
+                  "content-type": "application/json",
+                  "x-product-key": productKey,
+                },
+                body: JSON.stringify({ product_key: productKey }),
+              })
+
+              let refreshPayload = null
+              try {
+                refreshPayload = await refreshResp.clone().json()
+              } catch {
+                refreshPayload = null
+              }
+
+              // Prefer Authorization header
+              const respAuth = String(
+                refreshResp.headers.get("authorization") || refreshResp.headers.get("Authorization") || ""
+              ).trim()
+              const respHeaderToken = respAuth && /^Bearer\s+/i.test(respAuth)
+                ? respAuth.replace(/^Bearer\s+/i, "").trim()
+                : respAuth
+
+              const respBodyToken = String(
+                refreshPayload?.access_token || refreshPayload?.accessToken || refreshPayload?.token || refreshPayload?.jwt || ""
+              ).trim()
+
+              const finalRefreshToken = respHeaderToken || respBodyToken || ""
+              if (finalRefreshToken) {
+                try {
+                  setInMemoryAccessToken(finalRefreshToken)
+                } catch (e) {
+                  // ignore
+                }
+              }
+
+              // Retry session hydrate after manual refresh attempt
+              try {
+                sessionHydrated = await ensureSessionReady({ force: true })
+              } catch (e) {
+                sessionHydrated = false
+              }
+            } catch (manErr) {
+              console.warn("[business-register] manual refresh attempt failed:", manErr)
+            }
+          }
 
           const sentSuccessMessage = notifyMainAppBusinessRegisterSuccess()
           notifyAuthChanged()
@@ -1032,12 +1143,66 @@ export default function BusinessRegisterPage() {
           router.replace("/dashboard/broker")
         },
         onError: (err) => {
-          const status = Number(err?.response?.status || 0)
-          if (status === 401 || status === 403) {
-            redirectToBusinessRegisterLogin(router)
-            return
-          }
-          setSubmitError(getErrorMessage(err, "Registration failed"))
+          (async () => {
+            const status = Number(err?.response?.status || 0)
+            const data = err?.response?.data || err?.response || {}
+
+            const maybeBusinessId =
+              data?.business_id || data?.id || data?.data?.business_id || data?.data?.id || data?.result?.business_id || data?.result?.id || ""
+            const maybeBranchId = String(
+              data?.branch_id || data?.default_branch_id || data?.data?.branch_id || data?.data?.default_branch_id || ""
+            )
+
+            // If auth error but payload contains created business/branch info,
+            // treat it as a success fallback instead of forcing login.
+            if ((status === 401 || status === 403) && !maybeBusinessId && !maybeBranchId) {
+              redirectToBusinessRegisterLogin(router)
+              return
+            }
+
+            if (maybeBusinessId || maybeBranchId) {
+              try {
+                const businessName = normalizeBusinessLabel(form.businessName)
+                const businessId = maybeBusinessId || ""
+                const createdBranchId = maybeBranchId || ""
+
+                setBranchId(createdBranchId)
+
+                setCookie("business_name", businessName, { path: "/" })
+                setCookie("business_type", String(form.businessType), { path: "/" })
+                setCookie("business_location", form.businessLocation, { path: "/" })
+                setCookie("business_id", String(businessId), { path: "/" })
+                setCookie("branch_id", createdBranchId, { path: "/" })
+                setCookie("business_registered", "true", {
+                  maxAge: 60 * 60 * 24 * 30,
+                  path: "/",
+                })
+                setDashboardMode(DASHBOARD_MODE_BUSINESS)
+
+                setCookie("profile_completed", "true", {
+                  maxAge: 60 * 60 * 24 * 30,
+                  path: "/",
+                })
+
+                const sentSuccessMessage = notifyMainAppBusinessRegisterSuccess()
+                notifyAuthChanged()
+                if (!sentSuccessMessage) {
+                  const redirected = await redirectToListingWithBridgeToken({
+                    returnTo: getListingAppUrl("/dashboard/broker"),
+                    source: "main-app-register",
+                  })
+                  if (redirected) return
+                }
+                router.replace("/dashboard/broker")
+                return
+              } catch (fallbackErr) {
+                // If fallback processing fails, fall through to show error below.
+                console.warn("[business-register] fallback success handling failed:", fallbackErr)
+              }
+            }
+
+            setSubmitError(getErrorMessage(err, "Registration failed"))
+          })()
         },
       }
     )
@@ -1065,6 +1230,15 @@ export default function BusinessRegisterPage() {
           <div className="business-register-header">
             <h1 className="business-register-title">Register Your Business</h1>
             <p className="business-register-subtitle">Set up your branch profile to start listing and managing leads.</p>
+          </div>
+          <div className="business-register-progress">
+            <div className="business-register-progress-meta">
+              <span>Step {currentStep} of {WIZARD_STEPS.length}</span>
+              <strong>{currentStepMeta.title}</strong>
+            </div>
+            <div className="business-register-progress-track">
+              <span style={{ width: `${completionPercent}%` }} />
+            </div>
           </div>
           <div className="business-wizard-stepper">
             {WIZARD_STEPS.map((step) => {
@@ -1197,105 +1371,27 @@ export default function BusinessRegisterPage() {
           )}
 
           {currentStep === 2 && (
-          <section className="business-section-card">
+          <section className="business-section-card business-section-card--contact">
             <div className="business-section-head">
-              <h2>Contact Details</h2>
-              <p>Numbers and email used for branch communication and verification.</p>
+              <h2>Contact Information</h2>
+              <p>How can customers reach you?</p>
             </div>
-            <div className="business-grid business-grid--2">
-              <Field label="Country Code *">
-                <select
-                  className="business-form-select"
-                  value={String(selectedCountry?.dialCode || "")}
-                  onChange={(e) => {
-                    const next = getCountryByCode(e.target.value)
-                    if (next) setSelectedCountry(next)
-                  }}
-                >
-                  {phoneCodes.map((country) => (
-                    <option key={`${country.name}-${country.dialCode}`} value={country.dialCode}>
-                      {country.name} ({country.dialCode})
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Primary Number *">
-                <div className="business-inline-action">
-                  <input
-                    type="text"
-                    className={`business-form-input ${mobileVerified ? "border-emerald-300 bg-emerald-50" : ""}`}
-                    value={form.primaryNumber}
-                    disabled={mobileVerified}
-                    onChange={(e) => setField("primaryNumber", e.target.value.replace(/\D/g, ""))}
-                  />
-                  <button
-                    type="button"
-                    onClick={mobileVerified ? handleEnableMobileEdit : handleMobileVerify}
-                    disabled={mobileLoading || (!mobileVerified && !form.primaryNumber.trim()) || (mobileVerified && mobileEditCooldown > 0)}
-                    className="h-11 min-w-[110px] rounded-lg border border-blue-600 bg-blue-600 px-4 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
-                  >
-                    {mobileLoading ? "Sending..." : mobileVerified ? "Edit" : "Verify"}
-                  </button>
-                </div>
-                {mobileVerified && mobileEditCooldown > 0 && (
-                  <p className="business-verify-note">Try to edit in {formatCooldown(mobileEditCooldown)}</p>
-                )}
-              </Field>
-
-              <Field label="Send Mobile OTP Via">
-                <div className="flex items-center gap-6 pt-2">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="radio"
-                      name="business_mobile_otp_via"
-                      checked={mobileOtpVia === OTP_VIA_WHATSAPP}
-                      onChange={() => setMobileOtpVia(OTP_VIA_WHATSAPP)}
-                    />
-                    WhatsApp
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="radio"
-                      name="business_mobile_otp_via"
-                      checked={mobileOtpVia === OTP_VIA_SMS}
-                      onChange={() => setMobileOtpVia(OTP_VIA_SMS)}
-                    />
-                    SMS
-                  </label>
-                </div>
-              </Field>
-
-              <Field label="WhatsApp Number">
-                <div>
-                  <input
-                    type="text"
-                    className="business-form-input"
-                    value={form.whatsappNumber}
-                    onChange={(e) => setField("whatsappNumber", e.target.value.replace(/\D/g, ""))}
-                  />
-                  {mobileVerified &&
-                    form.primaryNumber.trim() &&
-                    (form.whatsappNumber.trim() || form.primaryNumber.trim()) === form.primaryNumber.trim() && (
-                      <p className="business-verify-note">Same as primary number. No separate verification required.</p>
-                  )}
-                </div>
-              </Field>
-
-              <Field label="Business Email (Optional)" hint="You can leave this blank or verify it when needed.">
-                <div className="business-inline-action">
+            <div className="business-contact-grid">
+              <Field label="Business Email (Optional)" hint="Optional. You can verify it now or later." className="business-contact-grid-email">
+                <div className="business-inline-action business-inline-action--soft">
                   <input
                     type="email"
                     className={`business-form-input ${emailVerified ? "border-emerald-300 bg-emerald-50" : ""}`}
                     value={form.businessEmail}
                     disabled={emailVerified}
                     onChange={(e) => setField("businessEmail", e.target.value)}
+                    placeholder="Enter business email"
                   />
                   <button
                     type="button"
                     onClick={emailVerified ? handleEnableEmailEdit : handleEmailVerify}
                     disabled={emailLoading || (!emailVerified && !form.businessEmail.trim()) || (emailVerified && emailEditCooldown > 0)}
-                    className="h-11 min-w-[110px] rounded-lg border border-blue-600 bg-blue-600 px-4 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
+                    className="business-inline-action-btn"
                   >
                     {emailLoading ? "Sending..." : emailVerified ? "Edit" : "Verify"}
                   </button>
@@ -1303,6 +1399,59 @@ export default function BusinessRegisterPage() {
                 {emailVerified && emailEditCooldown > 0 && (
                   <p className="business-verify-note">Try to edit in {formatCooldown(emailEditCooldown)}</p>
                 )}
+              </Field>
+
+              <Field label="Primary Mobile Number *" className="business-contact-grid-primary">
+                <div className="business-phone-row">
+                  <CountryCodePicker
+                    value={selectedCountry}
+                    options={COUNTRY_OPTIONS}
+                    onChange={setSelectedCountry}
+                  />
+                  <div className="business-phone-input-wrap">
+                    <input
+                      type="text"
+                      className={`business-form-input ${mobileVerified ? "border-emerald-300 bg-emerald-50" : ""}`}
+                      value={form.primaryNumber}
+                      disabled={mobileVerified}
+                      onChange={(e) => setField("primaryNumber", e.target.value.replace(/\D/g, ""))}
+                      placeholder="Enter mobile number"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={mobileVerified ? handleEnableMobileEdit : handleMobileVerify}
+                    disabled={mobileLoading || (!mobileVerified && !form.primaryNumber.trim()) || (mobileVerified && mobileEditCooldown > 0)}
+                    className="business-inline-action-btn"
+                  >
+                    {mobileLoading ? "Sending..." : mobileVerified ? "Edit" : "Verify"}
+                  </button>
+                </div>
+                {!mobileVerified && (
+                  <p className="business-verify-note">OTP will be sent to this number.</p>
+                )}
+                {mobileVerified && mobileEditCooldown > 0 && (
+                  <p className="business-verify-note">Try to edit in {formatCooldown(mobileEditCooldown)}</p>
+                )}
+              </Field>
+
+              <Field label="WhatsApp Number" hint="Optional. Leave blank to use the primary number." className="business-contact-grid-whatsapp">
+                <div className="business-phone-row business-phone-row--single-action">
+                  <CountryCodePicker
+                    value={selectedCountry}
+                    options={COUNTRY_OPTIONS}
+                    onChange={setSelectedCountry}
+                  />
+                  <div className="business-phone-input-wrap">
+                    <input
+                      type="text"
+                      className="business-form-input"
+                      value={form.whatsappNumber}
+                      onChange={(e) => setField("whatsappNumber", e.target.value.replace(/\D/g, ""))}
+                      placeholder="Enter WhatsApp number"
+                    />
+                  </div>
+                </div>
               </Field>
             </div>
           </section>
@@ -1439,13 +1588,29 @@ export default function BusinessRegisterPage() {
       <OtpVerificationModal
         open={otpModalOpen}
         title={otpModalType === "email" ? "Verify Business Email" : "Verify Business Mobile"}
-        subtitle="Enter the 4-digit OTP sent to"
+        subtitle={
+          otpModalType === "email"
+            ? "Enter the 4-digit OTP sent to"
+            : `Enter the 4-digit OTP sent by ${getOtpChannelLabel(mobileOtpVia)}`
+        }
         targetLabel={otpModalTarget}
+        helperText={
+          otpModalType === "mobile"
+            ? mobileOtpVia === OTP_VIA_SMS
+              ? "If the SMS does not arrive, wait for the timer to finish and resend the OTP on WhatsApp."
+              : "We sent the OTP on WhatsApp to the same primary number."
+            : "Use the code from your inbox to complete verification."
+        }
         otp={otpValue}
         onOtpChange={setOtpValue}
         onClose={closeOtpModal}
         onVerify={handleVerifyInlineOtp}
-        onResend={handleResendInlineOtp}
+        onResend={() => handleResendInlineOtp(otpModalType === "mobile" ? OTP_VIA_SMS : undefined)}
+        resendLabel={otpModalType === "mobile" ? "Resend by SMS" : "Resend OTP"}
+        onSecondaryResend={
+          otpModalType === "mobile" ? () => handleResendInlineOtp(OTP_VIA_WHATSAPP) : undefined
+        }
+        secondaryResendLabel={otpModalType === "mobile" ? "Resend on WhatsApp" : ""}
         loading={otpVerifying}
         resending={otpResending}
         cooldown={otpResendCooldown}
@@ -1461,14 +1626,121 @@ export default function BusinessRegisterPage() {
   )
 }
 
-function Field({ label, hint, error, children }) {
+function Field({ label, hint, error, children, className = "" }) {
   return (
-    <div className="business-form-group">
+    <div className={`business-form-group ${className}`.trim()}>
       <label className="business-form-label">{label}</label>
       {children}
       {hint && !error && <p className="business-form-hint">{hint}</p>}
       {error && <p className="business-form-error-inline">{error}</p>}
     </div>
+  )
+}
+
+function CountryCodePicker({ value, options, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const rootRef = useRef(null)
+  const normalizedQuery = query.trim().toLowerCase()
+
+  useEffect(() => {
+    if (!open) return
+
+    const handlePointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target)) {
+        setOpen(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown)
+    return () => document.removeEventListener("mousedown", handlePointerDown)
+  }, [open])
+
+  const visibleOptions = normalizedQuery
+    ? options.filter((country) => {
+        const name = String(country?.name || "").toLowerCase()
+        const dialCode = String(country?.dialCode || "").toLowerCase()
+        return name.includes(normalizedQuery) || dialCode.includes(normalizedQuery)
+      })
+    : options
+
+  const current = value || DEFAULT_COUNTRY
+
+  return (
+    <div className="business-phone-code business-country-picker" ref={rootRef}>
+      <button
+        type="button"
+        className={`business-country-trigger ${open ? "business-country-trigger--open" : ""}`}
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <CountryFlag country={current} />
+        <span className="business-country-trigger__code">{current?.dialCode || ""}</span>
+        <span className="business-country-trigger__chevron" aria-hidden="true">▾</span>
+      </button>
+
+      {open && (
+        <div className="business-country-menu">
+          <div className="business-country-search-wrap">
+            <input
+              type="text"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="business-country-search"
+              placeholder="Search country or code"
+              autoFocus
+            />
+          </div>
+          <div className="business-country-list" role="listbox">
+            {visibleOptions.map((country) => {
+              const isActive = country.dialCode === current?.dialCode && country.name === current?.name
+              return (
+                <button
+                  key={`${country.name}-${country.dialCode}`}
+                  type="button"
+                  className={`business-country-option ${isActive ? "business-country-option--active" : ""}`}
+                  onClick={() => {
+                    onChange(country)
+                    setOpen(false)
+                    setQuery("")
+                  }}
+                >
+                  <CountryFlag country={country} />
+                  <span className="business-country-option__name">{country.name}</span>
+                  <span className="business-country-option__code">{country.dialCode}</span>
+                </button>
+              )
+            })}
+            {!visibleOptions.length && (
+              <div className="business-country-empty">No country found.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CountryFlag({ country }) {
+  const flag = String(country?.flag || "").trim()
+  const name = String(country?.name || "Country").trim()
+
+  return (
+    <span className="business-country-flag" aria-hidden="true">
+      {flag ? (
+        <Image
+          src={flag}
+          alt={`${name} flag`}
+          width={22}
+          height={22}
+          className="business-country-flag__img"
+          unoptimized
+        />
+      ) : (
+        <span>{name.slice(0, 2).toUpperCase()}</span>
+      )}
+    </span>
   )
 }
 
