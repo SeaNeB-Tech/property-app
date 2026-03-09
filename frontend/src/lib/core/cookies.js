@@ -8,6 +8,7 @@ const envSameSite = process.env.NEXT_PUBLIC_COOKIE_SAMESITE || (isProduction ? "
 const COOKIE_CHANGE_EVENT = "property:cookie-change";
 const STORAGE_PREFIX = "property:volatile:";
 const volatileMemoryStore = new Map();
+const REAL_COOKIE_KEYS = new Set(["refresh_token_property", "csrf_token_property"]);
 if (isBrowser) {
   try {
     const removeIfExists = (storage, key) => {
@@ -71,33 +72,6 @@ const isAuthCookieName = (name) => {
     key.startsWith("auth_session_")
   );
 };
-const REAL_COOKIE_KEYS = new Set([
-  "refresh_token_property",
-  "csrf_token_property",
-  "profile_completed",
-  "post_otp_verified",
-  "signup_otp_verified",
-  "auth_return_to",
-  "business_registered",
-  "business_id",
-  "branch_id",
-  "business_name",
-  "business_type",
-  "business_location",
-  "mobile_verified",
-  "otp_cc",
-  "otp_mobile",
-  "otp_in_progress",
-  "otp_context",
-  "verified_mobile",
-  "verified_business_mobile",
-  "verified_business_email",
-  "verified_email",
-  "verified_pan",
-  "verified_gstin",
-  "user_email",
-  "seaneb_id",
-]);
 
 const isEssentialCookieName = (name) => {
   const key = String(name || "").trim().toLowerCase();
@@ -154,20 +128,67 @@ const usesRealCookie = (name) => isEssentialCookieName(name);
 
 const getStorageKey = (name) => `${STORAGE_PREFIX}${String(name || "").trim()}`;
 
-const setVolatileValue = (name, value) => {
+const readStoredRecord = (name) => {
   const key = getStorageKey(name);
-  volatileMemoryStore.set(key, String(value ?? ""));
+  const memoryValue = volatileMemoryStore.get(key);
+  if (memoryValue != null) {
+    return { value: String(memoryValue ?? ""), expiresAt: null };
+  }
+  if (!isBrowser) return null;
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const expiresAt = Number(parsed.expiresAt || 0);
+    if (expiresAt > 0 && Date.now() > expiresAt) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    return {
+      value: String(parsed.value ?? ""),
+      expiresAt: Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const setVolatileValue = (name, value, options = {}) => {
+  const key = getStorageKey(name);
+  const safeValue = String(value ?? "");
+  volatileMemoryStore.set(key, safeValue);
+  if (!isBrowser) return;
+  try {
+    const maxAge = Number(options?.maxAge);
+    const expiresAt = Number.isFinite(maxAge) && maxAge > 0 ? Date.now() + maxAge * 1000 : null;
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        value: safeValue,
+        expiresAt,
+      })
+    );
+  } catch {
+    // ignore storage failures
+  }
 };
 
 const getVolatileValue = (name) => {
-  const key = getStorageKey(name);
-  if (!volatileMemoryStore.has(key)) return null;
-  return volatileMemoryStore.get(key);
+  const stored = readStoredRecord(name);
+  return stored ? stored.value : null;
 };
 
 const removeVolatileValue = (name) => {
   const key = getStorageKey(name);
   volatileMemoryStore.delete(key);
+  if (!isBrowser) return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore storage failures
+  }
 };
 
 const clearRealCookieOnly = (name, options = {}) => {
@@ -193,7 +214,7 @@ export const setCookie = (name, value, options = {}) => {
   }
 
   if (!usesRealCookie(name)) {
-    setVolatileValue(name, value);
+    setVolatileValue(name, value, options);
     clearRealCookieOnly(name, options);
     emitCookieChange(name);
     return;

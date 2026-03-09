@@ -1,5 +1,11 @@
 import { authStore } from "@/app/auth/auth-service/store/authStore";
 import { getCookie, removeCookie } from "@/lib/auth/cookieManager";
+import {
+  getInMemoryAccessToken,
+  getInMemoryCsrfToken,
+  setInMemoryAccessToken,
+  setInMemoryCsrfToken,
+} from "@/lib/api/client";
 
 const REFRESH_TOKEN_COOKIE_KEYS = ["refresh_token_property"];
 
@@ -20,18 +26,21 @@ const readFirstCookie = (keys = []) => {
 
 export const getAccessToken = () => {
   logSafeMode();
-  return String(authStore?.accessToken || "").trim();
+  return String(getInMemoryAccessToken() || authStore?.accessToken || "").trim();
 };
 
 export const setAccessToken = (token, _options = {}) => {
   logSafeMode();
   authStore?.setAccessToken?.(token);
+  setInMemoryAccessToken(token);
   return String(token || "").trim();
 };
 
 export const clearAccessToken = (options = {}) => {
   logSafeMode();
   authStore?.setAccessToken?.("");
+  setInMemoryAccessToken("");
+  setInMemoryCsrfToken("");
   removeCookie("access_token", { path: "/", ...options });
 };
 
@@ -49,5 +58,10 @@ export const clearRefreshToken = (options = {}) => {
   logSafeMode();
   authStore?.setRefreshToken?.("");
   removeCookie("refresh_token_property", options);
+};
+
+export const getCsrfToken = () => {
+  logSafeMode();
+  return String(getInMemoryCsrfToken() || authStore?.getCsrfToken?.() || "").trim();
 };
 

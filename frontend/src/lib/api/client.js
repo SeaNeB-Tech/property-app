@@ -250,11 +250,11 @@ const refreshAccessTokenWithRetry = async () => {
 };
 
 export const ensureAccessToken = async () => {
-  const csrfHint = getCsrfToken();
-  if (csrfHint) return true;
+  const accessToken = getAccessToken();
+  if (accessToken) return true;
   try {
     await refreshAccessTokenWithRetry();
-    return true;
+    return Boolean(getAccessToken());
   } catch {
     return false;
   }
@@ -265,6 +265,20 @@ export const apiRequest = async (config = {}) => {
   nextConfig.withCredentials = true;
   nextConfig.credentials = "include";
   nextConfig.headers = stripAuthorizationHeader({ ...(config?.headers || {}) });
+
+  const requestUrl = String(nextConfig?.url || "").trim();
+  const isRefreshRequest = requestUrl.includes(REFRESH_ENDPOINT);
+  const requiresAuth = nextConfig?.requireAuth === true;
+
+  if (requiresAuth && !isRefreshRequest && !nextConfig?.skipRefresh && !getAccessToken()) {
+    try {
+      await refreshAccessTokenWithRetry();
+    } catch {
+      // Let the protected request proceed once. The 401 interceptor will
+      // immediately run refresh/retry using the newest CSRF state before
+      // deciding whether the session is really invalid.
+    }
+  }
 
   const csrfToken = getCsrfToken();
   const accessToken = getAccessToken();
