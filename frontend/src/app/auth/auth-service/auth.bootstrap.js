@@ -1,3 +1,9 @@
+import {
+  getInMemoryAccessToken,
+  setInMemoryAccessToken,
+  setInMemoryCsrfToken,
+} from "@/lib/api/client";
+
 const PRODUCT_KEY =
   String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
 const FAILURE_COOLDOWN_MS = 5000;
@@ -37,6 +43,14 @@ const requestRefresh = async () => {
   });
 };
 
+const readRefreshPayload = async (response) => {
+  try {
+    return await response.clone().json();
+  } catch {
+    return null;
+  }
+};
+
 export const ensureSessionReady = async ({ force = false } = {}) => {
   const now = Date.now();
   if (!force && lastFailureAt && now - lastFailureAt < FAILURE_COOLDOWN_MS) {
@@ -49,9 +63,41 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
 
   inFlightEnsureSessionPromise = (async () => {
   try {
+    const hydrateTokenFromRefresh = async () => {
+      const refreshResponse = await requestRefresh();
+      if (!refreshResponse.ok) {
+        const refreshStatus = Number(refreshResponse.status || 0);
+        const canRetry = [500, 502, 503, 504, 429].includes(refreshStatus);
+        return { ok: false, refreshStatus, canRetry };
+      }
+
+      const refreshPayload = await readRefreshPayload(refreshResponse);
+      const refreshedAccessToken = String(
+        refreshPayload?.accessToken || refreshPayload?.access_token || ""
+      ).trim();
+      const refreshedCsrfToken = String(
+        refreshPayload?.csrfToken || refreshPayload?.csrf_token || ""
+      ).trim();
+      if (refreshedAccessToken) {
+        setInMemoryAccessToken(refreshedAccessToken);
+      }
+      if (refreshedCsrfToken) {
+        setInMemoryCsrfToken(refreshedCsrfToken);
+      }
+
+      return { ok: true, refreshStatus: Number(refreshResponse.status || 200), canRetry: false };
+    };
+
     // Try direct profile probe first (handles still-valid access cookie quickly).
     const firstMe = await requestMe();
-    if (firstMe.ok) return true;
+    if (firstMe.ok) {
+      if (getInMemoryAccessToken()) return true;
+
+      const refreshResult = await hydrateTokenFromRefresh();
+      if (refreshResult.ok) {
+        return Boolean(getInMemoryAccessToken());
+      }
+    }
 
     const firstStatus = Number(firstMe.status || 0);
     if ([401, 403].includes(firstStatus)) {
@@ -68,10 +114,10 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
 
     // Retry refresh flow a few times to tolerate transient upstream failures.
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const refreshResponse = await requestRefresh();
-      if (!refreshResponse.ok) {
-        const refreshStatus = Number(refreshResponse.status || 0);
-        const canRetry = [500, 502, 503, 504, 429].includes(refreshStatus);
+      const refreshResult = await hydrateTokenFromRefresh();
+      if (!refreshResult.ok) {
+        const refreshStatus = Number(refreshResult.refreshStatus || 0);
+        const canRetry = Boolean(refreshResult.canRetry);
         if (canRetry && attempt < 2) {
           await sleep(200 * (attempt + 1));
           continue;
@@ -90,7 +136,7 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
       }
 
       const retryMeResponse = await requestMe();
-      if (retryMeResponse.ok) return true;
+      if (retryMeResponse.ok && getInMemoryAccessToken()) return true;
 
       const retryStatus = Number(retryMeResponse.status || 0);
       const shouldRetry = [401, 403, 500, 502, 503, 504].includes(retryStatus) && attempt < 2;

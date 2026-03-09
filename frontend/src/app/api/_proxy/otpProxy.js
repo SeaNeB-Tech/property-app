@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
-const ACCESS_COOKIE_KEYS = ["access_token", "accessToken", "token"];
 const REFRESH_COOKIE_KEYS = [
   "refresh_token_property",
   "refresh_token",
@@ -52,12 +51,29 @@ const getFirstCookieValueFromHeader = (cookieHeader, keys = []) => {
   return "";
 };
 
+const stripCookieKeysFromHeader = (cookieHeader, keys = []) => {
+  const source = String(cookieHeader || "").trim();
+  if (!source) return "";
+  const blocked = new Set(keys.map((key) => String(key || "").trim()).filter(Boolean));
+  return source
+    .split(";")
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const idx = part.indexOf("=");
+      const name = idx >= 0 ? part.slice(0, idx).trim() : part;
+      return !blocked.has(name);
+    })
+    .join("; ");
+};
+
 const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
   const getSetCookie = upstreamHeaders?.getSetCookie;
   if (typeof getSetCookie === "function") {
     const cookies = getSetCookie.call(upstreamHeaders) || [];
     for (const cookie of cookies) {
       if (!cookie) continue;
+      if (/^\s*access_token=/i.test(cookie)) continue;
       targetHeaders.append("set-cookie", cookie);
     }
     return;
@@ -72,6 +88,7 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
     .filter(Boolean);
 
   for (const cookie of splitCookies) {
+    if (/^\s*access_token=/i.test(cookie)) continue;
     targetHeaders.append("set-cookie", cookie);
   }
 };
@@ -184,19 +201,8 @@ const extractCookieValuesFromUpstream = (upstreamHeaders) => {
 
 const setAuthCookies = (
   response,
-  { accessToken, refreshToken, csrfToken, expiresIn = null, secure = false } = {}
+  { refreshToken, csrfToken, secure = false } = {}
 ) => {
-  if (accessToken) {
-    response.cookies.set({
-      name: "access_token",
-      value: accessToken,
-      httpOnly: true,
-      sameSite: "lax",
-      secure,
-      path: "/",
-      ...(expiresIn != null ? { maxAge: Math.max(1, Math.floor(expiresIn)) } : {}),
-    });
-  }
   if (refreshToken) {
     response.cookies.set({
       name: "refresh_token_property",
@@ -235,9 +241,11 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [], setCookiesF
     bodyText = "";
   }
 
-  const incomingCookie = String(request.headers.get("cookie") || "").trim();
+  const incomingCookie = stripCookieKeysFromHeader(
+    String(request.headers.get("cookie") || "").trim(),
+    ["access_token", "accessToken", "token"]
+  );
   const incomingCsrf = String(request.headers.get("x-csrf-token") || "").trim();
-  const cookieAccessToken = getFirstCookieValueFromHeader(incomingCookie, ACCESS_COOKIE_KEYS);
 
   let lastResponse = null;
   let resolvedResponse = null;
@@ -253,7 +261,6 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [], setCookiesF
       headers.set("x-product-key", PRODUCT_KEY);
       if (incomingCookie) headers.set("cookie", incomingCookie);
       if (incomingCsrf) headers.set("x-csrf-token", incomingCsrf);
-      if (cookieAccessToken) headers.set("authorization", `Bearer ${cookieAccessToken}`);
 
       try {
         const upstreamResponse = await fetch(url, {
@@ -314,15 +321,6 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [], setCookiesF
 
   if (setCookiesFromUpstream) {
     const upstreamCookieValues = extractCookieValuesFromUpstream(responseToReturn.headers);
-    const accessToken =
-      readTokenFromPayload(payloadJson || {}, responseToReturn.headers) ||
-      getFirstCookieValueFromHeader(
-        Object.entries(upstreamCookieValues)
-          .map(([k, v]) => `${k}=${v}`)
-          .join("; "),
-        ACCESS_COOKIE_KEYS
-      ) ||
-      "";
     const refreshToken =
       readRefreshTokenFromPayload(payloadJson || {}) ||
       getFirstCookieValueFromHeader(
@@ -341,15 +339,14 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [], setCookiesF
         CSRF_COOKIE_KEYS
       ) ||
       "";
-    const expiresIn = readExpiresInFromPayload(payloadJson || {});
     setAuthCookies(res, {
-      accessToken,
       refreshToken,
       csrfToken,
-      expiresIn,
       secure: shouldUseSecureCookies(request),
     });
   }
+
+  res.cookies.delete("access_token");
 
   return res;
 };

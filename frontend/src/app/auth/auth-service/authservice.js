@@ -1,4 +1,4 @@
-import { authApi, setInMemoryCsrfToken } from "@/lib/api/client";
+import { authApi, setInMemoryAccessToken, setInMemoryCsrfToken } from "@/lib/api/client";
 import { getJsonCookie, getCookie, removeCookie } from "@/services/auth.service";
 import { authStore } from "./store/authStore";
 import { clearPanelAuthSession } from "@/services/auth.service";
@@ -70,6 +70,19 @@ const readCsrfValueFromResponse = (response) => {
   return String(fromBody || fromHeader || "").trim();
 };
 
+const readAccessValueFromResponse = (response) => {
+  const data = response?.data || {};
+  return String(
+    deepTokenValue(data, [
+      "accessToken",
+      "access_token",
+      "token",
+      "jwt",
+    ]) ||
+      ""
+  ).trim();
+};
+
 const readBoolFromPayload = (payload = {}, keys = []) => {
   const candidates = [
     payload,
@@ -136,7 +149,11 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
   const res = await verifyOtpRequest(verifyPayload);
   const data = res.data || {};
 
+  const responseAccessToken = readAccessValueFromResponse(res);
   const responseCsrfToken = readCsrfValueFromResponse(res);
+  if (responseAccessToken) {
+    setInMemoryAccessToken(responseAccessToken);
+  }
   if (responseCsrfToken) {
     setInMemoryCsrfToken(responseCsrfToken);
   }
@@ -160,7 +177,16 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
     };
   }
 
-  authStore.setSessionStartTime();
+  if (responseAccessToken || responseCsrfToken) {
+    authStore.setSession({
+      access_token: responseAccessToken,
+      refresh_token: "",
+      csrf_token: responseCsrfToken,
+    });
+  } else {
+    authStore.setSessionStartTime();
+  }
+
   removeCookie("otp_in_progress");
 
   return {

@@ -160,14 +160,20 @@ const getCookieValueFromHeader = (cookieHeader, key) => {
   return "";
 };
 
-const resolveBearerFromCookies = (cookieHeader) => {
-  const rawToken = getCookieValueFromHeader(cookieHeader, "access_token");
-  if (!rawToken) return "";
-  try {
-    return decodeURIComponent(rawToken);
-  } catch {
-    return rawToken;
-  }
+const stripCookieKeysFromHeader = (cookieHeader, keys = []) => {
+  const source = String(cookieHeader || "").trim();
+  if (!source) return "";
+  const blocked = new Set(keys.map((key) => String(key || "").trim()).filter(Boolean));
+  return source
+    .split(";")
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const idx = part.indexOf("=");
+      const name = idx >= 0 ? part.slice(0, idx).trim() : part;
+      return !blocked.has(name);
+    })
+    .join("; ");
 };
 
 const resolveCsrfHeaderValue = (incomingHeader, cookieHeader) => {
@@ -194,6 +200,7 @@ const copyHeadersPreservingSetCookie = (upstreamHeaders) => {
     const cookies = getSetCookie.call(upstreamHeaders) || [];
     for (const cookie of cookies) {
       if (!cookie) continue;
+      if (/^\s*access_token=/i.test(cookie)) continue;
       nextHeaders.append("set-cookie", cookie);
     }
     return nextHeaders;
@@ -208,6 +215,7 @@ const copyHeadersPreservingSetCookie = (upstreamHeaders) => {
     .filter(Boolean);
 
   for (const cookie of splitCookies) {
+    if (/^\s*access_token=/i.test(cookie)) continue;
     nextHeaders.append("set-cookie", cookie);
   }
 
@@ -355,18 +363,6 @@ const toProxyResponse = async (upstreamResponse, pathSegments = [], request = nu
 
   if (payload && typeof payload === "object") {
     const expiresIn = readExpiresInFromPayload(payload);
-    const accessToken = readAccessTokenFromPayload(payload, upstreamResponse.headers);
-    if (accessToken) {
-      const cookie = buildSetCookieHeader({
-        secure,
-        name: "access_token",
-        value: accessToken,
-        httpOnly: true,
-        maxAge: expiresIn != null ? Math.max(1, expiresIn) : null,
-      });
-      if (cookie) responseHeaders.append("set-cookie", cookie);
-    }
-
     const refreshToken = readRefreshTokenFromPayload(payload);
     if (refreshToken) {
       const cookie = buildSetCookieHeader({
@@ -402,7 +398,10 @@ const forwardRequest = async (request, targetUrl, bodyText) => {
   incomingHeaders.delete("host");
   incomingHeaders.delete("connection");
   incomingHeaders.delete("content-length");
-  const incomingCookie = String(incomingHeaders.get("cookie") || "").trim();
+  const incomingCookie = stripCookieKeysFromHeader(
+    String(incomingHeaders.get("cookie") || "").trim(),
+    ["access_token", "accessToken", "token"]
+  );
   const resolvedCsrf = resolveCsrfHeaderValue(
     String(incomingHeaders.get("x-csrf-token") || "").trim(),
     incomingCookie
@@ -410,12 +409,17 @@ const forwardRequest = async (request, targetUrl, bodyText) => {
   const existingAuthorization = String(
     incomingHeaders.get("authorization") || incomingHeaders.get("Authorization") || ""
   ).trim();
-  const cookieAccessToken = resolveBearerFromCookies(incomingCookie);
+  if (incomingCookie) {
+    incomingHeaders.set("cookie", incomingCookie);
+  } else {
+    incomingHeaders.delete("cookie");
+  }
   if (resolvedCsrf) {
     incomingHeaders.set("x-csrf-token", resolvedCsrf);
   }
-  if (!existingAuthorization && cookieAccessToken) {
-    incomingHeaders.set("authorization", `Bearer ${cookieAccessToken}`);
+  if (!existingAuthorization) {
+    incomingHeaders.delete("authorization");
+    incomingHeaders.delete("Authorization");
   }
   incomingHeaders.set("x-product-key", PRODUCT_KEY);
 

@@ -20,12 +20,13 @@ const readFirstCookie = (keys = []) => {
 
 export const getAccessToken = () => {
   logSafeMode();
-  return "";
+  return String(authStore?.accessToken || "").trim();
 };
 
-export const setAccessToken = (_token, _options = {}) => {
+export const setAccessToken = (token, _options = {}) => {
   logSafeMode();
-  return "";
+  authStore?.setAccessToken?.(token);
+  return String(token || "").trim();
 };
 
 export const clearAccessToken = (options = {}) => {

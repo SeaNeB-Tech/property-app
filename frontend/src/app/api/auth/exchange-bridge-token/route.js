@@ -20,6 +20,7 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
     const cookies = getSetCookie.call(upstreamHeaders) || [];
     for (const cookie of cookies) {
       if (!cookie) continue;
+      if (/^\s*access_token=/i.test(cookie)) continue;
       targetHeaders.append("set-cookie", cookie);
     }
     return;
@@ -34,6 +35,7 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
     .filter(Boolean);
 
   for (const cookie of splitCookies) {
+    if (/^\s*access_token=/i.test(cookie)) continue;
     targetHeaders.append("set-cookie", cookie);
   }
 };
@@ -120,18 +122,6 @@ const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null,
   const refreshToken = readRefreshTokenFromPayload(payload);
   const csrfToken = readCsrfFromPayload(payload, upstreamHeaders);
   const expiresIn = readExpiresInFromPayload(payload);
-
-  if (accessToken) {
-    response.cookies.set({
-      name: "access_token",
-      value: accessToken,
-      httpOnly: true,
-      sameSite: "lax",
-      secure,
-      path: "/",
-      ...(expiresIn != null ? { maxAge: Math.max(1, Math.floor(expiresIn)) } : {}),
-    });
-  }
 
   if (refreshToken) {
     response.cookies.set({
@@ -257,6 +247,7 @@ export async function POST(req) {
         const response = NextResponse.json(data, { status: upstream.status, headers: responseHeaders });
         if (upstream.ok) {
           setAuthCookiesByPayload(response, data, upstream.headers, shouldUseSecureCookies(req));
+          response.cookies.delete("access_token");
           console.log("[SSO Exchange] Success - setting auth cookies");
         }
         return response;

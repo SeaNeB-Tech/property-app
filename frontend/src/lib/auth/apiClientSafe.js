@@ -1,3 +1,5 @@
+import { getAccessToken } from "@/lib/auth/tokenStorage";
+
 const logSafeMode = () => {
   if (typeof globalThis === "undefined") return;
   if (globalThis.__SEANEB_AUTH_SAFE_MODE_API_SAFE_FA__) return;
@@ -5,9 +7,20 @@ const logSafeMode = () => {
   console.info("[AUTH SAFE MODE] using shared auth layer");
 };
 
+const isUsableAccessToken = (value) => {
+  const token = String(value || "").trim();
+  if (!token) return false;
+  const lowered = token.toLowerCase();
+  return !["cookie_session", "null", "undefined", "invalid", "sentinel"].includes(lowered);
+};
+
 export const attachAuthorizationHeader = (headers) => {
-  // Strict cookie-based auth: never attach bearer tokens from JS.
-  return new Headers(headers || {});
+  const next = new Headers(headers || {});
+  const accessToken = String(getAccessToken() || "").trim();
+  if (isUsableAccessToken(accessToken)) {
+    next.set("Authorization", `Bearer ${accessToken}`);
+  }
+  return next;
 };
 
 export const requestWithAuthSafeRetry = async ({

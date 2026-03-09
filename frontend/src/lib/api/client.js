@@ -42,8 +42,7 @@ const getCsrfToken = () =>
   String(
     getFirstCookieValue(CSRF_COOKIE_NAMES) || inMemoryCsrfToken || ""
   ).trim();
-const getAccessToken = () =>
-  String(getFirstCookieValue(["access_token"]) || inMemoryAccessToken || "").trim();
+const getAccessToken = () => String(inMemoryAccessToken || "").trim();
 const getProductKey = () => {
   return DEFAULT_PRODUCT_KEY;
 };
@@ -195,6 +194,8 @@ export const refreshAccessToken = async () => {
       }
     );
   const applyRefreshResponse = (response) => {
+    const nextAccessToken = readAccessTokenFromResponse(response);
+    if (nextAccessToken) setAccessTokenInMemory(nextAccessToken);
     const nextCsrfToken = readCsrfTokenFromResponse(response);
     if (nextCsrfToken) setCsrfTokenInMemory(nextCsrfToken);
     return true;

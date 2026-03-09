@@ -1,5 +1,7 @@
 "use client";
 
+import { getInMemoryAccessToken } from "@/lib/api/client";
+
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const AUTH_RETURN_TO_COOKIE = "auth_return_to";
 const LISTING_APP_ORIGIN = (() => {
@@ -113,6 +115,7 @@ const mintBridgeToken = async () => {
   const endpoints = ["/api/sso", "/api/v1/sso", "/api/auth/sso"];
   for (const endpoint of endpoints) {
     try {
+      const accessToken = String(getInMemoryAccessToken() || "").trim();
       const response = await fetch(endpoint, {
         method: "POST",
         credentials: "include",
@@ -120,6 +123,7 @@ const mintBridgeToken = async () => {
         headers: {
           "content-type": "application/json",
           "x-product-key": PRODUCT_KEY,
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         body: JSON.stringify({
           product_key: PRODUCT_KEY,

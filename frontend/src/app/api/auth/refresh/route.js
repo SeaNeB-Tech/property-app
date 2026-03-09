@@ -57,6 +57,7 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
     const cookies = getSetCookie.call(upstreamHeaders) || [];
     for (const cookie of cookies) {
       if (!cookie) continue;
+      if (/^\s*access_token=/i.test(cookie)) continue;
       targetHeaders.append("set-cookie", cookie);
     }
     return;
@@ -71,6 +72,7 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
     .filter(Boolean);
 
   for (const cookie of splitCookies) {
+    if (/^\s*access_token=/i.test(cookie)) continue;
     targetHeaders.append("set-cookie", cookie);
   }
 };
@@ -181,18 +183,6 @@ const setCookieByPayload = (
   const accessToken = readTokenFromPayload(payloadJson, upstreamHeaders);
   const refreshToken = readRefreshTokenFromPayload(payloadJson);
   const csrfToken = readCsrfFromPayload(payloadJson, upstreamHeaders);
-
-  if (accessToken) {
-    response.cookies.set({
-      name: "access_token",
-      value: accessToken,
-      httpOnly: true,
-      sameSite: "lax",
-      secure,
-      path: "/",
-      ...(expiresIn != null ? { maxAge: Math.max(1, Math.floor(expiresIn)) } : {}),
-    });
-  }
 
   if (refreshToken) {
     response.cookies.set({
@@ -359,9 +349,11 @@ export async function POST(request) {
   }
 
   if (upstreamResponse.ok) {
+    const accessToken = readTokenFromPayload(payloadJson, upstreamResponse.headers);
     const response = NextResponse.json(
       {
         success: true,
+        ...(accessToken ? { accessToken, access_token: accessToken } : {}),
         ...(readCsrfFromPayload(payloadJson, upstreamResponse.headers)
           ? { csrfToken: readCsrfFromPayload(payloadJson, upstreamResponse.headers) }
           : {}),
@@ -374,7 +366,11 @@ export async function POST(request) {
         headers: responseHeaders,
       }
     );
+    if (accessToken) {
+      response.headers.set("authorization", `Bearer ${accessToken}`);
+    }
     setCookieByPayload(response, payloadJson, upstreamResponse.headers, shouldUseSecureCookies(request));
+    response.cookies.delete("access_token");
     return response;
   }
 

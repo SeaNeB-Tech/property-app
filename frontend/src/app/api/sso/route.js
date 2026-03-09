@@ -53,6 +53,9 @@ export async function POST(request) {
   console.log("[SSO Mint] Starting bridge token mint", { bodyPayload });
 
   const cookieHeader = String(request.headers.get("cookie") || "").trim();
+  const authorizationHeader = String(
+    request.headers.get("authorization") || request.headers.get("Authorization") || ""
+  ).trim();
   const upstreamCandidates = buildUpstreamCandidates();
   if (upstreamCandidates.length === 0) {
     console.error("[SSO Mint] No upstream candidates configured", {
@@ -79,6 +82,7 @@ export async function POST(request) {
     headers.set("content-type", "application/json");
     headers.set("x-product-key", PRODUCT_KEY);
     if (cookieHeader) headers.set("cookie", cookieHeader);
+    if (authorizationHeader) headers.set("authorization", authorizationHeader);
 
     const body = JSON.stringify({
       ...(bodyPayload && typeof bodyPayload === "object" ? bodyPayload : {}),

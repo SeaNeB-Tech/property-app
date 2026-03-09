@@ -24,7 +24,7 @@ import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
-import { API } from "@/lib/config/apiPaths"
+import { getListingAppUrl } from "@/lib/core/appUrls"
 import useDebounce from "@/hooks/useDebounce"
 import AuthCard1 from "@/components/ui/AuthCard1"
 import AuthHeader from "@/components/ui/AuthHeader"
@@ -36,6 +36,7 @@ import TermsConditionsModal from "@/components/ui/TermsConditionsModal"
 import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay"
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
 import { setAuthFlowContext } from "@/lib/auth/flowContext"
+import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect"
 
 // i18n
 import eng from "@/constants/i18/eng/business_register.json"
@@ -105,40 +106,6 @@ const getBusinessSuggestionLabel = (item) =>
 
 const getBusinessSuggestionPlaceId = (item) =>
   String(item?.place_id || item?.id || "").trim()
-
-const readProfilePayload = (payload) => {
-  const profile =
-    payload?.data?.profile ||
-    payload?.data?.user ||
-    payload?.data ||
-    payload?.profile ||
-    payload?.user ||
-    payload
-  return profile && typeof profile === "object" ? profile : null
-}
-
-const fetchWithSessionRefresh = async (url, options = {}) => {
-  const requestOnce = () =>
-    fetch(url, {
-      ...options,
-      credentials: "include",
-      cache: options.cache || "no-store",
-    })
-
-  const firstResponse = await requestOnce()
-  if (firstResponse.status !== 401) return firstResponse
-
-  const refreshResponse = await fetch("/api/auth/refresh", {
-    method: "POST",
-    credentials: "include",
-    cache: "no-store",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ product_key: String(getDefaultProductKey() || "property").trim() || "property" }),
-  })
-
-  if (!refreshResponse.ok) return firstResponse
-  return requestOnce()
-}
 
 const getResolvedCountryCode = () => {
   const verifiedBusinessMobile = getJsonCookie("verified_business_mobile")
@@ -1050,23 +1017,17 @@ export default function BusinessRegisterPage() {
             path: "/",
           })
 
-          try {
-            const meResponse = await fetchWithSessionRefresh(API.PROFILE, { method: "GET" })
-            if (meResponse.ok) {
-              const mePayload = await meResponse.json()
-              const latestProfile = readProfilePayload(mePayload)
-              if (typeof window !== "undefined" && latestProfile) {
-                window.__SEANEB_AUTH_USER__ = latestProfile
-              }
-            }
-          } catch {
-            // Best-effort only. Redirect flow should continue.
-          }
-
           const sentSuccessMessage = notifyMainAppBusinessRegisterSuccess()
           notifyAuthChanged()
           if (!sentSuccessMessage) {
-            console.warn("[business-register] Main app handshake did not complete; continuing to broker dashboard.")
+            const redirected = await redirectToListingWithBridgeToken({
+              returnTo: getListingAppUrl("/dashboard/broker"),
+              source: "main-app-register",
+            })
+            if (redirected) {
+              return
+            }
+            console.warn("[business-register] Main app handshake did not complete; falling back to local broker redirect.")
           }
           router.replace("/dashboard/broker")
         },

@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
-const ACCESS_COOKIE_KEYS = ["access_token", "accessToken", "token"];
 const CSRF_COOKIE_KEYS = ["csrf_token_property", "csrf_token"];
 
 const getBaseCandidates = () =>
@@ -46,12 +45,29 @@ const getFirstCookieValueFromHeader = (cookieHeader, keys = []) => {
   return "";
 };
 
+const stripCookieKeysFromHeader = (cookieHeader, keys = []) => {
+  const source = String(cookieHeader || "").trim();
+  if (!source) return "";
+  const blocked = new Set(keys.map((key) => String(key || "").trim()).filter(Boolean));
+  return source
+    .split(";")
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const idx = part.indexOf("=");
+      const name = idx >= 0 ? part.slice(0, idx).trim() : part;
+      return !blocked.has(name);
+    })
+    .join("; ");
+};
+
 const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
   const getSetCookie = upstreamHeaders?.getSetCookie;
   if (typeof getSetCookie === "function") {
     const cookies = getSetCookie.call(upstreamHeaders) || [];
     for (const cookie of cookies) {
       if (!cookie) continue;
+      if (/^\s*access_token=/i.test(cookie)) continue;
       targetHeaders.append("set-cookie", cookie);
     }
     return;
@@ -66,6 +82,7 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
     .filter(Boolean);
 
   for (const cookie of splitCookies) {
+    if (/^\s*access_token=/i.test(cookie)) continue;
     targetHeaders.append("set-cookie", cookie);
   }
 };
@@ -184,17 +201,6 @@ const setAuthCookiesByPayload = (response, payload = {}, headers = null, secure 
   const csrfToken = readCsrfFromPayload(payload, headers);
   const expiresIn = readExpiresInFromPayload(payload);
 
-  if (accessToken) {
-    response.cookies.set({
-      name: "access_token",
-      value: accessToken,
-      httpOnly: true,
-      sameSite: "lax",
-      secure,
-      path: "/",
-      ...(expiresIn != null ? { maxAge: Math.max(1, Math.floor(expiresIn)) } : {}),
-    });
-  }
   if (refreshToken) {
     response.cookies.set({
       name: "refresh_token_property",
@@ -263,7 +269,7 @@ const requestProfile = async ({
   cookieHeader,
   csrfHeader,
   authorizationHeader,
-  accessTokenFromCookie,
+  accessToken,
 }) => {
   const normalizedBase = String(base).replace(/\/+$/, "");
   const url = `${normalizedBase}${path}`;
@@ -273,8 +279,8 @@ const requestProfile = async ({
   if (csrfHeader) headers.set("x-csrf-token", csrfHeader);
   if (authorizationHeader) {
     headers.set("authorization", authorizationHeader);
-  } else if (accessTokenFromCookie) {
-    headers.set("authorization", `Bearer ${accessTokenFromCookie}`);
+  } else if (accessToken) {
+    headers.set("authorization", `Bearer ${accessToken}`);
   }
 
   return fetch(url, {
@@ -324,12 +330,14 @@ export async function GET(request) {
     );
   }
 
-  const incomingCookie = String(request.headers.get("cookie") || "").trim();
+  const incomingCookie = stripCookieKeysFromHeader(
+    String(request.headers.get("cookie") || "").trim(),
+    ["access_token", "accessToken", "token"]
+  );
   const incomingCsrf = String(request.headers.get("x-csrf-token") || "").trim();
   const incomingAuthorization = String(
     request.headers.get("authorization") || request.headers.get("Authorization") || ""
   ).trim();
-  const accessTokenFromCookie = getFirstCookieValueFromHeader(incomingCookie, ACCESS_COOKIE_KEYS);
   const initialCookieJar = parseCookieHeader(incomingCookie);
 
   let lastResponse = null;
@@ -342,7 +350,7 @@ export async function GET(request) {
           cookieHeader: incomingCookie,
           csrfHeader: incomingCsrf,
           authorizationHeader: incomingAuthorization,
-          accessTokenFromCookie,
+          accessToken: "",
         });
 
         lastResponse = response;
@@ -377,14 +385,11 @@ export async function GET(request) {
             const accessFromPayload = readAccessTokenFromPayload(refreshPayload, refreshResponse.headers);
             const refreshFromPayload = readRefreshTokenFromPayload(refreshPayload);
             const csrfFromPayload = readCsrfFromPayload(refreshPayload, refreshResponse.headers);
-            if (accessFromPayload) refreshedCookieJar.set("access_token", accessFromPayload);
             if (refreshFromPayload) refreshedCookieJar.set("refresh_token_property", refreshFromPayload);
             if (csrfFromPayload) refreshedCookieJar.set("csrf_token_property", csrfFromPayload);
             const mergedCookieHeader = toCookieHeader(refreshedCookieJar);
             const csrfAfterRefresh =
               getFirstCookieValueFromHeader(mergedCookieHeader, CSRF_COOKIE_KEYS) || incomingCsrf;
-            const accessAfterRefresh =
-              getFirstCookieValueFromHeader(mergedCookieHeader, ACCESS_COOKIE_KEYS) || accessTokenFromCookie;
 
             const retryProfile = await requestProfile({
               base,
@@ -392,7 +397,7 @@ export async function GET(request) {
               cookieHeader: mergedCookieHeader,
               csrfHeader: csrfAfterRefresh,
               authorizationHeader: incomingAuthorization,
-              accessTokenFromCookie: accessAfterRefresh,
+              accessToken: accessFromPayload,
             });
 
             const response = await copyResponse(retryProfile, responseHeaders);
@@ -402,6 +407,7 @@ export async function GET(request) {
               refreshResponse.headers,
               shouldUseSecureCookies(request)
             );
+            response.cookies.delete("access_token");
             return response;
           }
         }
