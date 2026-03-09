@@ -1,5 +1,6 @@
 import {
   getInMemoryAccessToken,
+  getInMemoryCsrfToken,
   setInMemoryAccessToken,
   setInMemoryCsrfToken,
 } from "@/lib/api/client";
@@ -19,6 +20,14 @@ const hasCsrfTokenCookie = () => {
     .split(";")
     .map((part) => String(part || "").trim())
     .some((part) => part.startsWith("csrf_token_property="));
+};
+
+const hasClientSession = () => {
+  return Boolean(
+    String(getInMemoryAccessToken() || "").trim() ||
+      String(getInMemoryCsrfToken() || "").trim() ||
+      hasCsrfTokenCookie()
+  );
 };
 
 const requestMe = async () => {
@@ -91,12 +100,16 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
     // Try direct profile probe first (handles still-valid access cookie quickly).
     const firstMe = await requestMe();
     if (firstMe.ok) {
-      if (getInMemoryAccessToken()) return true;
+      if (hasClientSession()) return true;
 
       const refreshResult = await hydrateTokenFromRefresh();
       if (refreshResult.ok) {
-        return Boolean(getInMemoryAccessToken());
+        return hasClientSession();
       }
+
+      // Some deployments confirm auth via cookie-backed /me but do not expose
+      // a JS-readable access token immediately after OTP verification.
+      return true;
     }
 
     const firstStatus = Number(firstMe.status || 0);
@@ -136,7 +149,9 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
       }
 
       const retryMeResponse = await requestMe();
-      if (retryMeResponse.ok && getInMemoryAccessToken()) return true;
+      if (retryMeResponse.ok) {
+        return true;
+      }
 
       const retryStatus = Number(retryMeResponse.status || 0);
       const shouldRetry = [401, 403, 500, 502, 503, 504].includes(retryStatus) && attempt < 2;
