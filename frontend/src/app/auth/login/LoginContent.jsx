@@ -21,8 +21,8 @@ import { sendOtp } from "@/app/auth/auth-service/otp.service";
 import { clearPreAuthCsrfCookies, getCookie, removeCookie, setCookie, setJsonCookie } from "@/services/auth.service";
 import { getListingAppUrl } from "@/lib/core/appUrls";
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition";
-import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap";
 import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect";
+import { useAuth } from "@/lib/auth/AuthContext";
 import {
   getAuthFlowContext,
   ingestAuthFlowContextFromWindowName,
@@ -131,6 +131,7 @@ const getFriendlyOtpError = (err) => {
 
 export default function LoginContent() {
   const router = useRouter();
+  const { authInitialized, isAuthenticated, isLoading, restoreSession } = useAuth();
 
   const [language, setLanguage] = useState(() => {
     if (typeof window !== "undefined") {
@@ -145,6 +146,7 @@ export default function LoginContent() {
   const [country, setCountry] = useState(phoneCodes[0]);
   const [method, setMethod] = useState("whatsapp");
   const [error, setError] = useState("");
+  const [autoRedirecting, setAutoRedirecting] = useState(false);
   const [flowContext] = useState(() => {
     if (typeof window === "undefined") return getAuthFlowContext();
     ingestAuthFlowContextFromWindowName();
@@ -176,50 +178,42 @@ export default function LoginContent() {
   }, [returnToParam]);
 
   useEffect(() => {
+    void restoreSession();
+  }, [restoreSession]);
+
+  useEffect(() => {
     let active = true;
-    const tryContinueWithExistingSession = async () => {
-      const otpInProgress = String(getCookie("otp_in_progress") || "").trim().toLowerCase();
-      const postOtpVerified = String(getCookie(POST_OTP_VERIFIED_COOKIE) || "").trim().toLowerCase();
-      const csrfHint = String(getCookie("csrf_token_property") || "").trim();
-      const shouldPreserveForOtpFlow =
-        otpInProgress === "1" ||
-        otpInProgress === "true" ||
-        otpInProgress === "yes" ||
-        postOtpVerified === "1" ||
-        postOtpVerified === "true" ||
-        postOtpVerified === "yes";
-      if (shouldPreserveForOtpFlow) return;
-      if (!csrfHint) return;
+
+    const maybeRedirect = async () => {
+      if (!authInitialized || !isAuthenticated) return;
+
+      setAutoRedirecting(true);
+      const target = (() => {
+        if (returnToParam && isSafeReturnTo(returnToParam)) return returnToParam;
+        return resolveRedirectTarget(getPostLoginTarget());
+      })();
 
       try {
-        const hasSession = await ensureSessionReady();
-        if (!active) return;
-        if (hasSession) {
-          const target = (() => {
-            if (returnToParam && isSafeReturnTo(returnToParam)) return returnToParam;
-            return resolveRedirectTarget(getPostLoginTarget());
-          })();
-
-          if (isCrossOriginAbsoluteTarget(target)) {
-            const redirected = await redirectToListingWithBridgeToken({
-              returnTo: target,
-              source,
-            });
-            if (!active) return;
-            if (redirected) return;
-          }
-          router.replace(target);
+        if (isCrossOriginAbsoluteTarget(target)) {
+          const redirected = await redirectToListingWithBridgeToken({
+            returnTo: target,
+            source,
+          });
+          if (!active) return;
+          if (redirected) return;
         }
-      } catch {
-        // Keep login page visible as fallback.
+        router.replace(target);
+      } finally {
+        if (active) setAutoRedirecting(false);
       }
     };
 
-    void tryContinueWithExistingSession();
+    void maybeRedirect();
+
     return () => {
       active = false;
     };
-  }, [returnToParam, router, source]);
+  }, [authInitialized, isAuthenticated, returnToParam, router, source]);
 
   useEffect(() => {
     let active = true;
@@ -298,11 +292,15 @@ export default function LoginContent() {
     );
   }, [country, isTransitioning, isValidMobile, method, mobile, returnToParam, router, runWithTransition, source]);
 
-  if (showTransition) {
+  if (showTransition || autoRedirecting || isLoading || !authInitialized) {
     return (
       <AuthTransitionOverlay
-        title="Sending OTP..."
-        description="Preparing secure verification for your login."
+        title={autoRedirecting ? "Preparing your dashboard..." : "Please wait..."}
+        description={
+          autoRedirecting
+            ? "Checking your session and redirecting."
+            : "Checking your session."
+        }
       />
     );
   }

@@ -255,6 +255,10 @@ const readRefreshTokenFromPayload = (payload = {}) => {
   return String(
     payload?.refreshToken ||
       payload?.refresh_token ||
+      payload?.session?.refreshToken ||
+      payload?.session?.refresh_token ||
+      payload?.data?.session?.refreshToken ||
+      payload?.data?.session?.refresh_token ||
       data?.refreshToken ||
       data?.refresh_token ||
       tokenObj?.refreshToken ||
@@ -282,6 +286,39 @@ const readExpiresInFromPayload = (payload = {}) => {
   const raw = payload?.expiresIn ?? payload?.expires_in ?? data?.expiresIn ?? data?.expires_in;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getSetCookieLines = (headers) => {
+  const getSetCookie = headers?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    return (getSetCookie.call(headers) || []).filter(Boolean);
+  }
+
+  const combinedCookieHeader = String(headers?.get("set-cookie") || "").trim();
+  if (!combinedCookieHeader) return [];
+
+  return combinedCookieHeader
+    .split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const readCookieValueFromSetCookie = (headers, keys = []) => {
+  const allowed = new Set((keys || []).map((key) => String(key || "").trim()).filter(Boolean));
+  if (!allowed.size) return "";
+
+  for (const line of getSetCookieLines(headers)) {
+    const firstSemi = line.indexOf(";");
+    const firstPart = (firstSemi >= 0 ? line.slice(0, firstSemi) : line).trim();
+    const eq = firstPart.indexOf("=");
+    if (eq < 0) continue;
+    const name = firstPart.slice(0, eq).trim();
+    const value = firstPart.slice(eq + 1).trim();
+    if (!name || !value) continue;
+    if (allowed.has(name)) return value;
+  }
+
+  return "";
 };
 
 const buildSetCookieHeader = ({
@@ -363,7 +400,15 @@ const toProxyResponse = async (upstreamResponse, pathSegments = [], request = nu
 
   if (payload && typeof payload === "object") {
     const expiresIn = readExpiresInFromPayload(payload);
-    const refreshToken = readRefreshTokenFromPayload(payload);
+    const refreshToken =
+      readRefreshTokenFromPayload(payload) ||
+      readCookieValueFromSetCookie(upstreamResponse.headers, [
+        "refresh_token_property",
+        "refresh_token",
+        "refreshToken",
+        "refreshToken_property",
+        "property_refresh_token",
+      ]);
     if (refreshToken) {
       const cookie = buildSetCookieHeader({
         secure,
@@ -374,7 +419,12 @@ const toProxyResponse = async (upstreamResponse, pathSegments = [], request = nu
       if (cookie) responseHeaders.append("set-cookie", cookie);
     }
 
-    const csrfToken = readCsrfTokenFromPayload(payload, upstreamResponse.headers);
+    const csrfToken =
+      readCsrfTokenFromPayload(payload, upstreamResponse.headers) ||
+      readCookieValueFromSetCookie(upstreamResponse.headers, [
+        "csrf_token_property",
+        "csrf_token",
+      ]);
     if (csrfToken) {
       const cookie = buildSetCookieHeader({
         secure,

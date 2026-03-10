@@ -22,7 +22,7 @@ import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.serv
 import { sendOtp } from "@/app/auth/auth-service/otp.service"
 import { verifyOtpAndLogin } from "@/app/auth/auth-service/authservice"
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
-import { setAccessToken as setInMemoryAccessToken } from "@/lib/auth/tokenStorage"
+import { hydrateAuthSession } from "@/lib/api/client"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
@@ -36,7 +36,14 @@ import OtpVerificationModal from "@/components/ui/OtpVerificationModal"
 import TermsConditionsModal from "@/components/ui/TermsConditionsModal"
 import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay"
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
-import { setAuthFlowContext } from "@/lib/auth/flowContext"
+import {
+  getAuthFlowContext,
+  ingestAuthFlowContextFromUrl,
+  ingestAuthFlowContextFromWindowName,
+  setAuthFlowContext,
+  stripAuthFlowParamsFromAddressBar,
+} from "@/lib/auth/flowContext"
+import { getAllowedReturnOrigins, getPrimaryListingOrigin } from "@/lib/core/postLoginRedirect"
 
 // i18n
 import eng from "@/constants/i18/eng/business_register.json"
@@ -51,6 +58,8 @@ const MOBILE_REGEX = /^[0-9]{8,15}$/
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2
 const PURPOSE_BUSINESS_EMAIL_VERIFY = 3
+const MAIN_APP_REGISTER_SOURCE = "main-app-register"
+const BUSINESS_REGISTER_SUCCESS_MESSAGE_TYPE = "SEANEB_BUSINESS_REGISTER_SUCCESS"
 const DEFAULT_MAIN_CATEGORY_ID = process.env.NEXT_PUBLIC_MAIN_CATEGORY_ID || ""
 const OTP_VIA_WHATSAPP = "whatsapp"
 const OTP_VIA_SMS = "sms"
@@ -150,10 +159,83 @@ const WIZARD_STEPS = [
 
 const getOtpChannelLabel = (via) => (via === OTP_VIA_SMS ? "SMS" : "WhatsApp")
 
+const resolveListingOrigin = (returnTo = "") => {
+  const allowedOrigins = getAllowedReturnOrigins()
+  const primaryOrigin = getPrimaryListingOrigin()
+  const fallback = primaryOrigin || ""
+  const target = String(returnTo || "").trim()
+
+  if (!target) return fallback
+
+  try {
+    const parsed = target.startsWith("/") && primaryOrigin
+      ? new URL(target, primaryOrigin)
+      : new URL(target)
+
+    if (allowedOrigins.length && !allowedOrigins.includes(parsed.origin)) {
+      return fallback
+    }
+
+    if (!allowedOrigins.length && !primaryOrigin) {
+      return ""
+    }
+
+    return parsed.origin
+  } catch {
+    return fallback
+  }
+}
+
+const notifyListingApp = ({ businessId = "", branchId = "" } = {}) => {
+  if (typeof window === "undefined") return false
+  const { source, returnTo } = getAuthFlowContext()
+  if (source !== MAIN_APP_REGISTER_SOURCE) return false
+
+  const targetOrigin = resolveListingOrigin(returnTo)
+  if (!targetOrigin) return false
+
+  if (!window.opener || window.opener.closed) return false
+
+  try {
+    window.opener.postMessage(
+      {
+        type: BUSINESS_REGISTER_SUCCESS_MESSAGE_TYPE,
+        payload: {
+          authCode: "",
+          businessId: String(businessId || ""),
+          branchId: String(branchId || ""),
+        },
+      },
+      targetOrigin
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+const finalizeRegistration = ({ router, businessId = "", branchId = "" } = {}) => {
+  const notified = notifyListingApp({ businessId, branchId })
+  if (notified) {
+    try {
+      window.close()
+    } catch {
+      // ignore close failures
+    }
+    window.setTimeout(() => {
+      if (typeof window !== "undefined" && !window.closed) {
+        router.replace("/dashboard/broker")
+      }
+    }, 200)
+    return
+  }
+  router.replace("/dashboard/broker")
+}
+
 const redirectToBusinessRegisterLogin = (router) => {
   const returnTo = "/auth/business-register"
   setAuthFlowContext({
-    source: "main-app-register",
+    source: MAIN_APP_REGISTER_SOURCE,
     returnTo,
   })
   router.replace("/auth/login")
@@ -294,6 +376,12 @@ export default function BusinessRegisterPage() {
     }, 1000)
     return () => window.clearInterval(timer)
   }, [emailEditCooldown, mobileEditCooldown])
+
+  useEffect(() => {
+    ingestAuthFlowContextFromWindowName()
+    ingestAuthFlowContextFromUrl()
+    stripAuthFlowParamsFromAddressBar()
+  }, [])
 
   useEffect(() => {
     const init = async () => {
@@ -986,7 +1074,7 @@ export default function BusinessRegisterPage() {
             const finalToken = headerToken || bodyToken || ""
             if (finalToken) {
               try {
-                setInMemoryAccessToken(finalToken)
+                hydrateAuthSession({ accessToken: finalToken, broadcast: true })
               } catch (e) {
                 // ignore
               }
@@ -1083,7 +1171,7 @@ export default function BusinessRegisterPage() {
               const finalRefreshToken = respHeaderToken || respBodyToken || ""
               if (finalRefreshToken) {
                 try {
-                  setInMemoryAccessToken(finalRefreshToken)
+                  hydrateAuthSession({ accessToken: finalRefreshToken, broadcast: true })
                 } catch (e) {
                   // ignore
                 }
@@ -1101,7 +1189,11 @@ export default function BusinessRegisterPage() {
           }
 
           notifyAuthChanged()
-          router.replace("/dashboard/broker")
+          if (!sessionHydrated) {
+            redirectToBusinessRegisterLogin(router)
+            return
+          }
+          finalizeRegistration({ router, businessId, branchId: createdBranchId })
         },
         onError: (err) => {
           (async () => {
@@ -1145,8 +1237,19 @@ export default function BusinessRegisterPage() {
                   path: "/",
                 })
 
+                let recoveredSession = false
+                try {
+                  recoveredSession = await ensureSessionReady({ force: true })
+                } catch {
+                  recoveredSession = false
+                }
+
                 notifyAuthChanged()
-                router.replace("/dashboard/broker")
+                if (!recoveredSession) {
+                  redirectToBusinessRegisterLogin(router)
+                  return
+                }
+                finalizeRegistration({ router, businessId, branchId: createdBranchId })
                 return
               } catch (fallbackErr) {
                 // If fallback processing fails, fall through to show error below.

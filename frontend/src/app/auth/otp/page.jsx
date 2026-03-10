@@ -156,6 +156,12 @@ export default function OtpPage() {
 
   const handleOtpSuccess = async ({ sourcePayload = null } = {}) => {
     const { source, returnTo } = getAuthFlowContext();
+    const localTarget = String(returnTo || "").trim();
+    if (localTarget === "/dashboard" || localTarget.startsWith("/dashboard/")) {
+      clearAuthFlowContext();
+      router.replace(localTarget);
+      return;
+    }
 
     try {
       const fallbackReturnTo =

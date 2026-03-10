@@ -34,6 +34,10 @@ const SOURCE_TO_TARGET_PATH = {
   "main-app-register": "/auth/business-register",
 };
 
+export const getAllowedReturnOrigins = () => [...ALLOWED_RETURN_ORIGINS];
+
+export const getPrimaryListingOrigin = () => PRIMARY_LISTING_ORIGIN;
+
 const readBridgeTokenFromPayload = (payload = {}) => {
   const candidates = [
     payload,
@@ -182,7 +186,10 @@ export const redirectToListingWithBridgeToken = async ({
 
   clearReturnToCookie();
   if (!bridgeToken) {
-    return false;
+    // Fallback for deployments where SSO bridge mint endpoint is unavailable.
+    // Let listing app restore session directly via shared auth cookies.
+    window.location.replace(safeSourceTarget);
+    return true;
   }
 
   const destination = appendBridgeToken(callbackUrl, bridgeToken);

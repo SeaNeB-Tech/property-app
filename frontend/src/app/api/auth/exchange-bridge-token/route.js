@@ -88,6 +88,10 @@ const readRefreshTokenFromPayload = (payload = {}) => {
   return String(
     payload?.refreshToken ||
       payload?.refresh_token ||
+      payload?.session?.refreshToken ||
+      payload?.session?.refresh_token ||
+      payload?.data?.session?.refreshToken ||
+      payload?.data?.session?.refresh_token ||
       data?.refreshToken ||
       data?.refresh_token ||
       tokenObj?.refreshToken ||
@@ -117,10 +121,52 @@ const readExpiresInFromPayload = (payload = {}) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const getSetCookieLines = (headers) => {
+  const getSetCookie = headers?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    return (getSetCookie.call(headers) || []).filter(Boolean);
+  }
+  const combined = String(headers?.get("set-cookie") || "").trim();
+  if (!combined) return [];
+  return combined
+    .split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const readCookieValueFromSetCookie = (headers, keys = []) => {
+  const allowed = new Set((keys || []).map((key) => String(key || "").trim()).filter(Boolean));
+  if (!allowed.size) return "";
+  for (const line of getSetCookieLines(headers)) {
+    const firstSemi = line.indexOf(";");
+    const firstPart = (firstSemi >= 0 ? line.slice(0, firstSemi) : line).trim();
+    const eq = firstPart.indexOf("=");
+    if (eq < 0) continue;
+    const name = firstPart.slice(0, eq).trim();
+    const value = firstPart.slice(eq + 1).trim();
+    if (!name || !value) continue;
+    if (allowed.has(name)) return value;
+  }
+  return "";
+};
+
 const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null, secure = false) => {
   const accessToken = readAccessTokenFromPayload(payload, upstreamHeaders);
-  const refreshToken = readRefreshTokenFromPayload(payload);
-  const csrfToken = readCsrfFromPayload(payload, upstreamHeaders);
+  const refreshToken =
+    readRefreshTokenFromPayload(payload) ||
+    readCookieValueFromSetCookie(upstreamHeaders, [
+      "refresh_token_property",
+      "refresh_token",
+      "refreshToken",
+      "refreshToken_property",
+      "property_refresh_token",
+    ]);
+  const csrfToken =
+    readCsrfFromPayload(payload, upstreamHeaders) ||
+    readCookieValueFromSetCookie(upstreamHeaders, [
+      "csrf_token_property",
+      "csrf_token",
+    ]);
   const expiresIn = readExpiresInFromPayload(payload);
 
   if (refreshToken) {
@@ -185,7 +231,7 @@ export async function POST(req) {
   console.log("[SSO Exchange] Starting exchange with base candidates:", baseCandidates);
   console.log("[SSO Exchange] Request body:", body);
 
-  const productKey = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim();
+  const productKey = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
   const cookieHeader = req.headers.get("cookie") || "";
   const headers = {
     "Content-Type": "application/json",
@@ -200,11 +246,27 @@ export async function POST(req) {
 
   const upstreamCandidates = Array.from(
     new Set(
-      baseCandidates.flatMap((base) => [
-        `${base}/sso/exchange`,
-        `${base}/auth/sso/exchange`,
-        `${base}/v1/sso/exchange`,
-      ])
+      baseCandidates.flatMap((base) => {
+        const normalized = String(base || "").trim().replace(/\/+$/, "");
+        const candidates = [
+          `${normalized}/sso/exchange`,
+          `${normalized}/auth/sso/exchange`,
+          `${normalized}/v1/sso/exchange`,
+        ];
+        try {
+          const parsed = new URL(normalized);
+          const origin = String(parsed.origin || "").trim().replace(/\/+$/, "");
+          if (origin) {
+            candidates.push(`${origin}/api/v1/sso/exchange`);
+            candidates.push(`${origin}/v1/sso/exchange`);
+            candidates.push(`${origin}/sso/exchange`);
+            candidates.push(`${origin}/auth/sso/exchange`);
+          }
+        } catch {
+          // keep normalized candidates only
+        }
+        return candidates;
+      })
     )
   );
 

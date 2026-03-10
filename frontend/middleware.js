@@ -6,6 +6,7 @@ const REFRESH_COOKIE_KEYS = [
   "refreshToken_property",
   "property_refresh_token",
 ];
+const CSRF_COOKIE_KEYS = ["csrf_token_property", "csrf_token"];
 const AUTH_ENTRY_PATHS = new Set([
   "/auth/login",
   "/auth/home",
@@ -64,6 +65,7 @@ const hasAnyCookie = (request, names = []) =>
 const hasSessionCookie = (request) => {
   return hasAnyCookie(request, REFRESH_COOKIE_KEYS);
 };
+const hasCsrfCookie = (request) => hasAnyCookie(request, CSRF_COOKIE_KEYS);
 
 const getSafeInternalReturnPath = (request) => {
   const returnTo = String(request.nextUrl.searchParams.get("returnTo") || "").trim();
@@ -109,22 +111,25 @@ const getValidatedSessionState = async (request) => {
       },
       cache: "no-store",
     });
-    if (!response.ok) {
-      return { authenticated: false, hasBusiness: false };
-    }
+    
+    if (response.ok) {
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
 
-    let payload = null;
-    try {
-      payload = await response.json();
-    } catch {
-      payload = null;
+      const profile = readProfilePayload(payload);
+      return {
+        authenticated: true,
+        hasBusiness: hasBusinessFromProfile(profile || {}),
+      };
     }
-
-    const profile = readProfilePayload(payload);
-    return {
-      authenticated: true,
-      hasBusiness: hasBusinessFromProfile(profile || {}),
-    };
+    
+    // If we get 401/403 and have a refresh token, the /api/auth/me endpoint
+    // should have already attempted refresh. If it still fails, session is invalid.
+    return { authenticated: false, hasBusiness: false };
   } catch {
     return { authenticated: false, hasBusiness: false };
   }
@@ -132,8 +137,11 @@ const getValidatedSessionState = async (request) => {
 
 export async function middleware(request) {
   const pathname = request.nextUrl.pathname;
-  let hasSession = hasSessionCookie(request);
+  const hasRefreshCookie = hasSessionCookie(request);
+  const hasCsrfSessionHint = hasCsrfCookie(request);
+  let hasSession = hasRefreshCookie;
   let hasBusiness = false;
+  let probeAuthenticated = false;
   const shouldProbeSession =
     pathname.startsWith("/dashboard") ||
     AUTH_ENTRY_PATHS.has(pathname) ||
@@ -143,18 +151,22 @@ export async function middleware(request) {
     const sessionState = await getValidatedSessionState(request);
     hasSession = sessionState.authenticated;
     hasBusiness = sessionState.hasBusiness;
+    probeAuthenticated = sessionState.authenticated;
   }
 
-  if (pathname.startsWith("/dashboard") && !hasSession) {
-    const loginUrl = new URL("/auth/login", request.url);
-    loginUrl.searchParams.set("returnTo", request.nextUrl.href);
-    return NextResponse.redirect(loginUrl);
+  const hasRecoverableSession = !hasSession && (hasRefreshCookie || hasCsrfSessionHint);
+
+  if (pathname.startsWith("/dashboard") && !hasSession && !hasRecoverableSession) {
+    // Do not hard-redirect dashboard requests at middleware layer.
+    // Client auth bootstrap can still restore using Authorization + CSRF hints
+    // immediately after SSO handoff, which middleware cannot observe.
+    return NextResponse.next();
   }
 
-  if (pathname.startsWith("/dashboard") && !hasBusiness) {
-    const businessRegisterUrl = new URL("/auth/business-register", request.url);
-    businessRegisterUrl.searchParams.set("returnTo", request.nextUrl.href);
-    return NextResponse.redirect(businessRegisterUrl);
+  if (pathname.startsWith("/dashboard") && probeAuthenticated && !hasBusiness) {
+    // Keep dashboard transition stable; business gating is enforced in client shell
+    // using resolved profile data/cookies after auth restore.
+    return NextResponse.next();
   }
 
   if (AUTH_ENTRY_PATHS.has(pathname) && hasSession) {

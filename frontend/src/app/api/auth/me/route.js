@@ -166,6 +166,10 @@ const readRefreshTokenFromPayload = (payload = {}) => {
   return String(
     payload?.refreshToken ||
       payload?.refresh_token ||
+      payload?.session?.refreshToken ||
+      payload?.session?.refresh_token ||
+      payload?.data?.session?.refreshToken ||
+      payload?.data?.session?.refresh_token ||
       data?.refreshToken ||
       data?.refresh_token ||
       tokenObj?.refreshToken ||
@@ -195,10 +199,52 @@ const readExpiresInFromPayload = (payload = {}) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const getSetCookieLines = (headers) => {
+  const getSetCookie = headers?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    return (getSetCookie.call(headers) || []).filter(Boolean);
+  }
+  const combined = String(headers?.get("set-cookie") || "").trim();
+  if (!combined) return [];
+  return combined
+    .split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const readCookieValueFromSetCookie = (headers, keys = []) => {
+  const allowed = new Set((keys || []).map((key) => String(key || "").trim()).filter(Boolean));
+  if (!allowed.size) return "";
+  for (const line of getSetCookieLines(headers)) {
+    const firstSemi = line.indexOf(";");
+    const firstPart = (firstSemi >= 0 ? line.slice(0, firstSemi) : line).trim();
+    const eq = firstPart.indexOf("=");
+    if (eq < 0) continue;
+    const name = firstPart.slice(0, eq).trim();
+    const value = firstPart.slice(eq + 1).trim();
+    if (!name || !value) continue;
+    if (allowed.has(name)) return value;
+  }
+  return "";
+};
+
 const setAuthCookiesByPayload = (response, payload = {}, headers = null, secure = false) => {
   const accessToken = readAccessTokenFromPayload(payload, headers);
-  const refreshToken = readRefreshTokenFromPayload(payload);
-  const csrfToken = readCsrfFromPayload(payload, headers);
+  const refreshToken =
+    readRefreshTokenFromPayload(payload) ||
+    readCookieValueFromSetCookie(headers, [
+      "refresh_token_property",
+      "refresh_token",
+      "refreshToken",
+      "refreshToken_property",
+      "property_refresh_token",
+    ]);
+  const csrfToken =
+    readCsrfFromPayload(payload, headers) ||
+    readCookieValueFromSetCookie(headers, [
+      "csrf_token_property",
+      "csrf_token",
+    ]);
   const expiresIn = readExpiresInFromPayload(payload);
 
   if (refreshToken) {
@@ -354,7 +400,22 @@ export async function GET(request) {
         });
 
         lastResponse = response;
-        if (response.ok) return copyResponse(response);
+        if (response.ok) {
+          const copiedResponse = await copyResponse(response);
+          // Ensure refresh token is set in response cookies if present in request
+          const refreshTokenFromRequest = getCookieValueFromHeader(incomingCookie, "refresh_token_property");
+          if (refreshTokenFromRequest && !copiedResponse.cookies.get("refresh_token_property")) {
+            copiedResponse.cookies.set({
+              name: "refresh_token_property",
+              value: refreshTokenFromRequest,
+              httpOnly: true,
+              sameSite: "lax",
+              secure: shouldUseSecureCookies(request),
+              path: "/",
+            });
+          }
+          return copiedResponse;
+        }
 
         const status = Number(response.status || 0);
         const shouldTryRefresh = status === 401 || status === 403;

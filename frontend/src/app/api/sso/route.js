@@ -11,9 +11,22 @@ const buildUpstreamCandidates = () => {
   const urls = [];
   for (const base of bases) {
     const normalized = String(base).replace(/\/+$/, "");
+    if (!normalized) continue;
     urls.push(`${normalized}/v1/sso`);
     urls.push(`${normalized}/sso`);
     urls.push(`${normalized}/auth/sso`);
+    try {
+      const parsed = new URL(normalized);
+      const origin = String(parsed.origin || "").trim().replace(/\/+$/, "");
+      if (origin) {
+        urls.push(`${origin}/api/v1/sso`);
+        urls.push(`${origin}/v1/sso`);
+        urls.push(`${origin}/sso`);
+        urls.push(`${origin}/auth/sso`);
+      }
+    } catch {
+      // keep direct normalized candidates only
+    }
   }
   return urls;
 };

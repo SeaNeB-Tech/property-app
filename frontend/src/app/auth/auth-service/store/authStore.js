@@ -37,10 +37,7 @@ const authStore = {
   csrfToken: null,
 
   getAccessToken() {
-    if (this.accessToken) return this.accessToken;
-    // Cookie-only auth: do not depend on readable access token in JS.
-    const csrfHint = String(getCookie("csrf_token_property") || "").trim();
-    return csrfHint ? "COOKIE_SESSION" : null;
+    return this.accessToken || null;
   },
 
   setAccessToken(token) {

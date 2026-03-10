@@ -1,4 +1,4 @@
-import { authApi, setInMemoryAccessToken, setInMemoryCsrfToken } from "@/lib/api/client";
+import { authApi, hydrateAuthSession } from "@/lib/api/client";
 import { getJsonCookie, getCookie, removeCookie } from "@/services/auth.service";
 import { authStore } from "./store/authStore";
 import { clearPanelAuthSession } from "@/services/auth.service";
@@ -151,11 +151,12 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
 
   const responseAccessToken = readAccessValueFromResponse(res);
   const responseCsrfToken = readCsrfValueFromResponse(res);
-  if (responseAccessToken) {
-    setInMemoryAccessToken(responseAccessToken);
-  }
-  if (responseCsrfToken) {
-    setInMemoryCsrfToken(responseCsrfToken);
+  if (responseAccessToken || responseCsrfToken) {
+    hydrateAuthSession({
+      accessToken: responseAccessToken,
+      csrfToken: responseCsrfToken,
+      broadcast: true,
+    });
   }
 
   const isExistingUserField = readBoolFromPayload(data, ["is_existing_user", "isExistingUser"]);
@@ -177,13 +178,7 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
     };
   }
 
-  if (responseAccessToken || responseCsrfToken) {
-    authStore.setSession({
-      access_token: responseAccessToken,
-      refresh_token: "",
-      csrf_token: responseCsrfToken,
-    });
-  } else {
+  if (!(responseAccessToken || responseCsrfToken)) {
     authStore.setSessionStartTime();
   }
 

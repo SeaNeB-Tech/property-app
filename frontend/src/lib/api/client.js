@@ -3,6 +3,8 @@ import { API_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUr
 import { getAuthAppUrl } from "@/lib/core/appUrls";
 import { getCookie as getCookieShared } from "@/lib/auth/cookieManager";
 import { setAuthFlowContext } from "@/lib/auth/flowContext";
+import { authStore } from "@/app/auth/auth-service/store/authStore";
+import { notifyAuthChanged } from "@/services/auth.service";
 
 const REFRESH_ENDPOINT = "/auth/refresh";
 const DEFAULT_PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
@@ -13,11 +15,102 @@ axios.defaults.withCredentials = true;
 let inMemoryCsrfToken = "";
 let inMemoryAccessToken = "";
 let refreshPromise = null;
+
 const TRANSIENT_BACKEND_STATUSES = new Set([500, 502, 503, 504, 522, 524]);
 const CSRF_COOKIE_NAMES = ["csrf_token_property"];
 
+/* -----------------------------
+   MULTI TAB TOKEN SYNC
+----------------------------- */
+
+let authChannel = null;
+
+if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+  authChannel = new BroadcastChannel("auth_channel");
+
+  authChannel.onmessage = (event) => {
+    const data = event?.data || {};
+    if (data?.type === "ACCESS_TOKEN_UPDATED") {
+      inMemoryAccessToken = String(data.token || "").trim();
+    }
+    if (data?.type === "CSRF_UPDATED") {
+      inMemoryCsrfToken = String(data.token || "").trim();
+    }
+  };
+}
+
+const broadcastAuthUpdate = (type, token) => {
+  try {
+    authChannel?.postMessage({ type, token });
+  } catch {}
+};
+
+/* -----------------------------
+   COOKIE HELPERS
+----------------------------- */
+
+const getFirstCookieValue = (names = []) => {
+  for (const name of names) {
+    const value = String(getCookieShared(name) || "").trim();
+    if (value) return value;
+  }
+  return "";
+};
+
+const getCsrfToken = () =>
+  String(getFirstCookieValue(CSRF_COOKIE_NAMES) || inMemoryCsrfToken || "").trim();
+
+const getAccessToken = () => String(inMemoryAccessToken || "").trim();
+
+const setCsrfTokenInMemory = (token) => {
+  inMemoryCsrfToken = String(token || "").trim();
+  broadcastAuthUpdate("CSRF_UPDATED", inMemoryCsrfToken);
+};
+
+const setAccessTokenInMemory = (token) => {
+  inMemoryAccessToken = String(token || "").trim();
+  broadcastAuthUpdate("ACCESS_TOKEN_UPDATED", inMemoryAccessToken);
+};
+
+/* -----------------------------
+   HYDRATE AUTH SESSION
+----------------------------- */
+
+export const hydrateAuthSession = ({
+  accessToken = "",
+  csrfToken = "",
+  broadcast = true,
+} = {}) => {
+  const nextAccess = String(accessToken || "").trim();
+  const nextCsrf = String(csrfToken || "").trim();
+
+  if (nextAccess) {
+    setAccessTokenInMemory(nextAccess);
+    authStore?.setAccessToken?.(nextAccess);
+  }
+
+  if (nextCsrf) {
+    setCsrfTokenInMemory(nextCsrf);
+    authStore?.setCsrfToken?.(nextCsrf);
+  }
+
+  if (broadcast && (nextAccess || nextCsrf)) {
+    notifyAuthChanged();
+  }
+
+  return {
+    accessToken: nextAccess || getAccessToken(),
+    csrfToken: nextCsrf || getCsrfToken(),
+  };
+};
+
+/* -----------------------------
+   SECURITY HELPERS
+----------------------------- */
+
 const stripAuthorizationHeader = (headers) => {
   if (!headers) return headers;
+
   if (typeof headers.delete === "function") {
     headers.delete("Authorization");
     headers.delete("authorization");
@@ -30,37 +123,13 @@ const stripAuthorizationHeader = (headers) => {
   return nextHeaders;
 };
 
-const getFirstCookieValue = (names = []) => {
-  for (const name of names) {
-    const value = String(getCookieShared(name) || "").trim();
-    if (value) return value;
-  }
-  return "";
-};
-
-const getCsrfToken = () =>
-  String(
-    getFirstCookieValue(CSRF_COOKIE_NAMES) || inMemoryCsrfToken || ""
-  ).trim();
-const getAccessToken = () => String(inMemoryAccessToken || "").trim();
-const getProductKey = () => {
-  return DEFAULT_PRODUCT_KEY;
-};
-
-const setCsrfTokenInMemory = (token) => {
-  inMemoryCsrfToken = String(token || "").trim();
-};
-const setAccessTokenInMemory = (token) => {
-  inMemoryAccessToken = String(token || "").trim();
-};
-
 const shouldInvalidateClientSession = (error) => {
   const status = Number(error?.response?.status || 0);
-  return status === 401 || status === 403;
+  return status === 401;
 };
 
 const isInvalidRefreshSession = (error) => {
-  const status = Number(error?.response?.status || error?.status || 0);
+  const status = Number(error?.response?.status || 0);
   return status === 401;
 };
 
@@ -70,69 +139,66 @@ const shouldRetryRefresh = (error) => {
   return TRANSIENT_BACKEND_STATUSES.has(status) || status === 429;
 };
 
+/* -----------------------------
+   REDIRECT
+----------------------------- */
+
 const redirectToAuthLogin = () => {
   if (typeof window === "undefined") return;
+
   const currentUrl = new URL(window.location.href);
   const returnTo = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
-  const sourceFromQuery = String(currentUrl.searchParams.get("source") || "").trim().toLowerCase();
-  const isBusinessRegisterRoute = currentUrl.pathname.startsWith("/auth/business-register");
+
+  const sourceFromQuery = String(currentUrl.searchParams.get("source") || "")
+    .trim()
+    .toLowerCase();
+
+  const isBusinessRegisterRoute =
+    currentUrl.pathname.startsWith("/auth/business-register");
+
   const source = sourceFromQuery || (isBusinessRegisterRoute ? "main-app-register" : "");
 
   setAuthFlowContext({ source, returnTo });
   window.location.href = getAuthAppUrl("/auth/login");
 };
 
+/* -----------------------------
+   TOKEN EXTRACTION
+----------------------------- */
+
 const readCsrfTokenFromResponse = (response) => {
   const data = response?.data || {};
-  const fromBody =
-    data?.csrf_token_property ||
-    data?.csrf_token ||
-    data?.csrfToken ||
-    data?.data?.csrf_token_property ||
-    data?.data?.csrf_token ||
-    data?.data?.csrfToken ||
-    data?.result?.csrf_token_property ||
-    data?.result?.csrf_token ||
-    data?.result?.csrfToken ||
-    "";
 
-  const fromHeader = String(
-    response?.headers?.["x-csrf-token"] ||
-      response?.headers?.["csrf-token"] ||
-      response?.headers?.["x-xsrf-token"] ||
+  return String(
+    data?.csrf_token_property ||
+      data?.csrf_token ||
+      data?.csrfToken ||
+      response?.headers?.["x-csrf-token"] ||
       ""
   ).trim();
-
-  return String(fromBody || fromHeader || "").trim();
 };
 
 const readAccessTokenFromResponse = (response) => {
   const data = response?.data || {};
-  const tokenObj =
-    data?.token ||
-    data?.tokens ||
-    data?.data?.token ||
-    data?.data?.tokens ||
-    data?.result?.token ||
-    {};
-  const headerAuth = String(
-    response?.headers?.["authorization"] || response?.headers?.["Authorization"] || ""
-  ).trim();
-  const headerToken = /^Bearer\s+/i.test(headerAuth) ? headerAuth.replace(/^Bearer\s+/i, "").trim() : headerAuth;
+  const headerAuth = String(response?.headers?.["authorization"] || "").trim();
+
+  const headerToken = /^Bearer\s+/i.test(headerAuth)
+    ? headerAuth.replace(/^Bearer\s+/i, "").trim()
+    : headerAuth;
 
   return String(
     data?.access_token ||
       data?.accessToken ||
       data?.token ||
       data?.jwt ||
-      tokenObj?.access_token ||
-      tokenObj?.accessToken ||
-      tokenObj?.token ||
-      tokenObj?.jwt ||
       headerToken ||
       ""
   ).trim();
 };
+
+/* -----------------------------
+   AXIOS CLIENTS
+----------------------------- */
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -154,91 +220,70 @@ const refreshClient = axios.create({
   },
 });
 
-const shouldAttemptBackendFailover = (error, originalConfig = {}) => {
-  // Browser must keep auth requests on same-origin /api so same-origin cookies are sent.
-  if (typeof window !== "undefined") return false;
-  if (originalConfig?._backendFailoverAttempted) return false;
-  if (!API_REMOTE_FALLBACK_BASE_URL) return false;
-  const status = Number(error?.response?.status || 0);
-  const networkFailure = !error?.response;
-  return networkFailure || TRANSIENT_BACKEND_STATUSES.has(status);
-};
-
-const retryWithBackendFailover = async (client, error) => {
-  const originalConfig = error?.config || {};
-  if (!shouldAttemptBackendFailover(error, originalConfig)) {
-    throw error;
-  }
-
-  originalConfig._backendFailoverAttempted = true;
-  originalConfig.baseURL = API_REMOTE_FALLBACK_BASE_URL;
-  originalConfig.withCredentials = true;
-  return client(originalConfig);
-};
+/* -----------------------------
+   REFRESH TOKEN
+----------------------------- */
 
 export const refreshAccessToken = async () => {
-  const productKey = getProductKey();
   const csrfToken = getCsrfToken();
 
-  let lastError = null;
-  const requestConfig = {
+  const config = {
     timeout: 7000,
     withCredentials: true,
-    credentials: "include",
+    headers: {
+      "x-product-key": DEFAULT_PRODUCT_KEY,
+      ...(csrfToken
+        ? {
+            "x-csrf-token": csrfToken,
+            "x-xsrf-token": csrfToken,
+            "csrf-token": csrfToken,
+          }
+        : {}),
+    },
   };
-  const buildHeaders = ({ includeCsrf = true } = {}) => ({
-    "x-product-key": productKey,
-    ...(includeCsrf && csrfToken ? { "x-csrf-token": csrfToken } : {}),
-  });
-  const runRefreshAttempt = async ({ includeCsrf = true } = {}) =>
-    refreshClient.post(
-      REFRESH_ENDPOINT,
-      { product_key: productKey },
-      {
-        ...requestConfig,
-        headers: buildHeaders({ includeCsrf }),
-      }
-    );
+
+  delete refreshClient.defaults.headers.common["Authorization"];
+
   const applyRefreshResponse = (response) => {
-    const nextAccessToken = readAccessTokenFromResponse(response);
-    if (nextAccessToken) setAccessTokenInMemory(nextAccessToken);
-    const nextCsrfToken = readCsrfTokenFromResponse(response);
-    if (nextCsrfToken) setCsrfTokenInMemory(nextCsrfToken);
+    const newAccessToken = readAccessTokenFromResponse(response);
+    const newCsrfToken = readCsrfTokenFromResponse(response);
+    hydrateAuthSession({
+      accessToken: newAccessToken,
+      csrfToken: newCsrfToken,
+      broadcast: true,
+    });
+
     return true;
   };
 
   try {
-    const primary = await runRefreshAttempt({ includeCsrf: true });
-    return applyRefreshResponse(primary);
-  } catch (err) {
-    lastError = err;
+    const response = await refreshClient.post(
+      REFRESH_ENDPOINT,
+      { product_key: DEFAULT_PRODUCT_KEY },
+      config
+    );
 
-    // CSRF may be stale immediately after OTP/login handoff.
-    const status = Number(lastError?.response?.status || 0);
-    if (csrfToken && (status === 401 || status === 403)) {
-      try {
-        const responseWithoutCsrf = await runRefreshAttempt({ includeCsrf: false });
-        return applyRefreshResponse(responseWithoutCsrf);
-      } catch (withoutCsrfErr) {
-        lastError = withoutCsrfErr;
-      }
+    return applyRefreshResponse(response);
+  } catch (error) {
+    const status = Number(error?.response?.status || 0);
+
+    if (status === 401 || status === 403) {
+      await new Promise((r) => setTimeout(r, 120));
+      const retry = await refreshClient.post(
+        REFRESH_ENDPOINT,
+        { product_key: DEFAULT_PRODUCT_KEY },
+        config
+      );
+      return applyRefreshResponse(retry);
     }
 
-    try {
-      const response = await retryWithBackendFailover(refreshClient, lastError);
-      return applyRefreshResponse(response);
-    } catch (fallbackErr) {
-      lastError = fallbackErr;
-    }
+    throw error;
   }
-
-  if (shouldInvalidateClientSession(lastError)) {
-    // Only clear on explicit auth-invalid responses.
-    setCsrfTokenInMemory("");
-  }
-
-  throw lastError || new Error("Refresh failed");
 };
+
+/* -----------------------------
+   SAFE REFRESH WRAPPER
+----------------------------- */
 
 const refreshAccessTokenWithRetry = async () => {
   try {
@@ -249,108 +294,105 @@ const refreshAccessTokenWithRetry = async () => {
   }
 };
 
+/* -----------------------------
+   ENSURE ACCESS TOKEN
+----------------------------- */
+
 export const ensureAccessToken = async () => {
-  const accessToken = getAccessToken();
-  if (accessToken) return true;
+  if (getAccessToken()) return true;
+
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessTokenWithRetry().finally(() => {
+      refreshPromise = null;
+    });
+  }
+
   try {
-    await refreshAccessTokenWithRetry();
+    await refreshPromise;
     return Boolean(getAccessToken());
   } catch {
     return false;
   }
 };
 
+/* -----------------------------
+   MAIN API REQUEST
+----------------------------- */
+
 export const apiRequest = async (config = {}) => {
   const nextConfig = { ...config };
+
   nextConfig.withCredentials = true;
-  nextConfig.credentials = "include";
   nextConfig.headers = stripAuthorizationHeader({ ...(config?.headers || {}) });
 
-  const requestUrl = String(nextConfig?.url || "").trim();
-  const isRefreshRequest = requestUrl.includes(REFRESH_ENDPOINT);
   const requiresAuth = nextConfig?.requireAuth === true;
 
-  if (requiresAuth && !isRefreshRequest && !nextConfig?.skipRefresh && !getAccessToken()) {
-    try {
-      await refreshAccessTokenWithRetry();
-    } catch {
-      // Let the protected request proceed once. The 401 interceptor will
-      // immediately run refresh/retry using the newest CSRF state before
-      // deciding whether the session is really invalid.
-    }
+  if (requiresAuth && !getAccessToken()) {
+    await ensureAccessToken();
   }
 
   const csrfToken = getCsrfToken();
   const accessToken = getAccessToken();
-  const productKey = getProductKey();
 
-  if (csrfToken && !nextConfig.headers["x-csrf-token"]) {
+  if (csrfToken) {
     nextConfig.headers["x-csrf-token"] = csrfToken;
+    nextConfig.headers["x-xsrf-token"] = csrfToken;
   }
-  if (accessToken && !nextConfig.headers.authorization && !nextConfig.headers.Authorization) {
+
+  if (accessToken) {
     nextConfig.headers.authorization = `Bearer ${accessToken}`;
   }
-  nextConfig.headers["x-product-key"] = productKey;
+
+  nextConfig.headers["x-product-key"] = DEFAULT_PRODUCT_KEY;
 
   return api.request(nextConfig);
 };
 
+/* -----------------------------
+   AUTH API HELPERS
+----------------------------- */
+
 export const authApi = {
-  get: (url, config = {}) => apiRequest({ ...config, method: "get", url, requireAuth: true }),
+  get: (url, config = {}) =>
+    apiRequest({ ...config, method: "get", url, requireAuth: true }),
+
   post: (url, data, config = {}) =>
     apiRequest({ ...config, method: "post", url, data, requireAuth: true }),
+
   put: (url, data, config = {}) =>
     apiRequest({ ...config, method: "put", url, data, requireAuth: true }),
+
   patch: (url, data, config = {}) =>
     apiRequest({ ...config, method: "patch", url, data, requireAuth: true }),
-  delete: (url, config = {}) => apiRequest({ ...config, method: "delete", url, requireAuth: true }),
+
+  delete: (url, config = {}) =>
+    apiRequest({ ...config, method: "delete", url, requireAuth: true }),
 };
 
-api.interceptors.request.use((config) => {
-  config.withCredentials = true;
-  config.credentials = "include";
-  config.headers = stripAuthorizationHeader(config.headers || {});
-
-  const csrfToken = getCsrfToken();
-  const accessToken = getAccessToken();
-  const productKey = getProductKey();
-
-  if (csrfToken) config.headers["x-csrf-token"] = csrfToken;
-  if (accessToken && !config.headers.authorization && !config.headers.Authorization) {
-    config.headers.authorization = `Bearer ${accessToken}`;
-  }
-  config.headers["x-product-key"] = productKey;
-
-  return config;
-});
+/* -----------------------------
+   RESPONSE INTERCEPTOR
+----------------------------- */
 
 api.interceptors.response.use(
   (response) => {
     const accessToken = readAccessTokenFromResponse(response);
-    if (accessToken) setAccessTokenInMemory(accessToken);
-    const nextCsrfToken = readCsrfTokenFromResponse(response);
-    if (nextCsrfToken) setCsrfTokenInMemory(nextCsrfToken);
+    const csrfToken = readCsrfTokenFromResponse(response);
+    hydrateAuthSession({
+      accessToken,
+      csrfToken,
+      broadcast: false,
+    });
+
     return response;
   },
   async (error) => {
     const originalRequest = error?.config || {};
     const status = Number(error?.response?.status || 0);
-    const isRefreshRequest = String(originalRequest?.url || "").includes(REFRESH_ENDPOINT);
-    const skipRefresh = originalRequest?.skipRefresh === true;
 
-    if (!isRefreshRequest) {
-      try {
-        return await retryWithBackendFailover(api, error);
-      } catch {
-        // Continue with regular auth/401 flow.
-      }
-    }
-
-    if (status !== 401 || originalRequest._retry || isRefreshRequest || skipRefresh) {
+    if (status !== 401 || originalRequest._retry) {
       return Promise.reject(error);
     }
 
-    // Retry only once per failed request.
     originalRequest._retry = true;
 
     try {
@@ -359,27 +401,42 @@ api.interceptors.response.use(
           refreshPromise = null;
         });
       }
+
       await refreshPromise;
-      originalRequest.withCredentials = true;
-      originalRequest.credentials = "include";
       return api(originalRequest);
     } catch (refreshError) {
-      if (shouldInvalidateClientSession(refreshError)) setCsrfTokenInMemory("");
-      if (originalRequest?.requireAuth && isInvalidRefreshSession(refreshError)) {
+      if (shouldInvalidateClientSession(refreshError)) {
+        setCsrfTokenInMemory("");
+      }
+
+      if (isInvalidRefreshSession(refreshError)) {
         redirectToAuthLogin();
       }
+
       return Promise.reject(refreshError);
     }
   }
 );
 
-export default api;
+/* -----------------------------
+   EXPORT HELPERS
+----------------------------- */
+
 export const clearInMemoryAccessToken = () => {
   setAccessTokenInMemory("");
   setCsrfTokenInMemory("");
+  authStore?.setAccessToken?.("");
+  authStore?.setCsrfToken?.("");
 };
-export const setInMemoryAccessToken = (token) => setAccessTokenInMemory(token);
-export const getInMemoryAccessToken = () => String(inMemoryAccessToken || "").trim();
-export const setInMemoryCsrfToken = (token) => setCsrfTokenInMemory(token);
-export const getInMemoryCsrfToken = () => String(inMemoryCsrfToken || "").trim();
 
+export const setInMemoryAccessToken = (token) => setAccessTokenInMemory(token);
+
+export const getInMemoryAccessToken = () =>
+  String(inMemoryAccessToken || "").trim();
+
+export const setInMemoryCsrfToken = (token) => setCsrfTokenInMemory(token);
+
+export const getInMemoryCsrfToken = () =>
+  String(inMemoryCsrfToken || "").trim();
+
+export default api;

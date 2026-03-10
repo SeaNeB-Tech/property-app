@@ -1,109 +1,136 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { authApi, refreshSession, setAuthFailureHandler } from "@/lib/auth/apiClient";
+import { authApi, setAuthFailureHandler } from "@/lib/auth/apiClient";
 import { API } from "@/lib/config/apiPaths";
 import { notifyAuthChanged, subscribeAuthState } from "@/services/auth.service";
+import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
+import { hydrateAuthSession } from "@/lib/api/client";
+import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap";
 
 const AuthContext = createContext(null);
-const PUBLIC_AUTH_PATHS = new Set([
-  "/auth/login",
-  "/auth/otp",
-  "/auth/email-otp",
-  "/auth/complete-profile",
-  "/auth/business-register",
-  "/auth/business-option",
-  "/auth/home",
-  "/auth/success",
-]);
 
-const hasAuthCookieHints = () => {
-  if (typeof document === "undefined") return false;
-  const cookieSource = String(document.cookie || "");
-  return (
-    cookieSource.includes("refresh_token_property=") ||
-    cookieSource.includes("csrf_token_property=") ||
-    cookieSource.includes("post_otp_verified=") ||
-    cookieSource.includes("signup_otp_verified=")
-  );
-};
+const AUTH_PROBE_FAILURE_COOLDOWN_MS = 5000;
 
-const shouldSkipPublicAuthProbe = () => {
-  if (typeof window === "undefined") return false;
-  const path = String(window.location.pathname || "").trim();
-  return PUBLIC_AUTH_PATHS.has(path) && !hasAuthCookieHints();
+let inFlightRestoreSessionPromise = null;
+let lastAuthProbeFailureAt = 0;
+
+const buildAuthProbeHeaders = () => {
+  const headers = new Headers();
+
+  const accessToken = String(getAccessToken() || "").trim();
+  const csrfToken = String(getCsrfToken() || "").trim();
+
+  if (accessToken) headers.set("authorization", `Bearer ${accessToken}`);
+  if (csrfToken) headers.set("x-csrf-token", csrfToken);
+
+  return headers;
 };
 
 export function AuthProvider({ children }) {
   const [status, setStatus] = useState("logged_out");
   const [user, setUser] = useState(null);
+  const [isReady, setIsReady] = useState(false);
 
   const applyUserProfile = useCallback((profile) => {
     const nextUser = profile?.data || profile?.user || profile || null;
+
     if (nextUser) {
       setUser(nextUser);
       setStatus("authenticated");
       return true;
     }
+
     setUser(null);
     setStatus("logged_out");
     return false;
   }, []);
 
   const restoreSession = useCallback(async () => {
-    if (shouldSkipPublicAuthProbe()) {
+    const now = Date.now();
+
+    if (
+      lastAuthProbeFailureAt &&
+      now - lastAuthProbeFailureAt < AUTH_PROBE_FAILURE_COOLDOWN_MS
+    ) {
       setUser(null);
       setStatus("logged_out");
       return false;
     }
 
-    setStatus("restoring");
+    if (inFlightRestoreSessionPromise) {
+      return inFlightRestoreSessionPromise;
+    }
 
-    const fetchProfile = async () =>
-      fetch(API.PROFILE, {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      });
+    const runRestore = async () => {
+      try {
+        setStatus("restoring");
 
-    try {
-      let response = await fetchProfile();
-      if (!response.ok && [401, 403].includes(Number(response.status || 0))) {
-        const refreshed = await refreshSession();
-        if (refreshed) {
-          response = await fetchProfile();
+        // Single-flight bootstrap: ensure refresh-cookie session is converted into a usable
+        // access token/CSRF memory state before probing /me.
+        const sessionOk = await ensureSessionReady();
+        if (!sessionOk) {
+          lastAuthProbeFailureAt = Date.now();
+          setUser(null);
+          setStatus("logged_out");
+          return false;
         }
-      }
 
-      if (!response.ok) {
+        const fetchProfile = async () =>
+          fetch(API.PROFILE, {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+            headers: buildAuthProbeHeaders(),
+          });
+
+        let response = await fetchProfile();
+
+        if (!response.ok && [401, 403].includes(Number(response.status))) {
+          const refreshed = await ensureSessionReady({ force: true });
+          if (refreshed) {
+            response = await fetchProfile();
+          }
+        }
+
+        if (!response.ok) {
+          lastAuthProbeFailureAt = Date.now();
+          setUser(null);
+          setStatus("logged_out");
+          return false;
+        }
+
+        const profile = await response.json();
+        hydrateAuthSession({
+          accessToken: getAccessToken(),
+          csrfToken: getCsrfToken(),
+          broadcast: false,
+        });
+
+        lastAuthProbeFailureAt = 0;
+        return applyUserProfile(profile);
+      } catch {
+        lastAuthProbeFailureAt = Date.now();
         setUser(null);
         setStatus("logged_out");
         return false;
+      } finally {
+        setIsReady(true);
       }
-      const profile = await response.json();
-      return applyUserProfile(profile);
-    } catch {
-      setUser(null);
-      setStatus("logged_out");
-      return false;
-    }
+    };
+
+    inFlightRestoreSessionPromise = runRestore().finally(() => {
+      inFlightRestoreSessionPromise = null;
+    });
+
+    return inFlightRestoreSessionPromise;
   }, [applyUserProfile]);
 
   const logout = useCallback(async ({ redirect } = { redirect: false }) => {
-    let canClearClientState = false;
     try {
       await authApi.logout();
-      canClearClientState = true;
-    } catch (error) {
-      const status = Number(error?.status || 0);
-      if (status === 401 || status === 403) {
-        canClearClientState = true;
-      } else {
-        return;
-      }
-    }
+    } catch {}
 
-    if (!canClearClientState) return;
     setUser(null);
     setStatus("logged_out");
 
@@ -114,35 +141,23 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (credentials) => {
     await authApi.login(credentials || {});
-    const response = await fetch(API.PROFILE, {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-    });
-    const profile = response.ok ? await response.json() : null;
-    const userProfile = profile?.data || profile?.user || profile || null;
-    applyUserProfile(userProfile);
-    notifyAuthChanged();
-    return userProfile;
-  }, [applyUserProfile]);
+    const success = await restoreSession();
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void restoreSession();
-    return subscribeAuthState(() => {
-      void restoreSession();
-    });
+    if (success) {
+      notifyAuthChanged();
+    }
+
+    return success;
   }, [restoreSession]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return () => {};
-    const onFocus = () => {
+    void restoreSession();
+
+    const unsubscribe = subscribeAuthState(() => {
       void restoreSession();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-    };
+    });
+
+    return unsubscribe;
   }, [restoreSession]);
 
   useEffect(() => {
@@ -150,23 +165,24 @@ export function AuthProvider({ children }) {
       await logout({ redirect: false });
     });
 
-    return () => {
-      setAuthFailureHandler(null);
-    };
+    return () => setAuthFailureHandler(null);
   }, [logout]);
 
   const value = useMemo(
     () => ({
       user,
       status,
+      isReady,
       isRestoring: status === "restoring",
       isAuthenticated: status === "authenticated",
+      authInitialized: isReady,
+      isLoading: !isReady || status === "restoring",
       login,
       restoreSession,
       logout,
       applyUserProfile,
     }),
-    [user, status, login, restoreSession, logout, applyUserProfile]
+    [user, status, isReady, login, restoreSession, logout, applyUserProfile]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -174,8 +190,10 @@ export function AuthProvider({ children }) {
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
+
   if (!context) {
     throw new Error("useAuth must be used within AuthProvider");
   }
+
   return context;
 };

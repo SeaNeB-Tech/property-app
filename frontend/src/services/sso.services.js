@@ -1,6 +1,6 @@
 import axios from "axios";
-import { authStore } from "@/app/auth/auth-service/store/authStore";
 import { ssoDebugLog } from "@/lib/observability/ssoDebug";
+import { hydrateAuthSession } from "@/lib/api/client";
 
 const DEFAULT_PRODUCT_KEY = String(
   process.env.NEXT_PUBLIC_PRODUCT_KEY || "property"
@@ -8,9 +8,6 @@ const DEFAULT_PRODUCT_KEY = String(
   .trim()
   .toLowerCase();
 
-/**
- * Safely pick token from multiple possible backend formats
- */
 const pickTokenValue = (payload, keys) => {
   if (!payload) return "";
 
@@ -31,10 +28,6 @@ const pickTokenValue = (payload, keys) => {
   return "";
 };
 
-/**
- * Exchange SSO bridge token for a session.
- * Backend is expected to set cookie session.
- */
 export const exchangeSsoBridgeToken = async (bridgeToken) => {
   const token = String(bridgeToken || "").trim();
 
@@ -61,6 +54,7 @@ export const exchangeSsoBridgeToken = async (bridgeToken) => {
       },
       {
         withCredentials: true,
+        timeout: 8000,
         headers: {
           "Content-Type": "application/json",
           "x-product-key": DEFAULT_PRODUCT_KEY,
@@ -75,9 +69,7 @@ export const exchangeSsoBridgeToken = async (bridgeToken) => {
       status,
     });
 
-    throw new Error(
-      `SSO exchange failed${status ? ` (${status})` : ""}`
-    );
+    throw new Error(`SSO exchange failed${status ? ` (${status})` : ""}`);
   }
 
   const payload = response?.data || {};
@@ -87,29 +79,26 @@ export const exchangeSsoBridgeToken = async (bridgeToken) => {
     "accessToken",
     "token",
   ]);
+  const csrfToken = pickTokenValue(payload, [
+    "csrf_token",
+    "csrfToken",
+    "csrf_token_property",
+    "csrfTokenProperty",
+  ]);
 
-  /**
-   * If backend returns token → hydrate store
-   * If cookie session only → mark as cookie session
-   */
-  if (accessToken) {
-    authStore?.setAccessToken?.(accessToken);
-  } else {
-    authStore?.setAccessToken?.("COOKIE_SESSION");
+  if (accessToken || csrfToken) {
+    hydrateAuthSession({ accessToken, csrfToken, broadcast: true });
   }
 
-  /**
-   * Verify session after exchange
-   * This ensures authStore user state is synced
-   */
   try {
     const me = await axios.get("/api/auth/me", {
       withCredentials: true,
+      headers: accessToken
+        ? { Authorization: `Bearer ${accessToken}` }
+        : {},
     });
 
-    if (me?.data) {
-      authStore?.setUser?.(me.data);
-    }
+    void me;
   } catch (error) {
     ssoDebugLog("sso.exchange.verify_failed", {
       status: Number(error?.response?.status || 0),

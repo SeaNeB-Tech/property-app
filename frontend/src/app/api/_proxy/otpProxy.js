@@ -138,6 +138,10 @@ const readRefreshTokenFromPayload = (payload = {}) => {
   return String(
     payload?.refreshToken ||
       payload?.refresh_token ||
+      payload?.session?.refreshToken ||
+      payload?.session?.refresh_token ||
+      payload?.data?.session?.refreshToken ||
+      payload?.data?.session?.refresh_token ||
       data?.refreshToken ||
       data?.refresh_token ||
       tokenObj?.refreshToken ||
@@ -321,29 +325,38 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [], setCookiesF
 
   if (setCookiesFromUpstream) {
     const upstreamCookieValues = extractCookieValuesFromUpstream(responseToReturn.headers);
-    const refreshToken =
-      readRefreshTokenFromPayload(payloadJson || {}) ||
-      getFirstCookieValueFromHeader(
+    
+    // First try to get tokens from response body
+    let refreshToken = readRefreshTokenFromPayload(payloadJson || {});
+    let csrfToken = readCsrfFromPayload(payloadJson || {}, responseToReturn.headers);
+    
+    // If not in body, try to get from upstream cookies
+    if (!refreshToken) {
+      refreshToken = getFirstCookieValueFromHeader(
         Object.entries(upstreamCookieValues)
           .map(([k, v]) => `${k}=${v}`)
           .join("; "),
         REFRESH_COOKIE_KEYS
-      ) ||
-      "";
-    const csrfToken =
-      readCsrfFromPayload(payloadJson || {}, responseToReturn.headers) ||
-      getFirstCookieValueFromHeader(
+      ) || "";
+    }
+    
+    if (!csrfToken) {
+      csrfToken = getFirstCookieValueFromHeader(
         Object.entries(upstreamCookieValues)
           .map(([k, v]) => `${k}=${v}`)
           .join("; "),
         CSRF_COOKIE_KEYS
-      ) ||
-      "";
-    setAuthCookies(res, {
-      refreshToken,
-      csrfToken,
-      secure: shouldUseSecureCookies(request),
-    });
+      ) || "";
+    }
+    
+    // Always set cookies if we have tokens
+    if (refreshToken || csrfToken) {
+      setAuthCookies(res, {
+        refreshToken,
+        csrfToken,
+        secure: shouldUseSecureCookies(request),
+      });
+    }
   }
 
   res.cookies.delete("access_token");
@@ -406,4 +419,3 @@ export const proxyVerifyOtpLegacy = async (request) => {
     setCookiesFromUpstream: true,
   });
 };
-

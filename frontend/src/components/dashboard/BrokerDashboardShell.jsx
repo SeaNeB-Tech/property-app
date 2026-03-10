@@ -1,47 +1,116 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import DashboardHeader from "@/components/dashboard/Header";
-import AppHeader from "@/components/ui/AppHeader";
-import { getCookie } from "@/services/auth.service";
-import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap";
-import { getAuthAppUrl } from "@/lib/core/appUrls";
+import { getCookie, setCookie } from "@/services/auth.service";
+import BrandLogo from "@/components/ui/BrandLogo";
+import { getAuthAppUrl, getListingAppUrl } from "@/lib/core/appUrls";
+import { useAuth } from "@/lib/auth/AuthContext";
 
-const readCookieValue = (name, fallback = "-") => {
-  const value = String(getCookie(name) || "").trim();
-  return value || fallback;
+const hasBusinessRegistration = (user = null) => {
+  const record = user && typeof user === "object" ? user : {};
+  const boolHints = [
+    record?.is_business_registered,
+    record?.isBusinessRegistered,
+    record?.business_registered,
+    record?.has_business,
+    record?.hasBusiness,
+  ];
+  if (boolHints.some((value) => value === true || String(value || "").trim().toLowerCase() === "true")) {
+    return true;
+  }
+
+  const idHints = [
+    record?.business_id,
+    record?.businessId,
+    record?.current_business_id,
+    record?.branch_id,
+    record?.branchId,
+    record?.business?.id,
+    record?.business?.business_id,
+  ];
+  return idHints.some((value) => String(value || "").trim().length > 0);
 };
 
 export default function BrokerDashboardShell() {
   const router = useRouter();
+  const { status, isRestoring, isReady, user, logout } = useAuth();
   const [sessionChecked, setSessionChecked] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  const userName = useMemo(
+    () =>
+      String(
+        user?.full_name ||
+          user?.fullName ||
+          user?.first_name ||
+          user?.firstName ||
+          user?.name ||
+          "Profile"
+      ).trim(),
+    [user]
+  );
+  const userInitial = String(userName || "P").charAt(0).toUpperCase();
 
   useEffect(() => {
     let active = true;
 
-    const validate = async () => {
-      const hasSession = await ensureSessionReady({ force: true });
-      if (!active) return;
+    const validate = () => {
+      if (!active || !isReady || isRestoring || status === "restoring") return;
 
-      if (!hasSession) {
+      if (status !== "authenticated") {
         router.replace(getAuthAppUrl("/auth/login"));
         return;
       }
 
-      if (getCookie("business_registered") !== "true") {
+      const hasBusinessCookie = getCookie("business_registered") === "true";
+      const hasBusinessInProfile = hasBusinessRegistration(user);
+      if (!hasBusinessCookie && !hasBusinessInProfile) {
         router.replace("/auth/business-register");
         return;
+      }
+
+      if (!hasBusinessCookie && hasBusinessInProfile) {
+        setCookie("business_registered", "true", {
+          maxAge: 60 * 60 * 24 * 30,
+          path: "/",
+        });
       }
 
       setSessionChecked(true);
     };
 
-    void validate();
+    validate();
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [isReady, isRestoring, router, status, user]);
+
+  useEffect(() => {
+    if (!isProfileOpen) return undefined;
+    const onClickOutside = (event) => {
+      if (!dropdownRef.current) return;
+      if (!dropdownRef.current.contains(event.target)) {
+        setIsProfileOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+    };
+  }, [isProfileOpen]);
+
+  const handleVisitHomePage = () => {
+    setIsProfileOpen(false);
+    window.location.href = getListingAppUrl("/home");
+  };
+
+  const handleLogout = async () => {
+    setIsProfileOpen(false);
+    await logout({ redirect: false });
+    window.location.href = getAuthAppUrl("/auth/login");
+  };
 
   if (!sessionChecked) {
     return (
@@ -51,81 +120,59 @@ export default function BrokerDashboardShell() {
     );
   }
 
-  const businessName = readCookieValue("business_name", "Your Business");
-  const businessType = readCookieValue("business_type", "Not set");
-  const location = readCookieValue("business_location", "Not set");
-  const businessId = readCookieValue("business_id");
-  const branchId = readCookieValue("branch_id");
-
   return (
-    <div className="min-h-screen bg-slate-50">
-      <AppHeader />
-      <DashboardHeader
-        title={businessName}
-        subtitle="This dashboard now stays inside the auth app so your authenticated business flow remains local."
-      />
+    <div className="min-h-screen bg-[radial-gradient(1200px_600px_at_50%_-10%,rgba(199,154,43,0.18),transparent_60%),linear-gradient(180deg,#fffdf7_0%,#f8f4ea_100%)]">
+      <header className="sticky top-0 z-20 border-b border-[#e6dcc7] bg-[#fffaf0]/95 backdrop-blur">
+        <div className="mx-auto flex h-[84px] w-full max-w-6xl items-center justify-between px-4 sm:px-6">
+          <BrandLogo
+            size={48}
+            titleClass="text-[#1f2a44] text-lg font-semibold"
+            subtitleClass="text-[#8a6b2f] text-xs"
+            compact
+          />
 
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6">
-        <section className="grid gap-4 md:grid-cols-3">
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">Registration Status</p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Active</h2>
-            <p className="mt-2 text-sm text-slate-600">Your business profile is available in this auth app dashboard.</p>
-          </article>
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">Business ID</p>
-            <h2 className="mt-2 break-all text-lg font-semibold text-slate-900">{businessId}</h2>
-            <p className="mt-2 text-sm text-slate-600">Primary branch: {branchId}</p>
-          </article>
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">Business Type</p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-900">{businessType}</h2>
-            <p className="mt-2 text-sm text-slate-600">Location: {location}</p>
-          </article>
-        </section>
+          <div className="relative" ref={dropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsProfileOpen((open) => !open)}
+              className="flex items-center gap-3 rounded-full border border-[#d9c79f] bg-white px-3 py-2 shadow-sm transition hover:border-[#c79a2b]"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1f2a44] text-sm font-semibold text-[#f8d98f]">
+                {userInitial}
+              </span>
+              <span className="hidden text-sm font-medium text-[#1f2a44] sm:block">{userName}</span>
+            </button>
 
-        <section className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-lg font-semibold text-slate-900">Business Overview</h3>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Business Name</p>
-                <p className="mt-2 text-sm font-medium text-slate-900">{businessName}</p>
+            {isProfileOpen ? (
+              <div className="absolute right-0 mt-2 w-56 rounded-2xl border border-[#dbc9a2] bg-white p-2 shadow-[0_12px_30px_rgba(48,40,20,0.18)]">
+                <button
+                  type="button"
+                  onClick={handleVisitHomePage}
+                  className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[#1f2a44] transition hover:bg-[#fbf4e2]"
+                >
+                  Visit Home Page
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[#9b2c2c] transition hover:bg-[#fff1eb]"
+                >
+                  Logout
+                </button>
               </div>
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Location</p>
-                <p className="mt-2 text-sm font-medium text-slate-900">{location}</p>
-              </div>
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Business Cookie Flag</p>
-                <p className="mt-2 text-sm font-medium text-emerald-700">business_registered=true</p>
-              </div>
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Session Mode</p>
-                <p className="mt-2 text-sm font-medium text-slate-900">Auth app local session</p>
-              </div>
-            </div>
-          </article>
+            ) : null}
+          </div>
+        </div>
+      </header>
 
-          <aside className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-lg font-semibold text-slate-900">Next Actions</h3>
-            <div className="mt-4 space-y-3">
-              <button
-                type="button"
-                onClick={() => router.push("/auth/business-register")}
-                className="flex h-11 w-full items-center justify-center rounded-lg border border-slate-300 bg-white text-sm font-medium text-slate-900 transition hover:bg-slate-50"
-              >
-                Edit Business Profile
-              </button>
-              <button
-                type="button"
-                onClick={() => router.push("/")}
-                className="flex h-11 w-full items-center justify-center rounded-lg bg-slate-900 text-sm font-medium text-white transition hover:bg-slate-700"
-              >
-                Go To Auth Home
-              </button>
-            </div>
-          </aside>
+      <main className="mx-auto flex min-h-[calc(100vh-84px)] w-full max-w-6xl items-center justify-center px-4 py-8 sm:px-6">
+        <section className="w-full rounded-3xl border border-[#e2d1ac] bg-[linear-gradient(180deg,#fffef9_0%,#fff8e8_100%)] px-6 py-16 text-center shadow-[0_18px_40px_rgba(84,67,28,0.12)] sm:px-10 sm:py-24">
+          <h1 className="bg-[linear-gradient(180deg,#a87b19_0%,#6b4f13_100%)] bg-clip-text text-4xl font-black tracking-[0.08em] text-transparent sm:text-6xl md:text-7xl">
+            FEATURES COMING SOON
+          </h1>
+          <p className="mt-6 text-sm font-medium tracking-[0.16em] text-[#7a6332] sm:text-base">
+            BROKER DASHBOARD EXPERIENCE IN PROGRESS
+          </p>
         </section>
       </main>
     </div>
