@@ -197,7 +197,6 @@ export const redirectToListingWithBridgeToken = async ({
   // If auth was opened from the listing app in another tab/window, reuse it and close this auth tab.
   try {
     const canUseOpener =
-      (normalizedSource === "main-app" || normalizedSource === "main-app-register") &&
       typeof window.opener !== "undefined" &&
       window.opener &&
       !window.opener.closed;

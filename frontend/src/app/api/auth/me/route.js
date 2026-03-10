@@ -252,7 +252,7 @@ const setAuthCookiesByPayload = (response, payload = {}, headers = null, secure 
       name: "refresh_token_property",
       value: refreshToken,
       httpOnly: true,
-      sameSite: "None",
+      sameSite: secure ? "None" : "Lax",
       secure,
       path: "/",
     });
@@ -262,7 +262,7 @@ const setAuthCookiesByPayload = (response, payload = {}, headers = null, secure 
       name: "csrf_token_property",
       value: csrfToken,
       httpOnly: false,
-      sameSite: "None",
+      sameSite: secure ? "None" : "Lax",
       secure,
       path: "/",
     });
@@ -409,7 +409,7 @@ export async function GET(request) {
               name: "refresh_token_property",
               value: refreshTokenFromRequest,
               httpOnly: true,
-              sameSite: "None",
+              sameSite: shouldUseSecureCookies(request) ? "None" : "Lax",
               secure: shouldUseSecureCookies(request),
               path: "/",
             });

@@ -235,7 +235,7 @@ const setCookieByPayload = (
       name: REFRESH_COOKIE_NAME,
       value: refreshToken,
       httpOnly: true,
-      sameSite: "None",
+      sameSite: secure ? "None" : "Lax",
       secure,
       path: "/",
     });
@@ -246,7 +246,7 @@ const setCookieByPayload = (
       name: "csrf_token_property",
       value: csrfToken,
       httpOnly: false,
-      sameSite: "None",
+      sameSite: secure ? "None" : "Lax",
       secure,
       path: "/",
     });

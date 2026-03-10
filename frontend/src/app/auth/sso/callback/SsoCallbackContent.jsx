@@ -4,6 +4,9 @@ import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { hydrateAuthSession } from "@/lib/api/client";
 
+const AUTH_SSO_RESULT_KEY = "seaneb_sso_exchange_result";
+const AUTH_SSO_MESSAGE_TYPE = "seaneb:sso:exchange";
+
 const LISTING_APP_ORIGIN = (() => {
   try {
     return new URL(String(process.env.NEXT_PUBLIC_APP_URL || "").trim()).origin;
@@ -70,6 +73,30 @@ const redirectToSource = (source) => {
   window.location.replace(target);
 };
 
+const publishSsoResult = ({ ok, source, error = "" }) => {
+  const payload = {
+    type: AUTH_SSO_MESSAGE_TYPE,
+    ok: Boolean(ok),
+    source: String(source || "").trim(),
+    error: String(error || "").trim(),
+    at: Date.now(),
+  };
+
+  try {
+    window.localStorage.setItem(AUTH_SSO_RESULT_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore storage errors
+  }
+
+  try {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage(payload, window.location.origin);
+    }
+  } catch {
+    // ignore postMessage errors
+  }
+};
+
 export default function SsoCallbackContent() {
   const params = useSearchParams();
 
@@ -81,6 +108,7 @@ export default function SsoCallbackContent() {
       const source = resolveSafeSource(params.get("source"));
 
       if (!bridgeToken) {
+        publishSsoResult({ ok: false, source, error: "bridge_token missing in callback URL" });
         redirectToSource(source);
         return;
       }
@@ -101,6 +129,7 @@ export default function SsoCallbackContent() {
         });
 
         if (!res.ok) {
+          publishSsoResult({ ok: false, source, error: "Bridge exchange failed" });
           redirectToSource(source);
           return;
         }
@@ -133,10 +162,28 @@ export default function SsoCallbackContent() {
 
         if (cancelled) return;
 
+        publishSsoResult({ ok: true, source });
+
+        if (window.opener && !window.opener.closed) {
+          try {
+            const openerTarget = String(source || "").trim();
+            if (openerTarget.startsWith("/") && LISTING_APP_ORIGIN) {
+              window.opener.location.href = new URL(openerTarget, LISTING_APP_ORIGIN).toString();
+            } else if (/^https?:\/\//i.test(openerTarget)) {
+              window.opener.location.href = openerTarget;
+            }
+            window.close();
+            return;
+          } catch {
+            // fall through to redirect
+          }
+        }
+
         await new Promise((resolve) => setTimeout(resolve, 80));
 
         redirectToSource(source);
       } catch {
+        publishSsoResult({ ok: false, source, error: "Bridge exchange failed" });
         redirectToSource(source);
       }
     }

@@ -212,7 +212,7 @@ const setAuthCookies = (
       name: "refresh_token_property",
       value: refreshToken,
       httpOnly: true,
-      sameSite: "None",
+      sameSite: secure ? "None" : "Lax",
       secure,
       path: "/",
     });
@@ -223,7 +223,7 @@ const setAuthCookies = (
       name: "csrf_token_property",
       value: csrfToken,
       httpOnly: false,
-      sameSite: "None",
+      sameSite: secure ? "None" : "Lax",
       secure,
       path: "/",
       maxAge: csrfMaxAge,

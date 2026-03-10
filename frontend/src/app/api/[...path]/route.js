@@ -331,7 +331,7 @@ const buildSetCookieHeader = ({
   const safeName = encodeURIComponent(String(name || "").trim());
   const safeValue = encodeURIComponent(String(value || "").trim());
   if (!safeName || !safeValue) return "";
-  const sameSiteValue = "None";
+  const sameSiteValue = secure ? "None" : "Lax";
   const parts = [`${safeName}=${safeValue}`, "Path=/", `SameSite=${sameSiteValue}`];
   if (httpOnly) parts.push("HttpOnly");
   if (secure) parts.push("Secure");

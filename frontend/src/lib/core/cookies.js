@@ -106,20 +106,20 @@ const resolveDomain = (domain) => {
 const resolveCookieOptions = (options = {}) => {
   const path = normalizePath(options.path || envCookiePath);
   const domain = resolveDomain(options.domain ?? envCookieDomain);
-  const normalizeSameSite = (value) => {
+  const normalizeSameSite = (value, isSecure) => {
     const raw = String(value ?? "").trim();
     const normalized = raw.toLowerCase();
     if (!normalized) return "";
-    if (normalized === "lax") return "None";
-    if (normalized === "none") return "None";
+    if (normalized === "lax") return "Lax";
+    if (normalized === "none") return isSecure ? "None" : "Lax";
     if (normalized === "strict") return "Strict";
     return raw;
   };
-  const sameSite = normalizeSameSite(options.sameSite ?? envSameSite);
   const secure =
     typeof options.secure === "boolean"
       ? options.secure
       : (isProduction || (isBrowser && window.location.protocol === "https:"));
+  const sameSite = normalizeSameSite(options.sameSite ?? envSameSite, secure);
 
   return { ...options, path, domain, sameSite, secure };
 };
