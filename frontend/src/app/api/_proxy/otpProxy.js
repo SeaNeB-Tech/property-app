@@ -277,11 +277,26 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [], setCookiesF
         lastResponse = upstreamResponse;
 
         const status = Number(upstreamResponse.status || 0);
-        if (upstreamResponse.ok || (status !== 404 && status !== 405)) {
+        if (upstreamResponse.ok) {
           resolvedResponse = upstreamResponse;
           resolvedForBase = true;
           break;
         }
+
+        if (status === 404 || status === 405) {
+          // Try the next upstream path candidate on the same base.
+          continue;
+        }
+
+        if (status >= 500) {
+          // Base is unhealthy (dev down, etc). Try the next base URL.
+          break;
+        }
+
+        // Valid non-5xx response (400/401/403/422/etc). Return it to the client.
+        resolvedResponse = upstreamResponse;
+        resolvedForBase = true;
+        break;
       } catch (err) {
         lastNetworkError = err instanceof Error ? err : new Error("network_error");
         lastResponse = null;
