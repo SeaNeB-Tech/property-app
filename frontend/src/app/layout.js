@@ -10,13 +10,30 @@ const notoSans = Noto_Sans({
   variable: "--font-noto-sans",
 });
 
+const tryParseUrl = (value) => {
+  try {
+    return new URL(String(value || "").trim());
+  } catch {
+    return null;
+  }
+};
+
+const authHomeUrl = getAuthAppUrl("/");
+const listingCanonicalUrl = getListingAppUrl("/home");
+const metadataBaseUrl = tryParseUrl(authHomeUrl);
+const canonicalUrl = tryParseUrl(listingCanonicalUrl)?.toString() || "";
+
 export const metadata = {
-  metadataBase: new URL(getAuthAppUrl("/")),
+  ...(metadataBaseUrl ? { metadataBase: metadataBaseUrl } : {}),
   title: "SeaNeB Property Panel",
   description: "SeaNeB Property authentication and panel application",
-  alternates: {
-    canonical: getListingAppUrl("/home"),
-  },
+  ...(canonicalUrl
+    ? {
+        alternates: {
+          canonical: canonicalUrl,
+        },
+      }
+    : {}),
   robots: {
     index: false,
     follow: false,

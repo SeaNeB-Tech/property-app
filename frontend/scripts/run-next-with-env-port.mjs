@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 const command = process.argv[2] || "dev";
 const envKey = process.argv[3] || "NEXT_PUBLIC_AUTH_APP_URL";
 const explicitPort = String(process.argv[4] || process.env.PORT || "").trim();
+const defaultPort = String(process.env.DEFAULT_PORT || "3000").trim();
 
 const rootDir = process.cwd();
 const envFiles = [".env"];
@@ -44,10 +45,7 @@ const isValidPort = (value) => {
 };
 
 if (!port) {
-  console.error(
-    `[run-next-with-env-port] Missing port. Set PORT or include an explicit port in ${envKey}.`
-  );
-  process.exit(1);
+  port = defaultPort;
 }
 
 if (!isValidPort(port)) {
