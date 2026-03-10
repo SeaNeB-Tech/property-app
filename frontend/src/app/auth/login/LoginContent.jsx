@@ -35,6 +35,7 @@ const LANG_MAP = { eng, guj, hindi };
 const LANGUAGE_STORAGE_KEY = "auth_language";
 const RETURN_TO_COOKIE = "auth_return_to";
 const POST_OTP_VERIFIED_COOKIE = "post_otp_verified";
+const RETURN_TO_GRACE_MS = 5000;
 // Use shared signup/login purpose so first OTP can continue directly into complete-profile
 // without requiring a second mobile OTP verification.
 const PURPOSE_LOGIN = 0;
@@ -147,6 +148,7 @@ export default function LoginContent() {
   const [method, setMethod] = useState("whatsapp");
   const [error, setError] = useState("");
   const [autoRedirecting, setAutoRedirecting] = useState(false);
+  const [allowLoginForm, setAllowLoginForm] = useState(true);
   const [flowContext] = useState(() => {
     if (typeof window === "undefined") return getAuthFlowContext();
     ingestAuthFlowContextFromWindowName();
@@ -180,6 +182,22 @@ export default function LoginContent() {
   useEffect(() => {
     void restoreSession();
   }, [restoreSession]);
+
+  useEffect(() => {
+    if (!returnToParam) {
+      setAllowLoginForm(true);
+      return;
+    }
+
+    setAllowLoginForm(false);
+    const timer = setTimeout(() => {
+      if (!isAuthenticated) {
+        setAllowLoginForm(true);
+      }
+    }, RETURN_TO_GRACE_MS);
+
+    return () => clearTimeout(timer);
+  }, [returnToParam, isAuthenticated]);
 
   useEffect(() => {
     let active = true;
@@ -292,7 +310,13 @@ export default function LoginContent() {
     );
   }, [country, isTransitioning, isValidMobile, method, mobile, returnToParam, router, runWithTransition, source]);
 
-  if (showTransition || autoRedirecting || isLoading || !authInitialized) {
+  if (
+    showTransition ||
+    autoRedirecting ||
+    isLoading ||
+    !authInitialized ||
+    (!allowLoginForm && returnToParam)
+  ) {
     return (
       <AuthTransitionOverlay
         title={autoRedirecting ? "Preparing your dashboard..." : "Please wait..."}

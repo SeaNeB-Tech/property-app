@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getCookie, setCookie } from "@/services/auth.service";
 import BrandLogo from "@/components/ui/BrandLogo";
-import { getAuthAppUrl, getListingAppUrl } from "@/lib/core/appUrls";
+import { getAuthLoginUrl, getListingAppUrl } from "@/lib/core/appUrls";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { logoutPanelSession } from "@/services/auth.service";
 
 const hasBusinessRegistration = (user = null) => {
   const record = user && typeof user === "object" ? user : {};
@@ -38,6 +39,7 @@ export default function BrokerDashboardShell() {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const graceTimerRef = useRef(null);
 
   const userName = useMemo(
     () =>
@@ -60,7 +62,23 @@ export default function BrokerDashboardShell() {
       if (!active || !isReady || isRestoring || status === "restoring") return;
 
       if (status !== "authenticated") {
-        router.replace(getAuthAppUrl("/auth/login"));
+        const hasCookie =
+          typeof document !== "undefined" &&
+          (String(document.cookie || "").includes("csrf_token_property=") ||
+            String(document.cookie || "").includes("refresh_token_property="));
+
+        if (hasCookie) {
+          return;
+        }
+
+        const returnTo =
+          typeof window !== "undefined" ? window.location.href : "/dashboard/broker";
+        router.replace(
+          getAuthLoginUrl({
+            returnTo,
+            source: "main-app",
+          })
+        );
         return;
       }
 
@@ -88,6 +106,12 @@ export default function BrokerDashboardShell() {
   }, [isReady, isRestoring, router, status, user]);
 
   useEffect(() => {
+    return () => {
+      if (graceTimerRef.current) clearTimeout(graceTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isProfileOpen) return undefined;
     const onClickOutside = (event) => {
       if (!dropdownRef.current) return;
@@ -108,8 +132,14 @@ export default function BrokerDashboardShell() {
 
   const handleLogout = async () => {
     setIsProfileOpen(false);
+    try {
+      await logoutPanelSession();
+    } catch {}
     await logout({ redirect: false });
-    window.location.href = getAuthAppUrl("/auth/login");
+    window.location.href = getAuthLoginUrl({
+      returnTo: getListingAppUrl("/home"),
+      source: "main-app",
+    });
   };
 
   if (!sessionChecked) {

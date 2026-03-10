@@ -17,3 +17,20 @@ export const getListingAppUrl = (path = "/") => {
   const safePath = path.startsWith("/") ? path : `/${path}`;
   return `${LISTING_APP_BASE_URL}${safePath}`;
 };
+
+export const getAuthLoginUrl = ({ returnTo = "", source = "" } = {}) => {
+  const base = getAuthAppUrl("/auth/login");
+  const safeReturnTo = String(returnTo || "").trim();
+  const safeSource = String(source || "").trim();
+
+  if (!safeReturnTo && !safeSource) return base;
+
+  const resolvedReturnTo = safeReturnTo.startsWith("/")
+    ? getListingAppUrl(safeReturnTo)
+    : safeReturnTo;
+
+  const url = new URL(base);
+  if (safeSource) url.searchParams.set("source", safeSource);
+  if (resolvedReturnTo) url.searchParams.set("returnTo", resolvedReturnTo);
+  return url.toString();
+};
