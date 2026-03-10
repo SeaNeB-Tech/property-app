@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import net from "node:net";
 import { spawn } from "node:child_process";
 
 const command = process.argv[2] || "dev";
@@ -29,11 +30,12 @@ const readEnvValue = (key) => {
 
 const rawUrl = readEnvValue(envKey);
 let port = explicitPort;
+let parsedUrl = null;
 
 if (!port && rawUrl) {
   try {
-    const parsed = new URL(rawUrl);
-    if (parsed.port) port = parsed.port;
+    parsedUrl = new URL(rawUrl);
+    if (parsedUrl.port) port = parsedUrl.port;
   } catch {
     // Handled by validation below.
   }
@@ -53,14 +55,80 @@ if (!isValidPort(port)) {
   process.exit(1);
 }
 
+const canBind = (host, p) =>
+  new Promise((resolve) => {
+    const server = net.createServer();
+    server.unref();
+    server.on("error", (err) => resolve({ ok: false, code: err?.code }));
+    server.listen({ host, port: Number(p) }, () => server.close(() => resolve({ ok: true, code: null })));
+  });
+
+const isPortAvailable = async (p) => {
+  // Next.js commonly binds to IPv6 on Windows (e.g. :::3000). If IPv6 bind fails
+  // with EADDRINUSE, we must treat the port as unavailable even if IPv4 bind works.
+  const v6 = await canBind("::", p);
+  if (v6.ok) return true;
+
+  // Some environments don't support IPv6 binding; fall back to IPv4 in that case.
+  if (v6.code === "EADDRNOTAVAIL" || v6.code === "EAFNOSUPPORT" || v6.code === "EINVAL") {
+    const v4 = await canBind("0.0.0.0", p);
+    return v4.ok;
+  }
+
+  return false;
+};
+
+const findAvailablePort = async (startPort, attempts = 20) => {
+  let candidate = Number(startPort);
+  for (let i = 0; i < attempts; i += 1) {
+    if (await isPortAvailable(String(candidate))) return String(candidate);
+    candidate += 1;
+  }
+  return String(startPort);
+};
+
+const isExplicit = Boolean(explicitPort);
+if (!(await isPortAvailable(port))) {
+  if (isExplicit) {
+    console.error(`[run-next-with-env-port] Port ${port} is already in use. Set PORT to a free port.`);
+    process.exit(1);
+  }
+
+  const nextPort = await findAvailablePort(port);
+  if (nextPort !== port) {
+    console.warn(`[run-next-with-env-port] Port ${port} is in use; using ${nextPort} instead.`);
+    port = nextPort;
+  }
+}
+
 const args = ["next", command];
 args.push("-p", port);
 
-const child = spawn("npx", args, {
-  stdio: "inherit",
-  shell: true,
-});
+const childEnv = { ...process.env, PORT: port };
+if (parsedUrl && parsedUrl.hostname === "localhost") {
+  const updated = new URL(parsedUrl.toString());
+  updated.port = port;
+  childEnv[envKey] = updated.toString();
+}
 
-child.on("exit", (code) => {
-  process.exit(code ?? 1);
-});
+const run = (runArgs) =>
+  new Promise((resolve) => {
+    const c = spawn("npx", runArgs, { stdio: "inherit", shell: true, env: childEnv });
+    c.on("exit", (code) => resolve(code ?? 1));
+  });
+
+(async () => {
+  // Try default (Turbopack) first. If it fails, retry with webpack dev server.
+  let exitCode = await run(args);
+  if (exitCode !== 0) {
+    try {
+      // Retry with webpack which is more reliable on some Windows setups.
+      const retryArgs = [...args, "--webpack"];
+      console.warn("[run-next-with-env-port] Turbopack dev failed; retrying with --webpack...");
+      exitCode = await run(retryArgs);
+    } catch (e) {
+      // ignore
+    }
+  }
+  process.exit(exitCode);
+})();
