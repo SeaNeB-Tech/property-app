@@ -174,20 +174,22 @@ const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null,
       name: "refresh_token_property",
       value: refreshToken,
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: "None",
       secure,
       path: "/",
     });
   }
 
   if (csrfToken) {
+    const csrfMaxAge = Number(process.env.NEXT_PUBLIC_CSRF_MAX_AGE || expiresIn || 60 * 60 * 24 * 30);
     response.cookies.set({
       name: "csrf_token_property",
       value: csrfToken,
       httpOnly: false,
-      sameSite: "lax",
+      sameSite: "None",
       secure,
       path: "/",
+      maxAge: csrfMaxAge,
     });
   }
 };

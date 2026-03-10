@@ -4,7 +4,7 @@ const isProduction = String(process.env.NODE_ENV || "").trim() === "production";
 
 const envCookiePath = process.env.NEXT_PUBLIC_COOKIE_PATH || "/";
 const envCookieDomain = process.env.NEXT_PUBLIC_COOKIE_DOMAIN || (isProduction ? ".seaneb.com" : "");
-const envSameSite = process.env.NEXT_PUBLIC_COOKIE_SAMESITE || (isProduction ? "None" : "Lax");
+const envSameSite = process.env.NEXT_PUBLIC_COOKIE_SAMESITE || "None";
 const COOKIE_CHANGE_EVENT = "property:cookie-change";
 const STORAGE_PREFIX = "property:volatile:";
 const volatileMemoryStore = new Map();
@@ -106,7 +106,16 @@ const resolveDomain = (domain) => {
 const resolveCookieOptions = (options = {}) => {
   const path = normalizePath(options.path || envCookiePath);
   const domain = resolveDomain(options.domain ?? envCookieDomain);
-  const sameSite = options.sameSite ?? envSameSite;
+  const normalizeSameSite = (value) => {
+    const raw = String(value ?? "").trim();
+    const normalized = raw.toLowerCase();
+    if (!normalized) return "";
+    if (normalized === "lax") return "None";
+    if (normalized === "none") return "None";
+    if (normalized === "strict") return "Strict";
+    return raw;
+  };
+  const sameSite = normalizeSameSite(options.sameSite ?? envSameSite);
   const secure =
     typeof options.secure === "boolean"
       ? options.secure

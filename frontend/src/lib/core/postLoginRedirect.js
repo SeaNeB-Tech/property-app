@@ -162,7 +162,7 @@ const appendBridgeToken = (returnTo, bridgeToken) => {
 
 const clearReturnToCookie = () => {
   try {
-    document.cookie = `${AUTH_RETURN_TO_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+    document.cookie = `${AUTH_RETURN_TO_COOKIE}=; path=/; max-age=0; SameSite=None`;
   } catch {
     // ignore cookie errors
   }

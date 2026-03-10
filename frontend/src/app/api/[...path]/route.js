@@ -331,7 +331,8 @@ const buildSetCookieHeader = ({
   const safeName = encodeURIComponent(String(name || "").trim());
   const safeValue = encodeURIComponent(String(value || "").trim());
   if (!safeName || !safeValue) return "";
-  const parts = [`${safeName}=${safeValue}`, "Path=/", "SameSite=Lax"];
+  const sameSiteValue = "None";
+  const parts = [`${safeName}=${safeValue}`, "Path=/", `SameSite=${sameSiteValue}`];
   if (httpOnly) parts.push("HttpOnly");
   if (secure) parts.push("Secure");
   if (typeof maxAge === "number" && Number.isFinite(maxAge) && maxAge > 0) {
@@ -431,6 +432,7 @@ const toProxyResponse = async (upstreamResponse, pathSegments = [], request = nu
         name: "csrf_token_property",
         value: csrfToken,
         httpOnly: false,
+        maxAge: Number(process.env.NEXT_PUBLIC_CSRF_MAX_AGE || expiresIn || 60 * 60 * 24 * 30),
       });
       if (cookie) responseHeaders.append("set-cookie", cookie);
     }

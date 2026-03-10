@@ -25,7 +25,7 @@ export const isAuthenticatedByCookies = () => {
 const forceExpireCookie = (name, domain = "") => {
   if (typeof document === "undefined") return;
   const secure = window.location.protocol === "https:" ? "; Secure" : "";
-  const base = `${encodeURIComponent(name)}=; path=/; max-age=0; SameSite=Lax`;
+  const base = `${encodeURIComponent(name)}=; path=/; max-age=0; SameSite=None`;
   document.cookie = `${base}${secure}`;
   if (domain) {
     document.cookie = `${base}; domain=${domain}${secure}`;
