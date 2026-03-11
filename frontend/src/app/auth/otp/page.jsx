@@ -266,6 +266,18 @@ export default function OtpPage() {
                 { country_code: ctx.country_code, mobile_number: ctx.mobile_number },
                 { maxAge: 60 * 60 * 24 * 7 }
               );
+            } else if (contextSnapshot?.mobile_number && contextSnapshot?.country_code) {
+              setCookie("mobile_verified", "true", { maxAge: 60 * 60 * 24 * 7 });
+              setCookie("otp_mobile", String(contextSnapshot.mobile_number), { maxAge: 60 * 60 * 24 * 7 });
+              setCookie("otp_cc", String(contextSnapshot.country_code), { maxAge: 60 * 60 * 24 * 7 });
+              setJsonCookie(
+                "verified_mobile",
+                {
+                  country_code: String(contextSnapshot.country_code),
+                  mobile_number: String(contextSnapshot.mobile_number),
+                },
+                { maxAge: 60 * 60 * 24 * 7 }
+              );
             }
 
             if (ctx?.purpose === PURPOSE_BUSINESS_MOBILE_VERIFY) {
@@ -319,16 +331,18 @@ export default function OtpPage() {
 
             if (requiresRegistration) {
               // Treat the first successful login OTP as signup-mobile verification proof.
-              setJsonCookie(
-                "signup_otp_verified",
-                {
-                  country_code: String(contextSnapshot.country_code),
-                  mobile_number: String(contextSnapshot.mobile_number),
-                  purpose: PURPOSE_SIGNUP_OR_LOGIN,
-                  verified_at: Date.now(),
-                },
-                { maxAge: 60 * 60 * 24 * 7, path: "/" }
-              );
+              if (contextSnapshot?.country_code && contextSnapshot?.mobile_number) {
+                setJsonCookie(
+                  "signup_otp_verified",
+                  {
+                    country_code: String(contextSnapshot.country_code),
+                    mobile_number: String(contextSnapshot.mobile_number),
+                    purpose: PURPOSE_SIGNUP_OR_LOGIN,
+                    verified_at: Date.now(),
+                  },
+                  { maxAge: 60 * 60 * 24 * 7, path: "/" }
+                );
+              }
               setCookie(POST_OTP_VERIFIED_COOKIE, "1", { maxAge: 60 * 60 * 24 * 7, path: "/" });
               removeCookie("otp_in_progress");
               removeCookie("otp_context");

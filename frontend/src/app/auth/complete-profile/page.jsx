@@ -100,6 +100,13 @@ const resolveVerifiedMobile = () => {
     return { country_code: ccFromJson, mobile_number: mobileFromJson }
   }
 
+  const signupProof = getJsonCookie("signup_otp_verified")
+  const ccFromProof = String(signupProof?.country_code || "").trim()
+  const mobileFromProof = String(signupProof?.mobile_number || "").trim()
+  if (ccFromProof && mobileFromProof) {
+    return { country_code: ccFromProof, mobile_number: mobileFromProof }
+  }
+
   const verifiedFlag = String(getCookie("mobile_verified") || "").trim().toLowerCase()
   const ccFromCookie = String(getCookie("otp_cc") || "").trim()
   const mobileFromCookie = String(getCookie("otp_mobile") || "").trim()
