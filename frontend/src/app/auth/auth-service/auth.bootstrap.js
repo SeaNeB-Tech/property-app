@@ -150,13 +150,19 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
 
       const hasCsrfCookie = hasCsrfTokenCookie();
 
+      let sessionHint = null;
       if (!force && !hasAccessToken && !hasCsrfCookie) {
-        lastFailureAt = Date.now();
-        return false;
+        sessionHint = await requestSessionHint();
+        if (!sessionHint?.hasRefreshSession) {
+          lastFailureAt = Date.now();
+          return false;
+        }
       }
 
       // If client hints exist, ask the server whether a refresh session exists.
-      const sessionHint = await requestSessionHint();
+      if (!sessionHint) {
+        sessionHint = await requestSessionHint();
+      }
       const hasRefreshSession = Boolean(sessionHint?.hasRefreshSession);
 
       const hydrateTokenFromRefresh = async () => {
