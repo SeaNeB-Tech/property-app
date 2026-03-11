@@ -1,24 +1,12 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { getCookieOptions } from "@/lib/auth/cookieOptions";
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
 const CSRF_COOKIE_KEYS = ["csrf_token_property", "csrf_token"];
 
 const getBaseCandidates = () =>
   Array.from(new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean)));
-
-const shouldUseSecureCookies = (request) => {
-  const forwardedProto = String(request?.headers?.get?.("x-forwarded-proto") || "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-  if (forwardedProto) return forwardedProto === "https";
-
-  const protocol = String(request?.nextUrl?.protocol || "").trim().toLowerCase();
-  if (protocol) return protocol === "https:";
-
-  return process.env.NODE_ENV === "production";
-};
 
 const getPathCandidates = () => ["/auth/me", "/profile/me"];
 const REFRESH_PATH_CANDIDATES = ["/auth/refresh"];
@@ -228,7 +216,7 @@ const readCookieValueFromSetCookie = (headers, keys = []) => {
   return "";
 };
 
-const setAuthCookiesByPayload = (response, payload = {}, headers = null, secure = false) => {
+const setAuthCookiesByPayload = (response, payload = {}, headers = null, cookieOptions = { sameSite: "Lax", secure: false }) => {
   const accessToken = readAccessTokenFromPayload(payload, headers);
   const refreshToken =
     readRefreshTokenFromPayload(payload) ||
@@ -252,8 +240,8 @@ const setAuthCookiesByPayload = (response, payload = {}, headers = null, secure 
       name: "refresh_token_property",
       value: refreshToken,
       httpOnly: true,
-      sameSite: secure ? "None" : "Lax",
-      secure,
+      sameSite: cookieOptions.sameSite,
+      secure: cookieOptions.secure,
       path: "/",
     });
   }
@@ -262,8 +250,8 @@ const setAuthCookiesByPayload = (response, payload = {}, headers = null, secure 
       name: "csrf_token_property",
       value: csrfToken,
       httpOnly: false,
-      sameSite: secure ? "None" : "Lax",
-      secure,
+      sameSite: cookieOptions.sameSite,
+      secure: cookieOptions.secure,
       path: "/",
     });
   }
@@ -368,6 +356,7 @@ const requestRefresh = async ({ base, cookieHeader, csrfHeader, includeCsrf = tr
 };
 
 export async function GET(request) {
+  const cookieOptions = getCookieOptions(request);
   const bases = getBaseCandidates();
   if (bases.length === 0) {
     return NextResponse.json(
@@ -409,8 +398,8 @@ export async function GET(request) {
               name: "refresh_token_property",
               value: refreshTokenFromRequest,
               httpOnly: true,
-              sameSite: shouldUseSecureCookies(request) ? "None" : "Lax",
-              secure: shouldUseSecureCookies(request),
+              sameSite: cookieOptions.sameSite,
+              secure: cookieOptions.secure,
               path: "/",
             });
           }
@@ -466,7 +455,7 @@ export async function GET(request) {
               response,
               refreshPayload,
               refreshResponse.headers,
-              shouldUseSecureCookies(request)
+              cookieOptions
             );
             response.cookies.delete("access_token");
             return response;

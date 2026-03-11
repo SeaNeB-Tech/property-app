@@ -88,7 +88,7 @@ const normalizePath = (path) => {
 };
 
 const resolveDomain = (domain) => {
-  const safeDomain = String(domain || "").trim();
+  const safeDomain = String(domain || "").trim().replace(/:\d+$/, "");
   if (!safeDomain || !isBrowser) return safeDomain;
 
   const host = String(window.location.hostname || "").toLowerCase();

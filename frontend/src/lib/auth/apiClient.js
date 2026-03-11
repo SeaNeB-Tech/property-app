@@ -241,7 +241,7 @@ export const apiRequest = async (
     },
   });
 
-  if (response.status !== 401 || !retryOn401 || isRefreshRequest) {
+  if (response.status !== 401 || !retryOn401 || isRefreshRequest || String(path || "") === ME_ENDPOINT) {
     return response;
   }
 

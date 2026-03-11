@@ -1,18 +1,6 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
-
-const shouldUseSecureCookies = (request) => {
-  const forwardedProto = String(request?.headers?.get?.("x-forwarded-proto") || "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-  if (forwardedProto) return forwardedProto === "https";
-
-  const protocol = String(request?.nextUrl?.protocol || "").trim().toLowerCase();
-  if (protocol) return protocol === "https:";
-
-  return process.env.NODE_ENV === "production";
-};
+import { getCookieOptions } from "@/lib/auth/cookieOptions";
 
 const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
   const getSetCookie = upstreamHeaders?.getSetCookie;
@@ -150,7 +138,7 @@ const readCookieValueFromSetCookie = (headers, keys = []) => {
   return "";
 };
 
-const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null, secure = false) => {
+const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null, cookieOptions = { sameSite: "Lax", secure: false }) => {
   const accessToken = readAccessTokenFromPayload(payload, upstreamHeaders);
   const refreshToken =
     readRefreshTokenFromPayload(payload) ||
@@ -174,8 +162,8 @@ const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null,
       name: "refresh_token_property",
       value: refreshToken,
       httpOnly: true,
-      sameSite: secure ? "None" : "Lax",
-      secure,
+      sameSite: cookieOptions.sameSite,
+      secure: cookieOptions.secure,
       path: "/",
     });
   }
@@ -186,8 +174,8 @@ const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null,
       name: "csrf_token_property",
       value: csrfToken,
       httpOnly: false,
-      sameSite: secure ? "None" : "Lax",
-      secure,
+      sameSite: cookieOptions.sameSite,
+      secure: cookieOptions.secure,
       path: "/",
       maxAge: csrfMaxAge,
     });
@@ -310,7 +298,7 @@ export async function POST(req) {
       if (upstream.ok || ![404, 405].includes(Number(upstream.status || 0))) {
         const response = NextResponse.json(data, { status: upstream.status, headers: responseHeaders });
         if (upstream.ok) {
-          setAuthCookiesByPayload(response, data, upstream.headers, shouldUseSecureCookies(req));
+          setAuthCookiesByPayload(response, data, upstream.headers, getCookieOptions(req));
           response.cookies.delete("access_token");
           console.log("[SSO Exchange] Success - setting auth cookies");
         }

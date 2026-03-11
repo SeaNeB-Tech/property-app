@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { getCookieOptions } from "@/lib/auth/cookieOptions";
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
 const REFRESH_COOKIE_NAME = "refresh_token_property";
@@ -10,19 +11,6 @@ const REFRESH_COOKIE_KEYS = [
   "refreshToken_property",
   "property_refresh_token",
 ];
-
-const shouldUseSecureCookies = (request) => {
-  const forwardedProto = String(request?.headers?.get?.("x-forwarded-proto") || "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-  if (forwardedProto) return forwardedProto === "https";
-
-  const protocol = String(request?.nextUrl?.protocol || "").trim().toLowerCase();
-  if (protocol) return protocol === "https:";
-
-  return process.env.NODE_ENV === "production";
-};
 
 const getCookieValueFromHeader = (cookieHeader, key) => {
   const source = String(cookieHeader || "");
@@ -210,7 +198,7 @@ const setCookieByPayload = (
   response,
   payloadJson = {},
   upstreamHeaders = null,
-  secure = false
+  cookieOptions = { sameSite: "Lax", secure: false }
 ) => {
   const expiresIn = readExpiresInFromPayload(payloadJson);
   const accessToken = readTokenFromPayload(payloadJson, upstreamHeaders);
@@ -235,8 +223,8 @@ const setCookieByPayload = (
       name: REFRESH_COOKIE_NAME,
       value: refreshToken,
       httpOnly: true,
-      sameSite: secure ? "None" : "Lax",
-      secure,
+      sameSite: cookieOptions.sameSite,
+      secure: cookieOptions.secure,
       path: "/",
     });
   }
@@ -246,8 +234,8 @@ const setCookieByPayload = (
       name: "csrf_token_property",
       value: csrfToken,
       httpOnly: false,
-      sameSite: secure ? "None" : "Lax",
-      secure,
+      sameSite: cookieOptions.sameSite,
+      secure: cookieOptions.secure,
       path: "/",
     });
   }
@@ -415,7 +403,7 @@ export async function POST(request) {
     if (accessToken) {
       response.headers.set("authorization", `Bearer ${accessToken}`);
     }
-    setCookieByPayload(response, payloadJson, upstreamResponse.headers, shouldUseSecureCookies(request));
+    setCookieByPayload(response, payloadJson, upstreamResponse.headers, getCookieOptions(request));
     response.cookies.delete("access_token");
     return response;
   }

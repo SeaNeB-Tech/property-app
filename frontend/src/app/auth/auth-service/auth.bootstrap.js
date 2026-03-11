@@ -4,7 +4,7 @@ import {
   hydrateAuthSession,
 } from "@/lib/api/client";
 
-import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
+import { clearAccessToken, getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
 
 const PRODUCT_KEY = process.env.NEXT_PUBLIC_PRODUCT_KEY?.trim() || "property";
 
@@ -239,6 +239,7 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
           }
 
           if ([401, 403].includes(status)) {
+            clearAccessToken();
             lastFailureAt = Date.now();
             return false;
           }

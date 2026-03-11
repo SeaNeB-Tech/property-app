@@ -1,3 +1,5 @@
+import { getCookieOptions } from "@/lib/auth/cookieOptions";
+
 const normalizeUrl = (value) => String(value || "").trim().replace(/\/+$/, "");
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const OTP_RATE_LIMIT_WINDOW_MS = 60_000;
@@ -323,6 +325,7 @@ const readCookieValueFromSetCookie = (headers, keys = []) => {
 
 const buildSetCookieHeader = ({
   secure = false,
+  sameSite = secure ? "None" : "Lax",
   name,
   value,
   httpOnly = false,
@@ -331,27 +334,13 @@ const buildSetCookieHeader = ({
   const safeName = encodeURIComponent(String(name || "").trim());
   const safeValue = encodeURIComponent(String(value || "").trim());
   if (!safeName || !safeValue) return "";
-  const sameSiteValue = secure ? "None" : "Lax";
-  const parts = [`${safeName}=${safeValue}`, "Path=/", `SameSite=${sameSiteValue}`];
+  const parts = [`${safeName}=${safeValue}`, "Path=/", `SameSite=${sameSite}`];
   if (httpOnly) parts.push("HttpOnly");
   if (secure) parts.push("Secure");
   if (typeof maxAge === "number" && Number.isFinite(maxAge) && maxAge > 0) {
     parts.push(`Max-Age=${Math.floor(maxAge)}`);
   }
   return parts.join("; ");
-};
-
-const shouldUseSecureCookies = (request) => {
-  const forwardedProto = String(request?.headers?.get?.("x-forwarded-proto") || "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-  if (forwardedProto) return forwardedProto === "https";
-
-  const protocol = String(request?.nextUrl?.protocol || "").trim().toLowerCase();
-  if (protocol) return protocol === "https:";
-
-  return process.env.NODE_ENV === "production";
 };
 
 const shouldHydrateAuthCookies = (segments = []) => {
@@ -370,7 +359,7 @@ const shouldHydrateAuthCookies = (segments = []) => {
 
 const toProxyResponse = async (upstreamResponse, pathSegments = [], request = null) => {
   const responseHeaders = copyHeadersPreservingSetCookie(upstreamResponse.headers);
-  const secure = shouldUseSecureCookies(request);
+  const cookieOptions = getCookieOptions(request);
 
   if (!shouldHydrateAuthCookies(pathSegments)) {
     return new Response(upstreamResponse.body, {
@@ -412,7 +401,8 @@ const toProxyResponse = async (upstreamResponse, pathSegments = [], request = nu
       ]);
     if (refreshToken) {
       const cookie = buildSetCookieHeader({
-        secure,
+        secure: cookieOptions.secure,
+        sameSite: cookieOptions.sameSite,
         name: "refresh_token_property",
         value: refreshToken,
         httpOnly: true,
@@ -428,7 +418,8 @@ const toProxyResponse = async (upstreamResponse, pathSegments = [], request = nu
       ]);
     if (csrfToken) {
       const cookie = buildSetCookieHeader({
-        secure,
+        secure: cookieOptions.secure,
+        sameSite: cookieOptions.sameSite,
         name: "csrf_token_property",
         value: csrfToken,
         httpOnly: false,

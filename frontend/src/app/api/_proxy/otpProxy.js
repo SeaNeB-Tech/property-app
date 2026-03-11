@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { getCookieOptions } from "@/lib/auth/cookieOptions";
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
 const REFRESH_COOKIE_KEYS = [
@@ -15,19 +16,6 @@ const buildUpstreamCandidates = () =>
   Array.from(new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean))).map(
     (base) => String(base).replace(/\/+$/, "")
   );
-
-const shouldUseSecureCookies = (request) => {
-  const forwardedProto = String(request?.headers?.get?.("x-forwarded-proto") || "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-  if (forwardedProto) return forwardedProto === "https";
-
-  const protocol = String(request?.nextUrl?.protocol || "").trim().toLowerCase();
-  if (protocol) return protocol === "https:";
-
-  return process.env.NODE_ENV === "production";
-};
 
 const getCookieValueFromHeader = (cookieHeader, key) => {
   const source = String(cookieHeader || "");
@@ -205,15 +193,15 @@ const extractCookieValuesFromUpstream = (upstreamHeaders) => {
 
 const setAuthCookies = (
   response,
-  { refreshToken, csrfToken, secure = false } = {}
+  { refreshToken, csrfToken, cookieOptions = { sameSite: "Lax", secure: false } } = {}
 ) => {
   if (refreshToken) {
     response.cookies.set({
       name: "refresh_token_property",
       value: refreshToken,
       httpOnly: true,
-      sameSite: secure ? "None" : "Lax",
-      secure,
+      sameSite: cookieOptions.sameSite,
+      secure: cookieOptions.secure,
       path: "/",
     });
   }
@@ -223,8 +211,8 @@ const setAuthCookies = (
       name: "csrf_token_property",
       value: csrfToken,
       httpOnly: false,
-      sameSite: secure ? "None" : "Lax",
-      secure,
+      sameSite: cookieOptions.sameSite,
+      secure: cookieOptions.secure,
       path: "/",
       maxAge: csrfMaxAge,
     });
@@ -341,6 +329,7 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [], setCookiesF
   const res = NextResponse.json(responseBody, { status: responseToReturn.status, headers: responseHeaders });
 
   if (setCookiesFromUpstream) {
+    const cookieOptions = getCookieOptions(request);
     const upstreamCookieValues = extractCookieValuesFromUpstream(responseToReturn.headers);
     
     // First try to get tokens from response body
@@ -371,7 +360,7 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [], setCookiesF
       setAuthCookies(res, {
         refreshToken,
         csrfToken,
-        secure: shouldUseSecureCookies(request),
+        cookieOptions,
       });
     }
   }
@@ -436,3 +425,4 @@ export const proxyVerifyOtpLegacy = async (request) => {
     setCookiesFromUpstream: true,
   });
 };
+
