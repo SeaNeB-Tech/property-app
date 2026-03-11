@@ -95,6 +95,25 @@ const hasCrossOriginReturnTo = (request) => {
   }
 };
 
+const getSetCookieLines = (headers) => {
+  const getSetCookie = headers?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    return (getSetCookie.call(headers) || []).filter(Boolean);
+  }
+  const combined = String(headers?.get("set-cookie") || "").trim();
+  if (!combined) return [];
+  return combined
+    .split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const appendSetCookieHeaders = (targetResponse, sourceHeaders) => {
+  for (const cookie of getSetCookieLines(sourceHeaders)) {
+    targetResponse.headers.append("set-cookie", cookie);
+  }
+};
+
 const redirectForAuthenticatedAuthPage = (request) => {
   const safeReturnPath = getSafeInternalReturnPath(request);
   if (safeReturnPath) {
@@ -113,6 +132,8 @@ const getValidatedSessionState = async (request) => {
       },
       cache: "no-store",
     });
+
+    const setCookies = getSetCookieLines(response.headers);
     
     if (response.ok) {
       let payload = null;
@@ -126,14 +147,30 @@ const getValidatedSessionState = async (request) => {
       return {
         authenticated: true,
         hasBusiness: hasBusinessFromProfile(profile || {}),
+        setCookies,
       };
     }
     
     // If we get 401/403 and have a refresh token, the /api/auth/me endpoint
     // should have already attempted refresh. If it still fails, session is invalid.
-    return { authenticated: false, hasBusiness: false };
+    return { authenticated: false, hasBusiness: false, setCookies };
   } catch {
-    return { authenticated: false, hasBusiness: false };
+    return { authenticated: false, hasBusiness: false, setCookies: [] };
+  }
+};
+
+const tryRefreshSession = async (request) => {
+  try {
+    return await fetch(new URL("/api/auth/refresh", request.url), {
+      method: "POST",
+      headers: {
+        cookie: String(request.headers.get("cookie") || ""),
+        "x-product-key": String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property",
+      },
+      cache: "no-store",
+    });
+  } catch {
+    return null;
   }
 };
 
@@ -144,6 +181,7 @@ export async function middleware(request) {
   let hasSession = hasRefreshCookie;
   let hasBusiness = false;
   let probeAuthenticated = false;
+  let sessionSetCookies = [];
   const shouldProbeSession =
     pathname.startsWith("/dashboard") ||
     AUTH_ENTRY_PATHS.has(pathname) ||
@@ -154,42 +192,66 @@ export async function middleware(request) {
     hasSession = sessionState.authenticated;
     hasBusiness = sessionState.hasBusiness;
     probeAuthenticated = sessionState.authenticated;
+    sessionSetCookies = sessionState.setCookies || [];
   }
 
   const hasRecoverableSession = !hasSession && (hasRefreshCookie || hasCsrfSessionHint);
+  const refreshResponse = hasRecoverableSession ? await tryRefreshSession(request) : null;
+  if (refreshResponse?.ok) {
+    hasSession = true;
+    probeAuthenticated = true;
+  }
+
+  let response = null;
 
   if (pathname.startsWith("/dashboard") && !hasSession && !hasRecoverableSession) {
     // Do not hard-redirect dashboard requests at middleware layer.
     // Client auth bootstrap can still restore using Authorization + CSRF hints
     // immediately after SSO handoff, which middleware cannot observe.
-    return NextResponse.next();
+    response = NextResponse.next();
   }
 
-  if (pathname.startsWith("/dashboard") && probeAuthenticated && !hasBusiness) {
+  if (!response && pathname.startsWith("/dashboard") && probeAuthenticated && !hasBusiness) {
     // Keep dashboard transition stable; business gating is enforced in client shell
     // using resolved profile data/cookies after auth restore.
-    return NextResponse.next();
+    response = NextResponse.next();
   }
 
-  if (AUTH_ENTRY_PATHS.has(pathname) && hasSession) {
+  if (!response && AUTH_ENTRY_PATHS.has(pathname) && hasSession) {
     if (hasCrossOriginReturnTo(request)) {
-      return NextResponse.next();
+      response = NextResponse.next();
+    } else {
+      response = redirectForAuthenticatedAuthPage(request);
     }
-    return redirectForAuthenticatedAuthPage(request);
   }
 
-  if (pathname === "/auth/complete-profile" && !hasSession) {
+  if (!response && pathname === "/auth/complete-profile" && !hasSession) {
     if (hasPostOtpVerified(request)) {
-      return NextResponse.next();
+      response = NextResponse.next();
+    } else {
+      const loginUrl = new URL("/auth/login", request.url);
+      loginUrl.searchParams.set("returnTo", request.nextUrl.href);
+      response = NextResponse.redirect(loginUrl);
     }
-    const loginUrl = new URL("/auth/login", request.url);
-    loginUrl.searchParams.set("returnTo", request.nextUrl.href);
-    return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  if (!response) {
+    response = NextResponse.next();
+  }
+
+  if (sessionSetCookies.length) {
+    for (const cookie of sessionSetCookies) {
+      response.headers.append("set-cookie", cookie);
+    }
+  }
+
+  if (refreshResponse?.headers) {
+    appendSetCookieHeaders(response, refreshResponse.headers);
+  }
+
+  return response;
 }
 
 export const config = {
-  matcher: ["/auth/:path*", "/dashboard/:path*"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)"],
 };

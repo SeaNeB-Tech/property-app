@@ -15,13 +15,18 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let inFlightEnsureSessionPromise = null;
 let lastFailureAt = 0;
 
+const CSRF_COOKIE_KEYS = ["csrf_token_property", "csrf_token", "csrfToken"];
+
 const hasCsrfTokenCookie = () => {
   if (typeof document === "undefined") return false;
 
-  return document.cookie
+  const cookies = document.cookie
     .split(";")
-    .map((p) => String(p || "").trim())
-    .some((p) => p.startsWith("csrf_token_property="));
+    .map((p) => String(p || "").trim());
+
+  return CSRF_COOKIE_KEYS.some((key) =>
+    cookies.some((cookie) => cookie.startsWith(`${key}=`))
+  );
 };
 
 const readCsrfFromCookie = () => {
@@ -36,8 +41,7 @@ const readCsrfFromCookie = () => {
     if (idx < 0) continue;
 
     const name = cookie.slice(0, idx).trim();
-
-    if (name === "csrf_token_property") {
+    if (CSRF_COOKIE_KEYS.includes(name)) {
       return cookie.slice(idx + 1).trim();
     }
   }
@@ -221,7 +225,9 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
         const refresh = await hydrateTokenFromRefresh();
 
         if (refresh.ok) {
-          return hasClientSession();
+          if (hasClientSession()) return true;
+          const confirmMe = await requestMe();
+          return confirmMe.ok;
         }
 
         return true;

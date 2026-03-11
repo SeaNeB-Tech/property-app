@@ -239,7 +239,7 @@ const redirectToBusinessRegisterLogin = (router) => {
     source: MAIN_APP_REGISTER_SOURCE,
     returnTo,
   })
-  router.replace("")
+  router.replace("/auth/login")
 }
 
 export default function BusinessRegisterPage() {
