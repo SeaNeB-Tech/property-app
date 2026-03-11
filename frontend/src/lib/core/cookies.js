@@ -127,7 +127,7 @@ const resolveCookieOptions = (options = {}) => {
   const secure =
     typeof options.secure === "boolean"
       ? options.secure
-      : (isProduction || (isBrowser && window.location.protocol === "https:"));
+      : (isBrowser ? window.location.protocol === "https:" : false);
   const sameSite = normalizeSameSite(options.sameSite ?? envSameSite, secure);
 
   return { ...options, path, domain, sameSite, secure };
