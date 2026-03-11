@@ -109,7 +109,14 @@ const resolveDomain = (domain) => {
   if (isLoopbackHost) return "";
   // Domain cookies are rejected on raw IP hosts. Keep host-only cookies.
   if (isIpv4 || isIpv6) return "";
-  return safeDomain;
+
+  const bareDomain = safeDomain.startsWith(".") ? safeDomain.slice(1) : safeDomain;
+  if (host === bareDomain || host.endsWith(`.${bareDomain}`)) {
+    return safeDomain;
+  }
+
+  // Host doesn't match configured domain; fall back to host-only cookie.
+  return "";
 };
 
 const resolveCookieOptions = (options = {}) => {
