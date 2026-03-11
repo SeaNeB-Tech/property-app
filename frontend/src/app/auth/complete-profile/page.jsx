@@ -21,6 +21,7 @@ import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay"
 
 // Services
 import { signupUser } from "@/app/auth/auth-service/signup.service"
+import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
 import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.service"
 import { authApi } from "@/lib/api/client"
 import { API } from "@/lib/config/apiPaths"
@@ -514,6 +515,19 @@ export default function CompleteProfilePage() {
           })
 
           await finalizeAuthenticatedSession()
+
+          const sessionReady = await ensureSessionReady({ force: true })
+          if (!sessionReady) {
+            removeCookie("reg_form_draft")
+            removeCookie("otp_context")
+            removeCookie("otp_cc")
+            removeCookie("otp_mobile")
+            removeCookie("mobile_verified")
+            removeCookie("signup_otp_verified")
+            removeCookie("verified_email")
+            router.replace(getAuthAppUrl("/auth/login"))
+            return
+          }
 
           removeCookie("reg_form_draft")
           removeCookie("otp_context")

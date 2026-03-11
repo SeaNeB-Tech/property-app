@@ -358,7 +358,10 @@ export default function OtpPage() {
             });
             const sessionReady = await ensureSessionReady({ force: true });
             if (!sessionReady) {
-              throw new Error("Session is not ready after OTP verification. Please login again.");
+              removeCookie("otp_in_progress");
+              removeCookie("otp_context");
+              router.replace(getAuthAppUrl("/auth/login"));
+              return;
             }
             notifyAuthChanged();
             setStatus("verified");
