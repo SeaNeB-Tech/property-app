@@ -76,6 +76,7 @@ const EMPTY_FORM = {
   seanebId: "",
   primaryNumber: "",
   whatsappNumber: "",
+  businessWebsite: "",
   businessEmail: "",
   aboutBranch: "Head office branch",
   businessLocation: "",
@@ -268,6 +269,9 @@ export default function BusinessRegisterPage() {
   const [mobileLoading, setMobileLoading] = useState(false)
   const [mobileEditCooldown, setMobileEditCooldown] = useState(0)
   const [mobileOtpVia, setMobileOtpVia] = useState(OTP_VIA_SMS)
+  const [whatsappVerified, setWhatsappVerified] = useState(false)
+  const [whatsappLoading, setWhatsappLoading] = useState(false)
+  const [whatsappEditCooldown, setWhatsappEditCooldown] = useState(0)
   const [selectedCountry, setSelectedCountry] = useState(() => {
     const fromSession = getResolvedCountryCode()
     return getCountryByCode(fromSession) || DEFAULT_COUNTRY
@@ -369,13 +373,14 @@ export default function BusinessRegisterPage() {
   }, [otpModalOpen, otpResendCooldown])
 
   useEffect(() => {
-    if (emailEditCooldown <= 0 && mobileEditCooldown <= 0) return
+    if (emailEditCooldown <= 0 && mobileEditCooldown <= 0 && whatsappEditCooldown <= 0) return
     const timer = window.setInterval(() => {
       setEmailEditCooldown((prev) => (prev > 0 ? prev - 1 : 0))
       setMobileEditCooldown((prev) => (prev > 0 ? prev - 1 : 0))
+      setWhatsappEditCooldown((prev) => (prev > 0 ? prev - 1 : 0))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [emailEditCooldown, mobileEditCooldown])
+  }, [emailEditCooldown, mobileEditCooldown, whatsappEditCooldown])
 
   useEffect(() => {
     ingestAuthFlowContextFromWindowName()
@@ -417,6 +422,7 @@ export default function BusinessRegisterPage() {
       const verifiedBusinessEmail = getCookie("verified_business_email")
       const verifiedPan = getCookie("verified_pan")
       const verifiedGstin = getCookie("verified_gstin")
+      const verifiedWhatsapp = getJsonCookie("verified_business_whatsapp")
       const initialBusinessEmail =
         verifiedBusinessEmail ||
         getCookie("verified_email") ||
@@ -527,7 +533,7 @@ export default function BusinessRegisterPage() {
         regDraft?.primaryNumber || verifiedMobile?.mobile_number || ""
       ).trim()
       const initialWhatsappNumber = String(
-        regDraft?.whatsappNumber || verifiedMobile?.mobile_number || ""
+        regDraft?.whatsappNumber || verifiedWhatsapp?.mobile_number || verifiedMobile?.mobile_number || ""
       ).trim()
 
       setForm((prev) => ({
@@ -550,11 +556,15 @@ export default function BusinessRegisterPage() {
       }
       // Always require fresh mobile verification on business registration form.
       setMobileVerified(false)
+      setWhatsappVerified(false)
       if (verifiedPan) {
         setPanVerified(true)
       }
       if (verifiedGstin) {
         setGstVerified(true)
+      }
+      if (verifiedWhatsapp?.mobile_number) {
+        setWhatsappVerified(true)
       }
 
       setMounted(true)
@@ -604,6 +614,12 @@ export default function BusinessRegisterPage() {
       setMobileVerified(false)
       removeCookie("verified_business_mobile")
       setForm((prev) => ({ ...prev, primaryNumber: safeValue }))
+      return
+    }
+    if (key === "whatsappNumber") {
+      setWhatsappVerified(false)
+      removeCookie("verified_business_whatsapp")
+      setForm((prev) => ({ ...prev, whatsappNumber: safeValue }))
       return
     }
     if (key === "seanebId") {
@@ -769,6 +785,49 @@ export default function BusinessRegisterPage() {
     return true
   }
 
+  const sendBusinessWhatsappOtp = async () => {
+    const mobile = form.whatsappNumber.trim()
+    const selectedCountryCode = normalizeCountryCode(selectedCountry?.dialCode)
+
+    if (!mobile || whatsappLoading || whatsappVerified) return false
+
+    if (!MOBILE_REGEX.test(mobile)) {
+      setSubmitError("Enter a valid WhatsApp number to verify")
+      return false
+    }
+
+    const countryCode = selectedCountryCode || getResolvedCountryCode()
+
+    if (!countryCode) {
+      setSubmitError("Please select country code.")
+      return false
+    }
+
+    setCookie("otp_cc", countryCode, { maxAge: 60 * 60 * 24 * 7, path: "/" })
+    setJsonCookie(
+      "otp_context",
+      {
+        country_code: countryCode,
+        mobile_number: mobile,
+        via: OTP_VIA_WHATSAPP,
+        purpose: PURPOSE_BUSINESS_MOBILE_VERIFY,
+        redirect_to: "/auth/business-register",
+      },
+      { maxAge: 300, path: "/" }
+    )
+
+    await sendOtp({ via: OTP_VIA_WHATSAPP, disableFallback: true })
+
+    setMobileOtpVia(OTP_VIA_WHATSAPP)
+    setOtpValue("")
+    setOtpClearSignal((value) => value + 1)
+    setOtpModalType("whatsapp")
+    setOtpModalTarget(`+${countryCode} ${mobile}`)
+    setOtpResendCooldown(RESEND_COOLDOWN_SECONDS)
+    setOtpModalOpen(true)
+    return true
+  }
+
   const handleMobileVerify = async () => {
     try {
       setMobileLoading(true)
@@ -778,6 +837,18 @@ export default function BusinessRegisterPage() {
       setSubmitError("Failed to send mobile OTP. Please try again.")
     } finally {
       setMobileLoading(false)
+    }
+  }
+
+  const handleWhatsappVerify = async () => {
+    try {
+      setWhatsappLoading(true)
+      setSubmitError("")
+      await sendBusinessWhatsappOtp()
+    } catch (err) {
+      setSubmitError("Failed to send WhatsApp OTP. Please try again.")
+    } finally {
+      setWhatsappLoading(false)
     }
   }
 
@@ -822,6 +893,21 @@ export default function BusinessRegisterPage() {
         }
         setMobileVerified(true)
         setMobileEditCooldown(VERIFIED_EDIT_COOLDOWN_SECONDS)
+      } else if (otpModalType === "whatsapp") {
+        await verifyOtpAndLogin({ otp: otpValue })
+        const ctx = getJsonCookie("otp_context")
+        if (ctx?.mobile_number && ctx?.country_code) {
+          setJsonCookie(
+            "verified_business_whatsapp",
+            {
+              country_code: String(ctx.country_code),
+              mobile_number: String(ctx.mobile_number),
+            },
+            { maxAge: 60 * 60 * 24 * 7, path: "/" }
+          )
+        }
+        setWhatsappVerified(true)
+        setWhatsappEditCooldown(VERIFIED_EDIT_COOLDOWN_SECONDS)
       }
 
       removeCookie("otp_context")
@@ -848,6 +934,12 @@ export default function BusinessRegisterPage() {
     removeCookie("verified_business_mobile")
   }
 
+  const handleEnableWhatsappEdit = () => {
+    if (whatsappEditCooldown > 0) return
+    setWhatsappVerified(false)
+    removeCookie("verified_business_whatsapp")
+  }
+
   const handleEnableEmailEdit = () => {
     if (emailEditCooldown > 0) return
     setEmailVerified(false)
@@ -867,6 +959,8 @@ export default function BusinessRegisterPage() {
       } else if (otpModalType === "mobile") {
         const channel = channelOverride === OTP_VIA_WHATSAPP ? OTP_VIA_WHATSAPP : OTP_VIA_SMS
         await sendBusinessMobileOtp(channel)
+      } else if (otpModalType === "whatsapp") {
+        await sendBusinessWhatsappOtp()
       }
       setOtpResendCooldown(RESEND_COOLDOWN_SECONDS)
     } catch (err) {
@@ -952,6 +1046,7 @@ export default function BusinessRegisterPage() {
     const primaryNumber = form.primaryNumber.trim()
     const whatsappNumber = form.whatsappNumber.trim()
     const effectiveWhatsappNumber = whatsappNumber || primaryNumber
+    const businessWebsite = form.businessWebsite.trim()
     const businessEmail = form.businessEmail.trim()
     const pan = form.pan.trim().toUpperCase()
     const gstin = form.gstin.trim().toUpperCase()
@@ -1044,6 +1139,7 @@ export default function BusinessRegisterPage() {
           seaneb_id: form.seanebId.trim(),
           primary_number: primaryNumber,
           whatsapp_number: effectiveWhatsappNumber,
+          business_website: businessWebsite || undefined,
           business_email: businessEmail || undefined,
           about_branch: form.aboutBranch.trim() || "Head office branch",
           address: form.businessLocation.trim(),
@@ -1532,7 +1628,7 @@ export default function BusinessRegisterPage() {
               </Field>
 
               <Field label="WhatsApp Number" hint="Optional. Leave blank to use the primary number." className="business-contact-grid-whatsapp">
-                <div className="business-phone-row business-phone-row--single-action">
+                <div className="business-phone-row">
                   <CountryCodePicker
                     value={selectedCountry}
                     options={COUNTRY_OPTIONS}
@@ -1541,13 +1637,38 @@ export default function BusinessRegisterPage() {
                   <div className="business-phone-input-wrap">
                     <input
                       type="text"
-                      className="business-form-input"
+                      className={`business-form-input ${whatsappVerified ? "border-emerald-300 bg-emerald-50" : ""}`}
                       value={form.whatsappNumber}
+                      disabled={whatsappVerified}
                       onChange={(e) => setField("whatsappNumber", e.target.value.replace(/\D/g, ""))}
                       placeholder="Enter WhatsApp number"
                     />
                   </div>
+                  <button
+                    type="button"
+                    onClick={whatsappVerified ? handleEnableWhatsappEdit : handleWhatsappVerify}
+                    disabled={whatsappLoading || (!whatsappVerified && !form.whatsappNumber.trim()) || (whatsappVerified && whatsappEditCooldown > 0)}
+                    className="business-inline-action-btn"
+                  >
+                    {whatsappLoading ? "Sending..." : whatsappVerified ? "Edit" : "Verify"}
+                  </button>
                 </div>
+                {!whatsappVerified && form.whatsappNumber.trim() && (
+                  <p className="business-verify-note">OTP will be sent on WhatsApp to this number.</p>
+                )}
+                {whatsappVerified && whatsappEditCooldown > 0 && (
+                  <p className="business-verify-note">Try to edit in {formatCooldown(whatsappEditCooldown)}</p>
+                )}
+              </Field>
+
+              <Field label="Business Website (Optional)" hint="Optional. Add your website URL if you have one." className="business-contact-grid-website">
+                <input
+                  type="url"
+                  className="business-form-input"
+                  value={form.businessWebsite}
+                  onChange={(e) => setField("businessWebsite", e.target.value)}
+                  placeholder="https://yourbusiness.com"
+                />
               </Field>
             </div>
           </section>
@@ -1683,11 +1804,19 @@ export default function BusinessRegisterPage() {
 
       <OtpVerificationModal
         open={otpModalOpen}
-        title={otpModalType === "email" ? "Verify Business Email" : "Verify Business Mobile"}
+        title={
+          otpModalType === "email"
+            ? "Verify Business Email"
+            : otpModalType === "whatsapp"
+              ? "Verify WhatsApp Number"
+              : "Verify Business Mobile"
+        }
         subtitle={
           otpModalType === "email"
             ? "Enter the 4-digit OTP sent to"
-            : `Enter the 4-digit OTP sent by ${getOtpChannelLabel(mobileOtpVia)}`
+            : otpModalType === "whatsapp"
+              ? "Enter the 4-digit OTP sent by WhatsApp"
+              : `Enter the 4-digit OTP sent by ${getOtpChannelLabel(mobileOtpVia)}`
         }
         targetLabel={otpModalTarget}
         helperText={
@@ -1695,6 +1824,8 @@ export default function BusinessRegisterPage() {
             ? mobileOtpVia === OTP_VIA_SMS
               ? "If the SMS does not arrive, wait for the timer to finish and resend the OTP on WhatsApp."
               : "We sent the OTP on WhatsApp to the same primary number."
+            : otpModalType === "whatsapp"
+              ? "We sent the OTP on WhatsApp to the number above."
             : "Use the code from your inbox to complete verification."
         }
         otp={otpValue}

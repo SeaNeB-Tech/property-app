@@ -477,7 +477,14 @@ article {
 }
 
 .business-contact-grid-whatsapp {
-  grid-column: 1 / -1;
+  grid-column: 1 / 2;
+  max-width: none;
+  justify-self: stretch;
+}
+
+.business-contact-grid-website {
+  grid-column: 2 / 3;
+  align-self: stretch;
 }
 
 .business-form-group {
@@ -799,6 +806,13 @@ article {
   .business-phone-row,
   .business-phone-row--single-action {
     grid-template-columns: 1fr;
+  }
+
+  .business-contact-grid-whatsapp,
+  .business-contact-grid-website {
+    grid-column: auto;
+    max-width: none;
+    justify-self: stretch;
   }
 
   .business-country-menu {

@@ -167,6 +167,7 @@ export const registerBusiness = async (data = {}) => {
     seaneb_id: toText(pickFirst(data.seaneb_id, data.seanebId)),
     primary_number: toText(pickFirst(data.primary_number, data.primaryNumber)),
     whatsapp_number: toText(pickFirst(data.whatsapp_number, data.whatsappNumber)),
+    business_website: toText(pickFirst(data.business_website, data.businessWebsite)),
     business_email: toText(pickFirst(data.business_email, data.businessEmail)),
     about_branch: toText(pickFirst(data.about_branch, data.aboutBranch, "Head office branch")),
     address: toText(pickFirst(data.address, data.business_location, data.businessLocation)),
