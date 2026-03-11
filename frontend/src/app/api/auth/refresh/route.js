@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
-import { getCookieOptions } from "@/lib/auth/cookieOptions";
-
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
 const REFRESH_COOKIE_NAME = "refresh_token_property";
 const REFRESH_COOKIE_KEYS = [
@@ -92,24 +90,6 @@ const readTokenFromPayload = (payload = {}, headers = null) => {
   ).trim();
 };
 
-const readRefreshTokenFromPayload = (payload = {}) => {
-  const data = payload?.data || {};
-  const tokenObj = data?.token || payload?.token || {};
-  return String(
-    payload?.refreshToken ||
-      payload?.refresh_token ||
-      payload?.session?.refreshToken ||
-      payload?.session?.refresh_token ||
-      payload?.data?.session?.refreshToken ||
-      payload?.data?.session?.refresh_token ||
-      data?.refreshToken ||
-      data?.refresh_token ||
-      tokenObj?.refreshToken ||
-      tokenObj?.refresh_token ||
-      ""
-  ).trim();
-};
-
 const readCsrfFromPayload = (payload = {}, headers = null) => {
   const data = payload?.data || {};
   return String(
@@ -192,56 +172,6 @@ const toCookieHeader = (request, refreshCookieValue) => {
     return `${REFRESH_COOKIE_NAME}=${refreshCookieValue}`;
   }
   return `${incomingCookie}; ${REFRESH_COOKIE_NAME}=${refreshCookieValue}`;
-};
-
-const setCookieByPayload = (
-  response,
-  payloadJson = {},
-  upstreamHeaders = null,
-  cookieOptions = { sameSite: "Lax", secure: false }
-) => {
-  const domain = cookieOptions?.domain || "";
-  const expiresIn = readExpiresInFromPayload(payloadJson);
-  const accessToken = readTokenFromPayload(payloadJson, upstreamHeaders);
-  const refreshToken =
-    readRefreshTokenFromPayload(payloadJson) ||
-    readCookieValueFromSetCookie(upstreamHeaders, [
-      "refresh_token_property",
-      "refresh_token",
-      "refreshToken",
-      "refreshToken_property",
-      "property_refresh_token",
-    ]);
-  const csrfToken =
-    readCsrfFromPayload(payloadJson, upstreamHeaders) ||
-    readCookieValueFromSetCookie(upstreamHeaders, [
-      "csrf_token_property",
-      "csrf_token",
-    ]);
-
-  if (refreshToken) {
-    response.cookies.set({
-      name: REFRESH_COOKIE_NAME,
-      value: refreshToken,
-      httpOnly: true,
-      sameSite: cookieOptions.sameSite,
-      secure: cookieOptions.secure,
-      ...(domain ? { domain } : {}),
-      path: "/",
-    });
-  }
-
-  if (csrfToken) {
-    response.cookies.set({
-      name: "csrf_token_property",
-      value: csrfToken,
-      httpOnly: false,
-      sameSite: cookieOptions.sameSite,
-      secure: cookieOptions.secure,
-      ...(domain ? { domain } : {}),
-      path: "/",
-    });
-  }
 };
 
 const doRefreshRequest = async ({
@@ -406,8 +336,6 @@ export async function POST(request) {
     if (accessToken) {
       response.headers.set("authorization", `Bearer ${accessToken}`);
     }
-    setCookieByPayload(response, payloadJson, upstreamResponse.headers, getCookieOptions(request));
-    response.cookies.delete("access_token");
     return response;
   }
 

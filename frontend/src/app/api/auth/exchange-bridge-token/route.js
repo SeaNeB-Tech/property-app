@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
-import { getCookieOptions } from "@/lib/auth/cookieOptions";
-
 const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
   const getSetCookie = upstreamHeaders?.getSetCookie;
   if (typeof getSetCookie === "function") {
@@ -25,163 +23,6 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
   for (const cookie of splitCookies) {
     if (/^\s*access_token=/i.test(cookie)) continue;
     targetHeaders.append("set-cookie", cookie);
-  }
-};
-
-const readAccessTokenFromPayload = (payload = {}, headers = null) => {
-  const data = payload?.data || {};
-  const tokenObj =
-    data?.token ||
-    payload?.token ||
-    payload?.session?.token ||
-    payload?.data?.session?.token ||
-    payload?.result?.token ||
-    payload?.payload?.token ||
-    {};
-  const headerAuth = String(
-    headers?.get("authorization") ||
-      headers?.get("Authorization") ||
-      ""
-  ).trim();
-  const responseHeaderToken = /^bearer\s+/i.test(headerAuth)
-    ? headerAuth.replace(/^bearer\s+/i, "").trim()
-    : headerAuth;
-
-  return String(
-    payload?.accessToken ||
-      payload?.access_token ||
-      data?.accessToken ||
-      data?.access_token ||
-      tokenObj?.accessToken ||
-      tokenObj?.access_token ||
-      tokenObj?.token ||
-      tokenObj?.jwt ||
-      payload?.jwt ||
-      data?.jwt ||
-      responseHeaderToken ||
-      ""
-  ).trim();
-};
-
-const readRefreshTokenFromPayload = (payload = {}) => {
-  const data = payload?.data || {};
-  const tokenObj =
-    data?.token ||
-    payload?.token ||
-    payload?.session?.token ||
-    payload?.data?.session?.token ||
-    payload?.result?.token ||
-    payload?.payload?.token ||
-    {};
-  return String(
-    payload?.refreshToken ||
-      payload?.refresh_token ||
-      payload?.session?.refreshToken ||
-      payload?.session?.refresh_token ||
-      payload?.data?.session?.refreshToken ||
-      payload?.data?.session?.refresh_token ||
-      data?.refreshToken ||
-      data?.refresh_token ||
-      tokenObj?.refreshToken ||
-      tokenObj?.refresh_token ||
-      ""
-  ).trim();
-};
-
-const readCsrfFromPayload = (payload = {}, headers = null) => {
-  const data = payload?.data || {};
-  return String(
-    payload?.csrfToken ||
-      payload?.csrf_token ||
-      data?.csrfToken ||
-      data?.csrf_token ||
-      headers?.get("x-csrf-token") ||
-      headers?.get("csrf-token") ||
-      headers?.get("x-xsrf-token") ||
-      ""
-  ).trim();
-};
-
-const readExpiresInFromPayload = (payload = {}) => {
-  const data = payload?.data || {};
-  const value = payload?.expiresIn ?? payload?.expires_in ?? data?.expiresIn ?? data?.expires_in;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : null;
-};
-
-const getSetCookieLines = (headers) => {
-  const getSetCookie = headers?.getSetCookie;
-  if (typeof getSetCookie === "function") {
-    return (getSetCookie.call(headers) || []).filter(Boolean);
-  }
-  const combined = String(headers?.get("set-cookie") || "").trim();
-  if (!combined) return [];
-  return combined
-    .split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/g)
-    .map((item) => item.trim())
-    .filter(Boolean);
-};
-
-const readCookieValueFromSetCookie = (headers, keys = []) => {
-  const allowed = new Set((keys || []).map((key) => String(key || "").trim()).filter(Boolean));
-  if (!allowed.size) return "";
-  for (const line of getSetCookieLines(headers)) {
-    const firstSemi = line.indexOf(";");
-    const firstPart = (firstSemi >= 0 ? line.slice(0, firstSemi) : line).trim();
-    const eq = firstPart.indexOf("=");
-    if (eq < 0) continue;
-    const name = firstPart.slice(0, eq).trim();
-    const value = firstPart.slice(eq + 1).trim();
-    if (!name || !value) continue;
-    if (allowed.has(name)) return value;
-  }
-  return "";
-};
-
-const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null, cookieOptions = { sameSite: "Lax", secure: false }) => {
-  const domain = cookieOptions?.domain || "";
-  const accessToken = readAccessTokenFromPayload(payload, upstreamHeaders);
-  const refreshToken =
-    readRefreshTokenFromPayload(payload) ||
-    readCookieValueFromSetCookie(upstreamHeaders, [
-      "refresh_token_property",
-      "refresh_token",
-      "refreshToken",
-      "refreshToken_property",
-      "property_refresh_token",
-    ]);
-  const csrfToken =
-    readCsrfFromPayload(payload, upstreamHeaders) ||
-    readCookieValueFromSetCookie(upstreamHeaders, [
-      "csrf_token_property",
-      "csrf_token",
-    ]);
-  const expiresIn = readExpiresInFromPayload(payload);
-
-  if (refreshToken) {
-    response.cookies.set({
-      name: "refresh_token_property",
-      value: refreshToken,
-      httpOnly: true,
-      sameSite: cookieOptions.sameSite,
-      secure: cookieOptions.secure,
-      ...(domain ? { domain } : {}),
-      path: "/",
-    });
-  }
-
-  if (csrfToken) {
-    const csrfMaxAge = Number(process.env.NEXT_PUBLIC_CSRF_MAX_AGE || expiresIn || 60 * 60 * 24 * 30);
-    response.cookies.set({
-      name: "csrf_token_property",
-      value: csrfToken,
-      httpOnly: false,
-      sameSite: cookieOptions.sameSite,
-      secure: cookieOptions.secure,
-      ...(domain ? { domain } : {}),
-      path: "/",
-      maxAge: csrfMaxAge,
-    });
   }
 };
 
@@ -301,9 +142,7 @@ export async function POST(req) {
       if (upstream.ok || ![404, 405].includes(Number(upstream.status || 0))) {
         const response = NextResponse.json(data, { status: upstream.status, headers: responseHeaders });
         if (upstream.ok) {
-          setAuthCookiesByPayload(response, data, upstream.headers, getCookieOptions(req));
-          response.cookies.delete("access_token");
-          console.log("[SSO Exchange] Success - setting auth cookies");
+          console.log("[SSO Exchange] Success - relaying upstream cookies");
         }
         return response;
       }

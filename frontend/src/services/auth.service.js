@@ -5,6 +5,7 @@ import {
   setInMemoryCsrfToken,
 } from "@/lib/api/client";
 import { authStore } from "@/app/auth/auth-service/store/authStore";
+import { route } from "./route";
 
 const AUTH_CHANGE_EVENT = "seaneb:auth-changed";
 
@@ -57,7 +58,7 @@ export const clearPanelAuthSession = () => {
 export const logoutPanelSession = async () => {
   let canClearClientState = false;
   try {
-    await authApi.post("/v1/logout", {}, { skipAuthRedirect: true });
+    await authApi.post(`${route?.logout?.url}`, {}, { skipAuthRedirect: true });
     canClearClientState = true;
   } catch (error) {
     const status = Number(error?.response?.status || 0);
