@@ -23,17 +23,26 @@ const isIpHost = (host) => {
   return isIpv4 || isIpv6;
 };
 
-const resolveCookieDomain = (request) => {
-  const envDomain = sanitizeCookieDomain(process.env.NEXT_PUBLIC_COOKIE_DOMAIN || "");
-  if (!envDomain) return "";
+const isLocalHost = (host) => {
+  if (!host) return false;
+  const value = String(host || "").trim().toLowerCase();
+  return value === "localhost" || value.endsWith(".local") || isIpHost(value);
+};
 
-  const host = String(request?.headers?.get?.("host") || "")
+const readHost = (request) =>
+  String(request?.headers?.get?.("host") || "")
     .trim()
     .toLowerCase()
     .replace(/:\d+$/, "");
 
+const resolveCookieDomain = (request) => {
+  const envDomain = sanitizeCookieDomain(process.env.NEXT_PUBLIC_COOKIE_DOMAIN || "");
+  if (!envDomain) return "";
+
+  const host = readHost(request);
+
   if (!host) return envDomain;
-  if (host === "localhost" || host.endsWith(".local") || isIpHost(host)) return "";
+  if (isLocalHost(host)) return "";
 
   const bareEnv = envDomain.startsWith(".") ? envDomain.slice(1) : envDomain;
   if (host === bareEnv || host.endsWith(`.${bareEnv}`)) {
@@ -45,11 +54,16 @@ const resolveCookieDomain = (request) => {
 
 export const getCookieOptions = (request) => {
   const proto = readProto(request);
+  const host = readHost(request);
   const isHttp = proto.startsWith("http") && !proto.startsWith("https");
+  const forceSecure =
+    process.env.NODE_ENV === "production" &&
+    host &&
+    !isLocalHost(host);
+  const secure = forceSecure ? true : !isHttp;
   return {
-    sameSite: isHttp ? "Lax" : "None",
-    secure: !isHttp,
+    sameSite: secure ? "None" : "Lax",
+    secure,
     domain: resolveCookieDomain(request),
   };
 };
-
