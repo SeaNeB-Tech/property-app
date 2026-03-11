@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import Image from "next/image"
 import phoneCodes from "@/constants/phoneCodes.json"
 import {
@@ -243,8 +243,6 @@ const redirectToBusinessRegisterLogin = (router) => {
 
 export default function BusinessRegisterPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const forceRegister = searchParams?.get("force") === "1"
   const [language, setLanguage] = useState(() => {
     if (typeof window !== "undefined") {
       const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
@@ -389,6 +387,9 @@ export default function BusinessRegisterPage() {
     const init = async () => {
       const profileCompleted = getCookie("profile_completed")
       const hasSession = await ensureSessionReady()
+      const forceRegister =
+        typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("force") === "1"
 
       if (!hasSession) {
         // Allow business registration page to be accessed by guests.
@@ -560,7 +561,7 @@ export default function BusinessRegisterPage() {
     }
 
     init()
-  }, [forceRegister, router])
+  }, [router])
 
   useEffect(() => {
     const fromSession = getResolvedCountryCode()
