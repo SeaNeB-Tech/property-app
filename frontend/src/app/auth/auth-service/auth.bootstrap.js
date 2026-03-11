@@ -138,20 +138,26 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
 
   inFlightEnsureSessionPromise = (async () => {
     try {
-      const sessionHint = await requestSessionHint();
 
-      const hasRefreshSession = Boolean(sessionHint?.hasRefreshSession);
-
+      // Fast-path: if there are no client-side hints of a session (in-memory
+      // access token or a client-readable CSRF cookie) skip the server probe
+      // and return quickly - but only when this is not a forced probe. When
+      // `force` is true, always ask the server for the session hint so callers
+      // (e.g., post-registration flows) can rehydrate the session.
       const hasAccessToken = Boolean(
         String(getInMemoryAccessToken() || "").trim()
       );
 
       const hasCsrfCookie = hasCsrfTokenCookie();
 
-      if (!hasRefreshSession && !hasAccessToken && !hasCsrfCookie) {
+      if (!force && !hasAccessToken && !hasCsrfCookie) {
         lastFailureAt = Date.now();
         return false;
       }
+
+      // If client hints exist, ask the server whether a refresh session exists.
+      const sessionHint = await requestSessionHint();
+      const hasRefreshSession = Boolean(sessionHint?.hasRefreshSession);
 
       const hydrateTokenFromRefresh = async () => {
         try {

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import phoneCodes from "@/constants/phoneCodes.json"
 import {
@@ -20,7 +20,7 @@ import {
 } from "@/app/auth/auth-service/business.service"
 import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.service"
 import { sendOtp } from "@/app/auth/auth-service/otp.service"
-import { verifyOtpAndLogin } from "@/app/auth/auth-service/authservice"
+import { verifyOtpAndLogin, waitForAuthCookies } from "@/app/auth/auth-service/authservice"
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
 import { hydrateAuthSession } from "@/lib/api/client"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
@@ -243,6 +243,8 @@ const redirectToBusinessRegisterLogin = (router) => {
 
 export default function BusinessRegisterPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const forceRegister = searchParams?.get("force") === "1"
   const [language, setLanguage] = useState(() => {
     if (typeof window !== "undefined") {
       const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
@@ -389,20 +391,22 @@ export default function BusinessRegisterPage() {
       const hasSession = await ensureSessionReady()
 
       if (!hasSession) {
-        redirectToBusinessRegisterLogin(router)
-        return
-      }
-      if (profileCompleted !== "true" && hasSession) {
-        setCookie("profile_completed", "true", {
-          maxAge: 60 * 60 * 24 * 30,
-          path: "/",
-        })
+        // Allow business registration page to be accessed by guests.
+        // Continue initialization without forcing login redirect.
+        console.info("[business-register] no session detected; continuing as guest")
+      } else {
+        if (profileCompleted !== "true") {
+          setCookie("profile_completed", "true", {
+            maxAge: 60 * 60 * 24 * 30,
+            path: "/",
+          })
+        }
       }
 
       // If business was already registered earlier, do not show registration again.
       const hasBusinessCookie = getCookie("business_registered") === "true"
       const existingBranchId = String(getCookie("branch_id") || "").trim()
-      if (hasBusinessCookie || existingBranchId) {
+      if ((hasBusinessCookie || existingBranchId) && !forceRegister) {
         router.replace("/dashboard/broker")
         return
       }
@@ -556,7 +560,7 @@ export default function BusinessRegisterPage() {
     }
 
     init()
-  }, [router])
+  }, [forceRegister, router])
 
   useEffect(() => {
     const fromSession = getResolvedCountryCode()
@@ -670,7 +674,19 @@ export default function BusinessRegisterPage() {
   }, [debouncedBusinessName])
 
   const ensureAuthSessionReady = async () => {
-    return ensureSessionReady({ force: true })
+    const ready = await ensureSessionReady({ force: true })
+    if (ready) return true
+
+    try {
+      const waitResult = await waitForAuthCookies()
+      if (waitResult?.ok) {
+        return ensureSessionReady({ force: true })
+      }
+    } catch {
+      // ignore cookie wait failures
+    }
+
+    return false
   }
 
   const handleEmailVerify = async () => {
@@ -1071,10 +1087,21 @@ export default function BusinessRegisterPage() {
               data?.access_token || data?.accessToken || data?.token || data?.jwt || ""
             ).trim()
 
+            // Also prefer CSRF token from headers or body if present
+            const headerCsrf = String(
+              headers?.["x-csrf-token"] || headers?.["x-xsrf-token"] || headers?.["x-csrf_token"] || headers?.["x-csrf"] || ""
+            ).trim()
+
+            const bodyCsrf = String(
+              data?.csrf_token || data?.csrfToken || data?.csrf || ""
+            ).trim()
+
             const finalToken = headerToken || bodyToken || ""
-            if (finalToken) {
+            const finalCsrf = headerCsrf || bodyCsrf || ""
+
+            if (finalToken || finalCsrf) {
               try {
-                hydrateAuthSession({ accessToken: finalToken, broadcast: true })
+                hydrateAuthSession({ accessToken: finalToken, csrfToken: finalCsrf, broadcast: true })
               } catch (e) {
                 // ignore
               }
@@ -1127,6 +1154,12 @@ export default function BusinessRegisterPage() {
           let sessionHydrated = false
           try {
             sessionHydrated = await ensureSessionReady({ force: true })
+            if (!sessionHydrated) {
+              const waitResult = await waitForAuthCookies()
+              if (waitResult?.ok) {
+                sessionHydrated = await ensureSessionReady({ force: true })
+              }
+            }
           } catch (e) {
             console.warn("[business-register] ensureSessionReady failed after registration:", e)
             sessionHydrated = false
@@ -1240,6 +1273,12 @@ export default function BusinessRegisterPage() {
                 let recoveredSession = false
                 try {
                   recoveredSession = await ensureSessionReady({ force: true })
+                  if (!recoveredSession) {
+                    const waitResult = await waitForAuthCookies()
+                    if (waitResult?.ok) {
+                      recoveredSession = await ensureSessionReady({ force: true })
+                    }
+                  }
                 } catch {
                   recoveredSession = false
                 }

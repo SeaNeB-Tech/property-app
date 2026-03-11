@@ -6,13 +6,11 @@ import { useAuth } from "@/lib/auth/AuthContext";
 import { getAuthLoginUrl } from "@/lib/core/appUrls";
 
 const AUTH_GRACE_MS = 5000;
-const AUTH_RETRY_INTERVAL_MS = 500;
 
-const hasAuthCookies = () => {
-  if (typeof document === "undefined") return false;
-  const source = String(document.cookie || "").toLowerCase();
-  return source.includes("csrf_token_property=") || source.includes("refresh_token_property=");
-};
+// NOTE: we avoid peeking at `document.cookie` here. Relying on client-visible
+// cookies is brittle (httpOnly cookies are invisible to JS) and leads to race
+// conditions and redirect loops. Instead, call `restoreSession()` once and
+// let the server-side session hint endpoints determine refresh availability.
 
 export default function RequireAuth({
   children,
@@ -25,49 +23,22 @@ export default function RequireAuth({
 } = {}) {
   const router = useRouter();
   const { authInitialized, isAuthenticated, isLoading, restoreSession } = useAuth();
-  const [retrying, setRetrying] = useState(false);
-  const graceTimerRef = useRef(null);
-  const retryIntervalRef = useRef(null);
+  const [attemptedRestore, setAttemptedRestore] = useState(false);
 
   useEffect(() => {
     if (!authInitialized || isLoading) return;
     if (isAuthenticated) return;
-    if (retrying) return;
+    if (attemptedRestore) return;
 
-    setRetrying(true);
+    setAttemptedRestore(true);
+
     const tryRestore = async () => {
+      // Try restoring session once. If it fails, redirect to login preserving
+      // a returnTo param so the user can come back after authenticating.
       const restored = await restoreSession?.();
       if (restored) return;
+
       const fallback = String(redirectTo || "/auth/login");
-
-      if (hasAuthCookies()) {
-        const start = Date.now();
-        retryIntervalRef.current = setInterval(async () => {
-          const retried = await restoreSession?.();
-          if (retried) {
-            if (retryIntervalRef.current) clearInterval(retryIntervalRef.current);
-            retryIntervalRef.current = null;
-            return;
-          }
-
-          if (Date.now() - start < AUTH_GRACE_MS) return;
-
-          if (retryIntervalRef.current) clearInterval(retryIntervalRef.current);
-          retryIntervalRef.current = null;
-
-          if (fallback === "/auth/login" && typeof window !== "undefined") {
-            router.replace(
-              getAuthLoginUrl({
-                returnTo: window.location.href,
-                source: "main-app",
-              })
-            );
-            return;
-          }
-          router.replace(fallback);
-        }, AUTH_RETRY_INTERVAL_MS);
-        return;
-      }
 
       if (fallback === "/auth/login" && typeof window !== "undefined") {
         router.replace(
@@ -78,18 +49,12 @@ export default function RequireAuth({
         );
         return;
       }
+
       router.replace(fallback);
     };
 
     void tryRestore();
-  }, [authInitialized, isAuthenticated, isLoading, redirectTo, router, restoreSession, retrying]);
-
-  useEffect(() => {
-    return () => {
-      if (graceTimerRef.current) clearTimeout(graceTimerRef.current);
-      if (retryIntervalRef.current) clearInterval(retryIntervalRef.current);
-    };
-  }, []);
+  }, [authInitialized, isAuthenticated, isLoading, redirectTo, router, restoreSession, attemptedRestore]);
 
   if (!authInitialized || isLoading) return fallback;
   if (!isAuthenticated) return fallback;

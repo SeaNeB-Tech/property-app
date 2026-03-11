@@ -217,6 +217,7 @@ const readCookieValueFromSetCookie = (headers, keys = []) => {
 };
 
 const setAuthCookiesByPayload = (response, payload = {}, headers = null, cookieOptions = { sameSite: "Lax", secure: false }) => {
+  const domain = cookieOptions?.domain || "";
   const accessToken = readAccessTokenFromPayload(payload, headers);
   const refreshToken =
     readRefreshTokenFromPayload(payload) ||
@@ -242,6 +243,7 @@ const setAuthCookiesByPayload = (response, payload = {}, headers = null, cookieO
       httpOnly: true,
       sameSite: cookieOptions.sameSite,
       secure: cookieOptions.secure,
+      ...(domain ? { domain } : {}),
       path: "/",
     });
   }
@@ -252,6 +254,7 @@ const setAuthCookiesByPayload = (response, payload = {}, headers = null, cookieO
       httpOnly: false,
       sameSite: cookieOptions.sameSite,
       secure: cookieOptions.secure,
+      ...(domain ? { domain } : {}),
       path: "/",
     });
   }
@@ -400,6 +403,7 @@ export async function GET(request) {
               httpOnly: true,
               sameSite: cookieOptions.sameSite,
               secure: cookieOptions.secure,
+              ...(cookieOptions?.domain ? { domain: cookieOptions.domain } : {}),
               path: "/",
             });
           }

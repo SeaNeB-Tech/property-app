@@ -66,6 +66,8 @@ const hasSessionCookie = (request) => {
   return hasAnyCookie(request, REFRESH_COOKIE_KEYS);
 };
 const hasCsrfCookie = (request) => hasAnyCookie(request, CSRF_COOKIE_KEYS);
+const hasPostOtpVerified = (request) =>
+  hasAnyCookie(request, ["post_otp_verified"]);
 
 const getSafeInternalReturnPath = (request) => {
   const returnTo = String(request.nextUrl.searchParams.get("returnTo") || "").trim();
@@ -177,6 +179,9 @@ export async function middleware(request) {
   }
 
   if (pathname === "/auth/complete-profile" && !hasSession) {
+    if (hasPostOtpVerified(request)) {
+      return NextResponse.next();
+    }
     const loginUrl = new URL("/auth/login", request.url);
     loginUrl.searchParams.set("returnTo", request.nextUrl.href);
     return NextResponse.redirect(loginUrl);

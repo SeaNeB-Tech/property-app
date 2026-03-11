@@ -326,6 +326,7 @@ const readCookieValueFromSetCookie = (headers, keys = []) => {
 const buildSetCookieHeader = ({
   secure = false,
   sameSite = secure ? "None" : "Lax",
+  domain = "",
   name,
   value,
   httpOnly = false,
@@ -335,6 +336,7 @@ const buildSetCookieHeader = ({
   const safeValue = encodeURIComponent(String(value || "").trim());
   if (!safeName || !safeValue) return "";
   const parts = [`${safeName}=${safeValue}`, "Path=/", `SameSite=${sameSite}`];
+  if (domain) parts.push(`Domain=${domain}`);
   if (httpOnly) parts.push("HttpOnly");
   if (secure) parts.push("Secure");
   if (typeof maxAge === "number" && Number.isFinite(maxAge) && maxAge > 0) {
@@ -350,6 +352,8 @@ const shouldHydrateAuthCookies = (segments = []) => {
   return (
     key === "auth/refresh" ||
     key === "auth/login" ||
+    key === "v1/user/signup" ||
+    key === "user/signup" ||
     key === "otp/verify-otp" ||
     key === "auth/verify-otp" ||
     key === "auth/otp/verify" ||
@@ -403,6 +407,7 @@ const toProxyResponse = async (upstreamResponse, pathSegments = [], request = nu
       const cookie = buildSetCookieHeader({
         secure: cookieOptions.secure,
         sameSite: cookieOptions.sameSite,
+        domain: cookieOptions.domain,
         name: "refresh_token_property",
         value: refreshToken,
         httpOnly: true,
@@ -420,6 +425,7 @@ const toProxyResponse = async (upstreamResponse, pathSegments = [], request = nu
       const cookie = buildSetCookieHeader({
         secure: cookieOptions.secure,
         sameSite: cookieOptions.sameSite,
+        domain: cookieOptions.domain,
         name: "csrf_token_property",
         value: csrfToken,
         httpOnly: false,

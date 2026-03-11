@@ -139,6 +139,7 @@ const readCookieValueFromSetCookie = (headers, keys = []) => {
 };
 
 const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null, cookieOptions = { sameSite: "Lax", secure: false }) => {
+  const domain = cookieOptions?.domain || "";
   const accessToken = readAccessTokenFromPayload(payload, upstreamHeaders);
   const refreshToken =
     readRefreshTokenFromPayload(payload) ||
@@ -164,6 +165,7 @@ const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null,
       httpOnly: true,
       sameSite: cookieOptions.sameSite,
       secure: cookieOptions.secure,
+      ...(domain ? { domain } : {}),
       path: "/",
     });
   }
@@ -176,6 +178,7 @@ const setAuthCookiesByPayload = (response, payload = {}, upstreamHeaders = null,
       httpOnly: false,
       sameSite: cookieOptions.sameSite,
       secure: cookieOptions.secure,
+      ...(domain ? { domain } : {}),
       path: "/",
       maxAge: csrfMaxAge,
     });

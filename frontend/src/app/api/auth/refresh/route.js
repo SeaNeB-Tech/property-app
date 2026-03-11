@@ -200,6 +200,7 @@ const setCookieByPayload = (
   upstreamHeaders = null,
   cookieOptions = { sameSite: "Lax", secure: false }
 ) => {
+  const domain = cookieOptions?.domain || "";
   const expiresIn = readExpiresInFromPayload(payloadJson);
   const accessToken = readTokenFromPayload(payloadJson, upstreamHeaders);
   const refreshToken =
@@ -225,6 +226,7 @@ const setCookieByPayload = (
       httpOnly: true,
       sameSite: cookieOptions.sameSite,
       secure: cookieOptions.secure,
+      ...(domain ? { domain } : {}),
       path: "/",
     });
   }
@@ -236,6 +238,7 @@ const setCookieByPayload = (
       httpOnly: false,
       sameSite: cookieOptions.sameSite,
       secure: cookieOptions.secure,
+      ...(domain ? { domain } : {}),
       path: "/",
     });
   }

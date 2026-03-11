@@ -195,6 +195,7 @@ const setAuthCookies = (
   response,
   { refreshToken, csrfToken, cookieOptions = { sameSite: "Lax", secure: false } } = {}
 ) => {
+  const domain = cookieOptions?.domain || "";
   if (refreshToken) {
     response.cookies.set({
       name: "refresh_token_property",
@@ -202,6 +203,7 @@ const setAuthCookies = (
       httpOnly: true,
       sameSite: cookieOptions.sameSite,
       secure: cookieOptions.secure,
+      ...(domain ? { domain } : {}),
       path: "/",
     });
   }
@@ -213,6 +215,7 @@ const setAuthCookies = (
       httpOnly: false,
       sameSite: cookieOptions.sameSite,
       secure: cookieOptions.secure,
+      ...(domain ? { domain } : {}),
       path: "/",
       maxAge: csrfMaxAge,
     });
