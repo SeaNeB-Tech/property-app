@@ -246,11 +246,19 @@ const requestProfile = async ({
   csrfHeader,
   authorizationHeader,
   accessToken,
+  forwardedHeaders = {},
 }) => {
   const normalizedBase = String(base).replace(/\/+$/, "");
   const url = `${normalizedBase}${path}`;
   const headers = new Headers();
   headers.set("x-product-key", PRODUCT_KEY);
+  
+  if (forwardedHeaders["user-agent"]) headers.set("user-agent", forwardedHeaders["user-agent"]);
+  if (forwardedHeaders["x-forwarded-for"]) headers.set("x-forwarded-for", forwardedHeaders["x-forwarded-for"]);
+  if (forwardedHeaders["x-real-ip"]) headers.set("x-real-ip", forwardedHeaders["x-real-ip"]);
+  if (forwardedHeaders["origin"]) headers.set("origin", forwardedHeaders["origin"]);
+  if (forwardedHeaders["referer"]) headers.set("referer", forwardedHeaders["referer"]);
+
   if (cookieHeader) headers.set("cookie", cookieHeader);
   if (csrfHeader) headers.set("x-csrf-token", csrfHeader);
   if (authorizationHeader) {
@@ -267,7 +275,7 @@ const requestProfile = async ({
   });
 };
 
-const requestRefresh = async ({ base, cookieHeader, csrfHeader, includeCsrf = true }) => {
+const requestRefresh = async ({ base, cookieHeader, csrfHeader, includeCsrf = true, forwardedHeaders = {} }) => {
   const normalizedBase = String(base).replace(/\/+$/, "");
 
   for (const path of REFRESH_PATH_CANDIDATES) {
@@ -275,6 +283,13 @@ const requestRefresh = async ({ base, cookieHeader, csrfHeader, includeCsrf = tr
     const headers = new Headers();
     headers.set("content-type", "application/json");
     headers.set("x-product-key", PRODUCT_KEY);
+
+    if (forwardedHeaders["user-agent"]) headers.set("user-agent", forwardedHeaders["user-agent"]);
+    if (forwardedHeaders["x-forwarded-for"]) headers.set("x-forwarded-for", forwardedHeaders["x-forwarded-for"]);
+    if (forwardedHeaders["x-real-ip"]) headers.set("x-real-ip", forwardedHeaders["x-real-ip"]);
+    if (forwardedHeaders["origin"]) headers.set("origin", forwardedHeaders["origin"]);
+    if (forwardedHeaders["referer"]) headers.set("referer", forwardedHeaders["referer"]);
+
     if (cookieHeader) headers.set("cookie", cookieHeader);
     if (includeCsrf && csrfHeader) headers.set("x-csrf-token", csrfHeader);
 
@@ -300,6 +315,15 @@ const requestRefresh = async ({ base, cookieHeader, csrfHeader, includeCsrf = tr
 export async function GET(request) {
   const cookieContext = getCookieContext(request);
   const bases = getBaseCandidates();
+  
+  const forwardedHeaders = {
+    "user-agent": request.headers.get("user-agent") || "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "x-forwarded-for": request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "",
+    "x-real-ip": request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || "",
+    "origin": request.headers.get("origin") || request.headers.get("Host") || "",
+    "referer": request.headers.get("referer") || "",
+  };
+
   if (bases.length === 0) {
     return NextResponse.json(
       { error: { code: "UPSTREAM_PROFILE_UNAVAILABLE", message: "API base URL is not configured" } },
@@ -328,6 +352,7 @@ export async function GET(request) {
           csrfHeader: incomingCsrf,
           authorizationHeader: incomingAuthorization,
           accessToken: "",
+          forwardedHeaders,
         });
 
         lastResponse = response;
@@ -344,6 +369,7 @@ export async function GET(request) {
               cookieHeader: incomingCookie,
               csrfHeader: incomingCsrf,
               includeCsrf: true,
+              forwardedHeaders,
             })) ||
             (incomingCsrf
               ? await requestRefresh({
@@ -351,6 +377,7 @@ export async function GET(request) {
                   cookieHeader: incomingCookie,
                   csrfHeader: incomingCsrf,
                   includeCsrf: false,
+                  forwardedHeaders,
                 })
               : null);
 
@@ -370,6 +397,7 @@ export async function GET(request) {
               csrfHeader: csrfAfterRefresh,
               authorizationHeader: incomingAuthorization,
               accessToken: "",
+              forwardedHeaders,
             });
 
             const response = await copyResponse(retryProfile, responseHeaders, cookieContext);

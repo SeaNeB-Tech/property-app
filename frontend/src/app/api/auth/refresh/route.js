@@ -273,12 +273,20 @@ const doRefreshRequest = async ({
   requestBody,
   incomingCsrf,
   includeCsrf = true,
+  forwardedHeaders = {},
 }) => {
   const headers = new Headers();
   headers.set("content-type", "application/json");
   headers.set("x-product-key", PRODUCT_KEY);
   headers.delete("authorization");
   headers.delete("Authorization");
+  
+  if (forwardedHeaders["user-agent"]) headers.set("user-agent", forwardedHeaders["user-agent"]);
+  if (forwardedHeaders["x-forwarded-for"]) headers.set("x-forwarded-for", forwardedHeaders["x-forwarded-for"]);
+  if (forwardedHeaders["x-real-ip"]) headers.set("x-real-ip", forwardedHeaders["x-real-ip"]);
+  if (forwardedHeaders["origin"]) headers.set("origin", forwardedHeaders["origin"]);
+  if (forwardedHeaders["referer"]) headers.set("referer", forwardedHeaders["referer"]);
+  
   if (cookieHeader) headers.set("cookie", cookieHeader);
   if (includeCsrf && incomingCsrf) headers.set("x-csrf-token", incomingCsrf);
 
@@ -300,6 +308,15 @@ const doRefreshRequest = async ({
 export async function POST(request) {
   const cookieContext = getCookieContext(request);
   const upstreamCandidates = buildUpstreamCandidates();
+  
+  const forwardedHeaders = {
+    "user-agent": request.headers.get("user-agent") || "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "x-forwarded-for": request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "",
+    "x-real-ip": request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || "",
+    "origin": request.headers.get("origin") || request.headers.get("Host") || "",
+    "referer": request.headers.get("referer") || "",
+  };
+
   if (upstreamCandidates.length === 0) {
     return NextResponse.json(
       {
@@ -354,6 +371,7 @@ export async function POST(request) {
         requestBody,
         incomingCsrf,
         includeCsrf: true,
+        forwardedHeaders,
       });
     } catch (err) {
       lastNetworkError = err instanceof Error ? err : new Error("Refresh request failed");
@@ -369,6 +387,7 @@ export async function POST(request) {
           requestBody,
           incomingCsrf,
           includeCsrf: false,
+          forwardedHeaders,
         });
         if (noCsrfRetry.ok || ![401, 403].includes(Number(noCsrfRetry.status || 0))) {
           upstreamResponse = noCsrfRetry;
@@ -441,6 +460,12 @@ export async function POST(request) {
         error: {
           code: "INVALID_REFRESH_TOKEN",
           message: "Invalid refresh session",
+          _debug: {
+            url: upstreamResponse.url,
+            status: upstreamResponse.status,
+            host: cookieContext.host,
+            origin: forwardedHeaders["origin"]
+          }
         },
       },
       { status: 401, headers: responseHeaders }
