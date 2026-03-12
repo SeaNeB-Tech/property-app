@@ -10,7 +10,15 @@ const STORAGE_PREFIX = "property:volatile:";
 const volatileMemoryStore = new Map();
 const REAL_COOKIE_KEYS = new Set([
   "refresh_token_property",
+  "refresh_token",
+  "refreshtoken",
+  "refreshtoken_property",
+  "property_refresh_token",
   "csrf_token_property",
+  "csrf_token",
+  "csrftoken",
+  "xsrf-token",
+  "x-xsrf-token",
   // Server-visible marker to allow profile completion right after OTP verification.
   "post_otp_verified",
 ]);
@@ -27,7 +35,14 @@ if (isBrowser) {
     const authKeys = [
       "access_token",
       "refresh_token_property",
+      "refresh_token",
+      "refreshtoken",
+      "refreshToken",
       "csrf_token_property",
+      "csrf_token",
+      "csrfToken",
+      "xsrf-token",
+      "x-xsrf-token",
       "auth_session",
     ];
 
@@ -68,7 +83,13 @@ const isAuthCookieName = (name) => {
   if (!key) return false;
   return (
     key === "csrf_token_property" ||
+    key === "csrf_token" ||
+    key === "csrftoken" ||
+    key === "xsrf-token" ||
+    key === "x-xsrf-token" ||
     key === "refresh_token_property" ||
+    key === "refresh_token" ||
+    key === "refreshtoken" ||
     key === "access_token" ||
     key === "auth_session" ||
     key.startsWith("csrf_token_property") ||
@@ -232,11 +253,6 @@ if (isBrowser) {
 
 export const setCookie = (name, value, options = {}) => {
   if (!isBrowser) return;
-  if (isBlockedAuthCookieWrite(name)) {
-    // Auth cookies are backend-managed. Frontend must not write or cache them.
-    emitCookieChange(name);
-    return;
-  }
 
   if (!usesRealCookie(name)) {
     setVolatileValue(name, value, options);

@@ -11,12 +11,16 @@ const REFRESH_TOKEN_COOKIE_KEYS = [
   "refresh_token_property",
   "refresh_token",
   "refreshToken",
+  "refreshToken_property",
+  "property_refresh_token",
 ];
 
 const CSRF_COOKIE_KEYS = [
   "csrf_token_property",
   "csrf_token",
   "csrfToken",
+  "csrfToken_property",
+  "property_csrf_token",
 ];
 
 const logSafeMode = () => {

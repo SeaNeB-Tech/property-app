@@ -15,7 +15,15 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let inFlightEnsureSessionPromise = null;
 let lastFailureAt = 0;
 
-const CSRF_COOKIE_KEYS = ["csrf_token_property", "csrf_token", "csrfToken"];
+const CSRF_COOKIE_KEYS = [
+  "csrf_token_property",
+  "csrf_token",
+  "csrfToken",
+  "xsrf-token",
+  "x-xsrf-token",
+  "XSRF-TOKEN",
+  "X-XSRF-TOKEN",
+];
 
 const hasCsrfTokenCookie = () => {
   if (typeof document === "undefined") return false;
@@ -42,7 +50,12 @@ const readCsrfFromCookie = () => {
 
     const name = cookie.slice(0, idx).trim();
     if (CSRF_COOKIE_KEYS.includes(name)) {
-      return cookie.slice(idx + 1).trim();
+      const val = cookie.slice(idx + 1).trim();
+      try {
+        return decodeURIComponent(val);
+      } catch {
+        return val;
+      }
     }
   }
 
@@ -62,7 +75,11 @@ const buildAuthProbeHeaders = () => {
 
   if (csrfToken?.trim()) {
     headers.set("x-csrf-token", csrfToken.trim());
+    headers.set("x-xsrf-token", csrfToken.trim());
+    headers.set("csrf-token", csrfToken.trim());
   }
+
+  headers.set("x-product-key", PRODUCT_KEY);
 
   return headers;
 };
