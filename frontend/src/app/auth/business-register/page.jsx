@@ -22,7 +22,8 @@ import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.serv
 import { sendOtp } from "@/app/auth/auth-service/otp.service"
 import { verifyOtpAndLogin, waitForAuthCookies } from "@/app/auth/auth-service/authservice"
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
-import { hydrateAuthSession } from "@/lib/api/client"
+import { hydrateAuthSession, refreshAccessToken } from "@/lib/api/client"
+import { getAccessToken } from "@/lib/auth/tokenStorage"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
@@ -689,14 +690,32 @@ export default function BusinessRegisterPage() {
     }
   }, [debouncedBusinessName])
 
+  const hasAccessToken = () => Boolean(String(getAccessToken() || "").trim())
+
   const ensureAuthSessionReady = async () => {
     const ready = await ensureSessionReady({ force: true })
+    if (ready && !hasAccessToken()) {
+      try {
+        await refreshAccessToken()
+      } catch {
+        // ignore refresh failures; session may still be cookie-backed
+      }
+    }
+
     if (ready) return true
 
     try {
       const waitResult = await waitForAuthCookies()
       if (waitResult?.ok) {
-        return ensureSessionReady({ force: true })
+        const retried = await ensureSessionReady({ force: true })
+        if (retried && !hasAccessToken()) {
+          try {
+            await refreshAccessToken()
+          } catch {
+            // ignore refresh failures
+          }
+        }
+        return retried
       }
     } catch {
       // ignore cookie wait failures

@@ -21,6 +21,99 @@ const getCookieValueFromHeader = (cookieHeader, key) => {
   return "";
 };
 
+const getRequestHost = (request) =>
+  String(request?.headers?.get("x-forwarded-host") || request?.headers?.get("host") || "").trim();
+
+const getRequestProtocol = (request) => {
+  const forwarded = String(request?.headers?.get("x-forwarded-proto") || "").trim().toLowerCase();
+  if (forwarded) return forwarded;
+  return String(request?.nextUrl?.protocol || "").replace(":", "").trim().toLowerCase();
+};
+
+const getCookieContext = (request) => ({
+  host: getRequestHost(request),
+  isSecure: getRequestProtocol(request) === "https",
+});
+
+const normalizeHost = (host) => String(host || "").trim().replace(/:\d+$/, "").toLowerCase();
+
+const isIpHost = (host) => {
+  const value = normalizeHost(host);
+  if (!value) return false;
+  if (value.includes(":")) return true; // IPv6
+  return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(value);
+};
+
+const isLoopbackHost = (host) => {
+  const value = normalizeHost(host);
+  return value === "localhost" || value === "::1" || /^127(?:\.\d{1,3}){3}$/.test(value);
+};
+
+const domainMatchesHost = (domain, host) => {
+  const safeHost = normalizeHost(host);
+  const safeDomain = String(domain || "").trim().replace(/^\./, "").toLowerCase();
+  if (!safeHost || !safeDomain) return false;
+  return safeHost === safeDomain || safeHost.endsWith(`.${safeDomain}`);
+};
+
+const rewriteSetCookieForRequest = (cookie, context) => {
+  if (!context) return cookie;
+  const parts = String(cookie || "")
+    .split(";")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!parts.length) return cookie;
+
+  const nameValue = parts[0];
+  const attrs = [];
+  let domain = "";
+  let sameSite = "";
+  let hasSecure = false;
+
+  for (const attr of parts.slice(1)) {
+    const [rawKey, ...rest] = attr.split("=");
+    const key = String(rawKey || "").trim().toLowerCase();
+    const value = rest.join("=").trim();
+
+    if (key === "domain") {
+      domain = value;
+      continue;
+    }
+    if (key === "samesite") {
+      sameSite = value;
+      continue;
+    }
+    if (key === "secure") {
+      hasSecure = true;
+      continue;
+    }
+    attrs.push(attr);
+  }
+
+  const host = normalizeHost(context.host);
+  const dropDomain =
+    domain &&
+    (isIpHost(host) || isLoopbackHost(host) || !domainMatchesHost(domain, host));
+
+  if (domain && !dropDomain) {
+    attrs.push(`Domain=${domain}`);
+  }
+
+  let finalSameSite = sameSite;
+  if (!context.isSecure && String(sameSite || "").toLowerCase() === "none") {
+    finalSameSite = "Lax";
+  }
+  if (finalSameSite) {
+    attrs.push(`SameSite=${finalSameSite}`);
+  }
+
+  if (context.isSecure && hasSecure) {
+    attrs.push("Secure");
+  }
+
+  return [nameValue, ...attrs].join("; ");
+};
+
 const stripCookieKeysFromHeader = (cookieHeader, keys = []) => {
   const source = String(cookieHeader || "").trim();
   if (!source) return "";
@@ -37,14 +130,14 @@ const stripCookieKeysFromHeader = (cookieHeader, keys = []) => {
     .join("; ");
 };
 
-const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
+const appendSetCookieHeaders = (targetHeaders, upstreamHeaders, context = null) => {
   const getSetCookie = upstreamHeaders?.getSetCookie;
   if (typeof getSetCookie === "function") {
     const cookies = getSetCookie.call(upstreamHeaders) || [];
     for (const cookie of cookies) {
       if (!cookie) continue;
       if (/^\s*access_token=/i.test(cookie)) continue;
-      targetHeaders.append("set-cookie", cookie);
+      targetHeaders.append("set-cookie", rewriteSetCookieForRequest(cookie, context));
     }
     return;
   }
@@ -59,7 +152,7 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
 
   for (const cookie of splitCookies) {
     if (/^\s*access_token=/i.test(cookie)) continue;
-    targetHeaders.append("set-cookie", cookie);
+    targetHeaders.append("set-cookie", rewriteSetCookieForRequest(cookie, context));
   }
 };
 
@@ -155,9 +248,10 @@ const proxyJsonPost = async ({ request, upstreamPathCandidates = [] } = {}) => {
   }
 
   const responseHeaders = new Headers();
+  const cookieContext = getCookieContext(request);
   const contentType = String(responseToReturn.headers.get("content-type") || "").trim();
   if (contentType) responseHeaders.set("content-type", contentType);
-  appendSetCookieHeaders(responseHeaders, responseToReturn.headers);
+  appendSetCookieHeaders(responseHeaders, responseToReturn.headers, cookieContext);
 
   let payloadText = "";
   let payloadJson = null;

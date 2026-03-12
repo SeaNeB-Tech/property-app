@@ -10,7 +10,16 @@ const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
 const AUTH_COOKIE_WAIT_TIMEOUT_MS = 2000;
 const AUTH_COOKIE_WAIT_POLL_MS = 120;
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
-const CSRF_COOKIE_NAMES = ["csrf_token_property"];
+const CSRF_COOKIE_NAMES = [
+  "csrf_token_property",
+  "csrf_token",
+  "csrfToken",
+  "csrf-token",
+  "XSRF-TOKEN",
+  "xsrf-token",
+  "XSRF_TOKEN",
+  "_csrf",
+];
 const OTP_VERIFY_PATHS = ["/auth/verify-otp", "/otp/verify-otp", "/auth/otp/verify-otp"];
 
 const getFirstCookieValue = (names = []) => {

@@ -34,8 +34,7 @@ export default function BusinessOptionPage() {
       let sessionOk = !!authStore.getAccessToken()
       if (!sessionOk) {
         try {
-          await bootstrapProductAuth()
-          sessionOk = !!authStore.getAccessToken()
+          sessionOk = await bootstrapProductAuth()
         } catch {
           sessionOk = false
         }

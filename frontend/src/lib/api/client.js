@@ -17,7 +17,16 @@ let inMemoryAccessToken = "";
 let refreshPromise = null;
 
 const TRANSIENT_BACKEND_STATUSES = new Set([500, 502, 503, 504, 522, 524]);
-const CSRF_COOKIE_NAMES = ["csrf_token_property"];
+const CSRF_COOKIE_NAMES = [
+  "csrf_token_property",
+  "csrf_token",
+  "csrfToken",
+  "csrf-token",
+  "XSRF-TOKEN",
+  "xsrf-token",
+  "XSRF_TOKEN",
+  "_csrf",
+];
 
 /* -----------------------------
    MULTI TAB TOKEN SYNC

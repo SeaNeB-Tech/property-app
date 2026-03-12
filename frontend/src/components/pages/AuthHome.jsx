@@ -36,8 +36,7 @@ export default function AuthHome() {
       let sessionOk = !!authStore.getAccessToken();
       if (!sessionOk) {
         try {
-          await bootstrapProductAuth();
-          sessionOk = !!authStore.getAccessToken();
+          sessionOk = await bootstrapProductAuth();
         } catch {
           sessionOk = false;
         }
