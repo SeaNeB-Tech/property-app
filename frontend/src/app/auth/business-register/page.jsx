@@ -233,8 +233,7 @@ const finalizeRegistration = ({ router, businessId = "", branchId = "" } = {}) =
   router.replace("/dashboard/broker")
 }
 
-const redirectToBusinessRegisterLogin = (router) => {
-  const returnTo = "/auth/business-register"
+const redirectToBusinessRegisterLogin = (router, returnTo = "/auth/business-register") => {
   setAuthFlowContext({
     source: MAIN_APP_REGISTER_SOURCE,
     returnTo,
@@ -1320,7 +1319,7 @@ export default function BusinessRegisterPage() {
 
           notifyAuthChanged()
           if (!sessionHydrated) {
-            redirectToBusinessRegisterLogin(router)
+            redirectToBusinessRegisterLogin(router, "/dashboard/broker")
             return
           }
           finalizeRegistration({ router, businessId, branchId: createdBranchId })
@@ -1382,7 +1381,7 @@ export default function BusinessRegisterPage() {
 
                 notifyAuthChanged()
                 if (!recoveredSession) {
-                  redirectToBusinessRegisterLogin(router)
+                  redirectToBusinessRegisterLogin(router, "/dashboard/broker")
                   return
                 }
                 finalizeRegistration({ router, businessId, branchId: createdBranchId })

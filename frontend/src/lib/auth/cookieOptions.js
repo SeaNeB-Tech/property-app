@@ -23,26 +23,52 @@ const isIpHost = (host) => {
   return isIpv4 || isIpv6;
 };
 
-const isLocalHost = (host) => {
-  if (!host) return false;
-  const value = String(host || "").trim().toLowerCase();
-  return value === "localhost" || value.endsWith(".local") || isIpHost(value);
-};
-
 const readHost = (request) =>
   String(request?.headers?.get?.("host") || "")
     .trim()
     .toLowerCase()
     .replace(/:\d+$/, "");
 
+const parseHostList = (value) =>
+  String(value || "")
+    .split(",")
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter(Boolean);
+
+const LOCAL_HOSTS = parseHostList(
+  process.env.COOKIE_LOCAL_HOSTS || process.env.NEXT_PUBLIC_COOKIE_LOCAL_HOSTS
+);
+
+const isHostInLocalAllowlist = (host) => {
+  if (!host) return false;
+  const value = String(host || "").trim().toLowerCase();
+  if (!LOCAL_HOSTS.length) return false;
+  return LOCAL_HOSTS.includes(value);
+};
+
+const isSingleLabelHost = (value) => {
+  const normalized = String(value || "").trim().toLowerCase().replace(/^\./, "");
+  if (!normalized) return true;
+  return !normalized.includes(".");
+};
+
+const isValidCookieDomain = (domain) => {
+  if (!domain) return false;
+  const normalized = String(domain || "").trim().toLowerCase().replace(/^\./, "");
+  if (!normalized) return false;
+  if (isIpHost(normalized)) return false;
+  if (isSingleLabelHost(normalized)) return false;
+  return true;
+};
+
 const resolveCookieDomain = (request) => {
   const envDomain = sanitizeCookieDomain(process.env.NEXT_PUBLIC_COOKIE_DOMAIN || "");
-  if (!envDomain) return "";
+  if (!isValidCookieDomain(envDomain)) return "";
 
   const host = readHost(request);
 
   if (!host) return envDomain;
-  if (isLocalHost(host)) return "";
+  if (isHostInLocalAllowlist(host)) return "";
 
   const bareEnv = envDomain.startsWith(".") ? envDomain.slice(1) : envDomain;
   if (host === bareEnv || host.endsWith(`.${bareEnv}`)) {
@@ -59,7 +85,7 @@ export const getCookieOptions = (request) => {
   const forceSecure =
     process.env.NODE_ENV === "production" &&
     host &&
-    !isLocalHost(host);
+    !isHostInLocalAllowlist(host);
   const secure = forceSecure ? true : !isHttp;
   return {
     sameSite: secure ? "None" : "Lax",

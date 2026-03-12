@@ -105,7 +105,17 @@ const args = ["next", command];
 args.push("-p", port);
 
 const childEnv = { ...process.env, PORT: port };
-if (parsedUrl && parsedUrl.hostname === "localhost") {
+const parseHostList = (value) =>
+  String(value || "")
+    .split(",")
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter(Boolean);
+const devHosts = new Set(
+  parseHostList(process.env.LOCAL_DEV_HOSTS || process.env.NEXT_PUBLIC_LOCAL_DEV_HOSTS)
+);
+const shouldRewriteEnvUrl =
+  parsedUrl && devHosts.size && devHosts.has(parsedUrl.hostname.toLowerCase());
+if (shouldRewriteEnvUrl) {
   const updated = new URL(parsedUrl.toString());
   updated.port = port;
   childEnv[envKey] = updated.toString();
