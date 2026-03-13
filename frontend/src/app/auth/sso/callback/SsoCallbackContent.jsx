@@ -191,7 +191,7 @@ export default function SsoCallbackContent() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [params]);
 
   return null;
 }

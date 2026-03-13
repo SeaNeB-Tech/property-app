@@ -106,8 +106,9 @@ export default function BrokerDashboardShell() {
   }, [isReady, isRestoring, router, status, user]);
 
   useEffect(() => {
+    const timer = graceTimerRef.current;
     return () => {
-      if (graceTimerRef.current) clearTimeout(graceTimerRef.current);
+      if (timer) clearTimeout(timer);
     };
   }, []);
 
