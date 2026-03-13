@@ -7,6 +7,13 @@ import {
 import { clearAccessToken, getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
 
 const PRODUCT_KEY = process.env.NEXT_PUBLIC_PRODUCT_KEY?.trim() || "property";
+const AUTH_DEBUG =
+  String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true";
+
+const logAuthDebug = (...args) => {
+  if (!AUTH_DEBUG || typeof console === "undefined") return;
+  console.debug(...args);
+};
 
 const FAILURE_COOLDOWN_MS = 5000;
 
@@ -68,16 +75,15 @@ const buildAuthProbeHeaders = () => {
   const accessToken = getAccessToken() || getInMemoryAccessToken();
   const csrfToken =
     getCsrfToken() || getInMemoryCsrfToken() || readCsrfFromCookie();
+  const csrfHeaderValue = String(csrfToken || "").trim();
 
   if (accessToken?.trim()) {
     headers.set("authorization", `Bearer ${accessToken.trim()}`);
   }
 
-  if (csrfToken?.trim()) {
-    headers.set("x-csrf-token", csrfToken.trim());
-    headers.set("x-xsrf-token", csrfToken.trim());
-    headers.set("csrf-token", csrfToken.trim());
-  }
+  headers.set("x-csrf-token", csrfHeaderValue);
+  headers.set("x-xsrf-token", csrfHeaderValue);
+  headers.set("csrf-token", csrfHeaderValue);
 
   headers.set("x-product-key", PRODUCT_KEY);
 
@@ -185,6 +191,7 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
         sessionHint = await requestSessionHint();
       }
       const hasRefreshSession = Boolean(sessionHint?.hasRefreshSession);
+      logAuthDebug("[auth.bootstrap] session hint", { hasRefreshSession });
 
       const hydrateTokenFromRefresh = async () => {
         try {
@@ -274,6 +281,13 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
           }
 
           if ([401, 403].includes(status)) {
+            if (hasRefreshSession) {
+              logAuthDebug("[auth.bootstrap] refresh rejected but session hint true", {
+                status,
+              });
+              return true;
+            }
+
             clearAccessToken();
             lastFailureAt = Date.now();
             return false;
@@ -283,6 +297,13 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
             status,
             attempt: attempt + 1,
           });
+
+          if (hasRefreshSession) {
+            logAuthDebug("[auth.bootstrap] refresh failed; using server session", {
+              status,
+            });
+            return true;
+          }
 
           lastFailureAt = Date.now();
 
@@ -313,6 +334,11 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
         lastFailureAt = Date.now();
 
         return false;
+      }
+
+      if (hasRefreshSession) {
+        logAuthDebug("[auth.bootstrap] refresh loop exhausted; using server session");
+        return true;
       }
 
       lastFailureAt = Date.now();

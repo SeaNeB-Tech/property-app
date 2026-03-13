@@ -1,6 +1,11 @@
 "use client";
 
-import { getInMemoryAccessToken } from "@/lib/api/client";
+import {
+  ensureAccessToken,
+  getInMemoryAccessToken,
+  getInMemoryCsrfToken,
+} from "@/lib/api/client";
+import { postLoginSuccessToOpener } from "@/lib/auth/crossTabMessaging";
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const AUTH_RETURN_TO_COOKIE = "auth_return_to";
@@ -182,7 +187,22 @@ export const redirectToListingWithBridgeToken = async ({
   if (!callbackUrl) return false;
 
   const fromPayload = readBridgeTokenFromPayload(sourcePayload || {});
+
+  if (!fromPayload && !getInMemoryAccessToken()) {
+    await ensureAccessToken();
+  }
+
   const bridgeToken = fromPayload || (await mintBridgeToken());
+
+  if (!getInMemoryAccessToken()) {
+    await ensureAccessToken();
+  }
+
+  postLoginSuccessToOpener({
+    accessToken: getInMemoryAccessToken(),
+    csrfToken: getInMemoryCsrfToken(),
+    returnTo: safeSourceTarget,
+  });
 
   clearReturnToCookie();
   if (!bridgeToken) {
@@ -193,22 +213,6 @@ export const redirectToListingWithBridgeToken = async ({
   }
 
   const destination = appendBridgeToken(callbackUrl, bridgeToken);
-
-  // If auth was opened from the listing app in another tab/window, reuse it and close this auth tab.
-  try {
-    const canUseOpener =
-      typeof window.opener !== "undefined" &&
-      window.opener &&
-      !window.opener.closed;
-
-    if (canUseOpener) {
-      window.opener.location.href = destination;
-      window.close();
-      return true;
-    }
-  } catch {
-    // Fallback to same-tab redirect when opener cannot be used due to browser policies.
-  }
 
   window.location.replace(destination);
   return true;

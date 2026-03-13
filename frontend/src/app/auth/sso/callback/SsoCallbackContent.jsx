@@ -172,8 +172,6 @@ export default function SsoCallbackContent() {
             } else if (/^https?:\/\//i.test(openerTarget)) {
               window.opener.location.href = openerTarget;
             }
-            window.close();
-            return;
           } catch {
             // fall through to redirect
           }

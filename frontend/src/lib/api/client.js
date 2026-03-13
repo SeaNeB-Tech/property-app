@@ -8,6 +8,23 @@ import { notifyAuthChanged } from "@/services/auth.service";
 
 const REFRESH_ENDPOINT = "/auth/refresh";
 const DEFAULT_PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
+const AUTH_DEBUG =
+  String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true";
+
+const logAuthDebug = (...args) => {
+  if (!AUTH_DEBUG || typeof console === "undefined") return;
+  console.debug(...args);
+};
+
+const toPositiveNumber = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const REFRESH_TIMEOUT_MS = toPositiveNumber(
+  process.env.NEXT_PUBLIC_AUTH_REFRESH_TIMEOUT_MS,
+  7000
+);
 
 axios.defaults.headers.common["x-product-key"] = DEFAULT_PRODUCT_KEY;
 axios.defaults.withCredentials = true;
@@ -34,16 +51,49 @@ const CSRF_COOKIE_NAMES = [
 
 let authChannel = null;
 
+const AUTH_CHANNEL_NAME = "auth_channel";
+const AUTH_CHANNEL_EVENTS = {
+  accessTokenUpdated: "access_token_updated",
+  csrfUpdated: "csrf_updated",
+};
+
+const AUTH_CHANNEL_ACCESS_TYPES = new Set([
+  AUTH_CHANNEL_EVENTS.accessTokenUpdated,
+  "ACCESS_TOKEN_UPDATED",
+  "acces_token_updated",
+]);
+
+const AUTH_CHANNEL_CSRF_TYPES = new Set([
+  AUTH_CHANNEL_EVENTS.csrfUpdated,
+  "CSRF_UPDATED",
+]);
+
 if (typeof window !== "undefined" && "BroadcastChannel" in window) {
-  authChannel = new BroadcastChannel("auth_channel");
+  authChannel = new BroadcastChannel(AUTH_CHANNEL_NAME);
 
   authChannel.onmessage = (event) => {
     const data = event?.data || {};
-    if (data?.type === "ACCESS_TOKEN_UPDATED") {
-      inMemoryAccessToken = String(data.token || "").trim();
+    const type = String(data?.type || "").trim();
+    let didUpdate = false;
+
+    if (AUTH_CHANNEL_ACCESS_TYPES.has(type)) {
+      const nextToken = String(data?.token ?? "").trim();
+      if (nextToken !== inMemoryAccessToken) {
+        inMemoryAccessToken = nextToken;
+        didUpdate = true;
+      }
     }
-    if (data?.type === "CSRF_UPDATED") {
-      inMemoryCsrfToken = String(data.token || "").trim();
+
+    if (AUTH_CHANNEL_CSRF_TYPES.has(type)) {
+      const nextToken = String(data?.token ?? "").trim();
+      if (nextToken !== inMemoryCsrfToken) {
+        inMemoryCsrfToken = nextToken;
+        didUpdate = true;
+      }
+    }
+
+    if (didUpdate) {
+      notifyAuthChanged();
     }
   };
 }
@@ -73,12 +123,12 @@ const getAccessToken = () => String(inMemoryAccessToken || "").trim();
 
 const setCsrfTokenInMemory = (token) => {
   inMemoryCsrfToken = String(token || "").trim();
-  broadcastAuthUpdate("CSRF_UPDATED", inMemoryCsrfToken);
+  broadcastAuthUpdate(AUTH_CHANNEL_EVENTS.csrfUpdated, inMemoryCsrfToken);
 };
 
 const setAccessTokenInMemory = (token) => {
   inMemoryAccessToken = String(token || "").trim();
-  broadcastAuthUpdate("ACCESS_TOKEN_UPDATED", inMemoryAccessToken);
+  broadcastAuthUpdate(AUTH_CHANNEL_EVENTS.accessTokenUpdated, inMemoryAccessToken);
 };
 
 /* -----------------------------
@@ -235,19 +285,16 @@ const refreshClient = axios.create({
 
 export const refreshAccessToken = async () => {
   const csrfToken = getCsrfToken();
+  const csrfHeaderValue = String(csrfToken || "").trim();
 
   const config = {
-    timeout: 7000,
+    timeout: REFRESH_TIMEOUT_MS,
     withCredentials: true,
     headers: {
       "x-product-key": DEFAULT_PRODUCT_KEY,
-      ...(csrfToken
-        ? {
-            "x-csrf-token": csrfToken,
-            "x-xsrf-token": csrfToken,
-            "csrf-token": csrfToken,
-          }
-        : {}),
+      "x-csrf-token": csrfHeaderValue,
+      "x-xsrf-token": csrfHeaderValue,
+      "csrf-token": csrfHeaderValue,
     },
   };
 
@@ -266,6 +313,9 @@ export const refreshAccessToken = async () => {
   };
 
   try {
+    logAuthDebug("[auth] refreshAccessToken: start", {
+      hasCsrfHeader: Boolean(csrfHeaderValue),
+    });
     const response = await refreshClient.post(
       REFRESH_ENDPOINT,
       { product_key: DEFAULT_PRODUCT_KEY },
@@ -275,6 +325,10 @@ export const refreshAccessToken = async () => {
     return applyRefreshResponse(response);
   } catch (error) {
     const status = Number(error?.response?.status || 0);
+    logAuthDebug("[auth] refreshAccessToken failed", {
+      status,
+      message: error?.message || "unknown_error",
+    });
 
     if (status === 401 || status === 403) {
       await new Promise((r) => setTimeout(r, 120));

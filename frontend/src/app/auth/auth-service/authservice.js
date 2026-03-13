@@ -3,12 +3,32 @@ import { getJsonCookie, getCookie, removeCookie } from "@/services/auth.service"
 import { authStore } from "./store/authStore";
 import { clearPanelAuthSession } from "@/services/auth.service";
 import { getAuthAppUrl } from "@/lib/core/appUrls";
+import { postLogoutToOpener } from "@/lib/auth/crossTabMessaging";
 
 const IDENTIFIER_TYPE_MOBILE = 0;
 const PURPOSE_SIGNUP_OR_LOGIN = 0;
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
-const AUTH_COOKIE_WAIT_TIMEOUT_MS = 2000;
-const AUTH_COOKIE_WAIT_POLL_MS = 120;
+const AUTH_DEBUG =
+  String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true";
+
+const logAuthDebug = (...args) => {
+  if (!AUTH_DEBUG || typeof console === "undefined") return;
+  console.debug(...args);
+};
+
+const toPositiveNumber = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const AUTH_COOKIE_WAIT_TIMEOUT_MS = toPositiveNumber(
+  process.env.NEXT_PUBLIC_AUTH_COOKIE_WAIT_TIMEOUT_MS,
+  5000
+);
+const AUTH_COOKIE_WAIT_POLL_MS = toPositiveNumber(
+  process.env.NEXT_PUBLIC_AUTH_COOKIE_WAIT_POLL_MS,
+  120
+);
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const CSRF_COOKIE_NAMES = [
   "csrf_token_property",
@@ -30,19 +50,45 @@ const getFirstCookieValue = (names = []) => {
   return "";
 };
 
+const requestSessionHint = async () => {
+  try {
+    const res = await fetch("/api/auth/session", {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    });
+
+    if (!res.ok) return false;
+
+    const payload = await res.json().catch(() => ({}));
+    return Boolean(payload?.hasRefreshSession);
+  } catch {
+    return false;
+  }
+};
+
 export const waitForAuthCookies = async ({
   timeoutMs = AUTH_COOKIE_WAIT_TIMEOUT_MS,
   pollMs = AUTH_COOKIE_WAIT_POLL_MS,
 } = {}) => {
   const startedAt = Date.now();
+  logAuthDebug("[auth] waitForAuthCookies: start", { timeoutMs, pollMs });
   while (Date.now() - startedAt < timeoutMs) {
     const csrfToken = getFirstCookieValue(CSRF_COOKIE_NAMES);
     if (csrfToken) {
+      logAuthDebug("[auth] waitForAuthCookies: csrf cookie detected");
       return { ok: true, csrfToken, waitedMs: Date.now() - startedAt };
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 
+  const hasRefreshSession = await requestSessionHint();
+  if (hasRefreshSession) {
+    logAuthDebug("[auth] waitForAuthCookies: server session hint detected");
+    return { ok: true, csrfToken: "", waitedMs: Date.now() - startedAt };
+  }
+
+  logAuthDebug("[auth] waitForAuthCookies: timed out");
   return { ok: false, csrfToken: "", waitedMs: Date.now() - startedAt };
 };
 
@@ -227,5 +273,6 @@ export const logout = async () => {
   if (!canClearClientState) return;
   authStore.clearAll();
   clearPanelAuthSession();
+  postLogoutToOpener();
   window.location.href = getAuthAppUrl("/auth/login");
 };

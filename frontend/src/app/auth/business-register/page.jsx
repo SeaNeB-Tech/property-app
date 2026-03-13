@@ -23,7 +23,7 @@ import { sendOtp } from "@/app/auth/auth-service/otp.service"
 import { verifyOtpAndLogin, waitForAuthCookies } from "@/app/auth/auth-service/authservice"
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
 import { hydrateAuthSession, refreshAccessToken } from "@/lib/api/client"
-import { getAccessToken } from "@/lib/auth/tokenStorage"
+import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
@@ -68,6 +68,22 @@ const RESEND_COOLDOWN_SECONDS = 60
 const VERIFIED_EDIT_COOLDOWN_SECONDS = 60
 const TERMS_TEXT_PATH = "/legal/terms-conditions-property.txt"
 const LANGUAGE_STORAGE_KEY = "auth_language"
+const AUTH_DEBUG =
+  String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true"
+
+const logAuthDebug = (...args) => {
+  if (!AUTH_DEBUG || typeof console === "undefined") return
+  console.debug(...args)
+}
+
+const buildCsrfHeaders = (token) => {
+  const csrfToken = String(token || "").trim()
+  return {
+    "x-csrf-token": csrfToken,
+    "x-xsrf-token": csrfToken,
+    "csrf-token": csrfToken,
+  }
+}
 
 const EMPTY_FORM = {
   businessName: "",
@@ -188,6 +204,39 @@ const resolveListingOrigin = (returnTo = "") => {
   }
 }
 
+const resolveListingDestination = (returnTo = "") => {
+  const allowedOrigins = getAllowedReturnOrigins()
+  const primaryOrigin = getPrimaryListingOrigin()
+  const fallbackPath = "/dashboard/broker"
+  const fallback = primaryOrigin
+    ? new URL(fallbackPath, primaryOrigin).toString()
+    : fallbackPath
+  const target = String(returnTo || "").trim()
+
+  if (!target) return fallback
+
+  try {
+    if (target.startsWith("/") && primaryOrigin) {
+      return new URL(target, primaryOrigin).toString()
+    }
+
+    const parsed = new URL(target)
+    if (!/^https?:$/i.test(parsed.protocol)) return fallback
+
+    if (allowedOrigins.length && !allowedOrigins.includes(parsed.origin)) {
+      return fallback
+    }
+
+    if (!allowedOrigins.length && primaryOrigin && parsed.origin !== primaryOrigin) {
+      return fallback
+    }
+
+    return parsed.toString()
+  } catch {
+    return fallback
+  }
+}
+
 const notifyListingApp = ({ businessId = "", branchId = "" } = {}) => {
   if (typeof window === "undefined") return false
   const { source, returnTo } = getAuthFlowContext()
@@ -217,20 +266,15 @@ const notifyListingApp = ({ businessId = "", branchId = "" } = {}) => {
 }
 
 const finalizeRegistration = ({ router, businessId = "", branchId = "" } = {}) => {
-  const notified = notifyListingApp({ businessId, branchId })
-  if (notified) {
-    try {
-      window.close()
-    } catch {
-      // ignore close failures
-    }
-    window.setTimeout(() => {
-      if (typeof window !== "undefined" && !window.closed) {
-        router.replace("/dashboard/broker")
-      }
-    }, 200)
+  notifyListingApp({ businessId, branchId })
+  const { returnTo } = getAuthFlowContext()
+  const destination = resolveListingDestination(returnTo)
+
+  if (typeof window !== "undefined") {
+    window.location.replace(destination)
     return
   }
+
   router.replace("/dashboard/broker")
 }
 
@@ -1286,6 +1330,10 @@ export default function BusinessRegisterPage() {
           if (!sessionHydrated) {
             try {
               const productKey = String(getDefaultProductKey() || "property").trim()
+              const csrfToken = String(getCsrfToken() || "").trim()
+              logAuthDebug("[business-register] manual refresh after register", {
+                hasCsrfHeader: Boolean(csrfToken),
+              })
               const refreshResp = await fetch("/api/auth/refresh", {
                 method: "POST",
                 credentials: "include",
@@ -1293,6 +1341,7 @@ export default function BusinessRegisterPage() {
                 headers: {
                   "content-type": "application/json",
                   "x-product-key": productKey,
+                  ...buildCsrfHeaders(csrfToken),
                 },
                 body: JSON.stringify({ product_key: productKey }),
               })
@@ -1338,7 +1387,8 @@ export default function BusinessRegisterPage() {
 
           notifyAuthChanged()
           if (!sessionHydrated) {
-            redirectToBusinessRegisterLogin(router, "/dashboard/broker")
+            logAuthDebug("[business-register] session not hydrated; continuing with cookie session")
+            finalizeRegistration({ router, businessId, branchId: createdBranchId })
             return
           }
           finalizeRegistration({ router, businessId, branchId: createdBranchId })

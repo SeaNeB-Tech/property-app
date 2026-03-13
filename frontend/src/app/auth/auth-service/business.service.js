@@ -16,11 +16,57 @@ import {
 } from "@/app/auth/auth-service/service.utils"
 
 const businessApi = authApi
+const AUTH_DEBUG =
+  String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true"
+
+const logAuthDebug = (...args) => {
+  if (!AUTH_DEBUG || typeof console === "undefined") return
+  console.debug(...args)
+}
+
+const normalizeText = (value) => String(value || "").trim().toLowerCase()
+
+const extractBusinessIds = (payload = {}) => {
+  const data = payload?.data || payload?.result || payload || {}
+  const businessId =
+    data?.business_id ||
+    data?.id ||
+    data?.data?.business_id ||
+    data?.data?.id ||
+    ""
+  const branchId =
+    data?.branch_id ||
+    data?.default_branch_id ||
+    data?.data?.branch_id ||
+    data?.data?.default_branch_id ||
+    ""
+  return {
+    businessId: String(businessId || "").trim(),
+    branchId: String(branchId || "").trim(),
+  }
+}
+
+const recoverBusinessCreationResponse = (err) => {
+  if (!err?.response) return null
+  const url = String(err?.config?.url || "").toLowerCase()
+  if (!url.includes("/v1/business/create")) return null
+
+  const { businessId, branchId } = extractBusinessIds(err?.response?.data)
+  if (businessId || branchId) {
+    logAuthDebug("[business.service] treating auth error as success", {
+      url,
+      status: getErrorStatus(err),
+    })
+    return err.response
+  }
+
+  return null
+}
 
 const isAuthError = (err) => {
   const status = getErrorStatus(err)
-  const code = getErrorCode(err)
-  const message = getErrorText(err)
+  const code = normalizeText(getErrorCode(err))
+  const message = normalizeText(getErrorText(err))
 
   if (status === 401 || status === 403) return true
   if (code.includes("auth") || code.includes("token") || code.includes("csrf")) return true
@@ -29,8 +75,8 @@ const isAuthError = (err) => {
 
 const isProductError = (err) => {
   const status = getErrorStatus(err)
-  const code = getErrorCode(err)
-  const message = getErrorText(err)
+  const code = normalizeText(getErrorCode(err))
+  const message = normalizeText(getErrorText(err))
 
   if (code.includes("product")) return true
   if (message.includes("invalid or inactive product") || message.includes("product not found")) return true
@@ -85,6 +131,9 @@ const withRecovery = async (requestFn) => {
   try {
     return await requestFn()
   } catch (err) {
+    const recoveredResponse = recoverBusinessCreationResponse(err)
+    if (recoveredResponse) return recoveredResponse
+
     if (isAuthError(err)) {
       const recovered = await bootstrapProductAuth({ force: true })
       if (!recovered) throw err

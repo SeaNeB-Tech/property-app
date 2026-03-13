@@ -80,6 +80,8 @@ const nextConfig = {
     NEXT_PUBLIC_COOKIE_SAMESITE: process.env.NEXT_PUBLIC_COOKIE_SAMESITE || "None",
   },
   images: {
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 2678400,
     remotePatterns: [
       {
         protocol: "https",
@@ -156,6 +158,9 @@ const nextConfig = {
         headers: securityHeaders,
       },
     ];
+  },
+  compiler: {
+    removeConsole: isProduction ? { exclude: ["error", "warn"] } : false,
   },
   reactCompiler: true,
 };
