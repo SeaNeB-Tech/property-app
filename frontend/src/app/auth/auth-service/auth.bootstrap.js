@@ -16,11 +16,149 @@ const logAuthDebug = (...args) => {
 };
 
 const FAILURE_COOLDOWN_MS = 5000;
+const BOOTSTRAP_LOCK_KEY = "seaneb:auth:bootstrap:lock";
+const BOOTSTRAP_LOCK_TTL_MS = 8000;
+const BOOTSTRAP_LOCK_WAIT_MS = 2500;
+const BOOTSTRAP_LOCK_POLL_MS = 100;
+const REFRESH_ATTEMPT_KEY = "seaneb:auth:refresh:attempt";
+const REFRESH_ATTEMPT_COOLDOWN_MS = 1500;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let inFlightEnsureSessionPromise = null;
 let lastFailureAt = 0;
+let lastRefreshAttemptAt = 0;
+
+const SSO_LOCK_WAIT_MS = 2000;
+const SSO_LOCK_POLL_MS = 50;
+
+const isSsoLockActive = () =>
+  typeof window !== "undefined" && Boolean(window.__ACTIVE_SSO_LOCK__);
+
+const waitForSsoLockRelease = async () => {
+  if (!isSsoLockActive()) return true;
+
+  const start = Date.now();
+  while (isSsoLockActive() && Date.now() - start < SSO_LOCK_WAIT_MS) {
+    await sleep(SSO_LOCK_POLL_MS);
+  }
+
+  return !isSsoLockActive();
+};
+
+const canUseStorage = () => {
+  if (typeof window === "undefined") return false;
+  try {
+    return Boolean(window.localStorage);
+  } catch {
+    return false;
+  }
+};
+
+const readStorageJson = (key) => {
+  if (!canUseStorage()) return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const writeStorageJson = (key, value) => {
+  if (!canUseStorage()) return false;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const readStorageNumber = (key) => {
+  if (!canUseStorage()) return 0;
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const acquireBootstrapLock = () => {
+  if (!canUseStorage()) {
+    return { acquired: true, id: "memory" };
+  }
+
+  const now = Date.now();
+  const existing = readStorageJson(BOOTSTRAP_LOCK_KEY);
+
+  if (existing && now < Number(existing.expiresAt || 0)) {
+    return { acquired: false, id: existing.id || "" };
+  }
+
+  const id = `${now}-${Math.random().toString(36).slice(2, 8)}`;
+  const entry = {
+    id,
+    startedAt: now,
+    expiresAt: now + BOOTSTRAP_LOCK_TTL_MS,
+  };
+
+  writeStorageJson(BOOTSTRAP_LOCK_KEY, entry);
+
+  const verify = readStorageJson(BOOTSTRAP_LOCK_KEY);
+  if (!verify || verify.id !== id) {
+    return { acquired: false, id: verify?.id || "" };
+  }
+
+  return { acquired: true, id };
+};
+
+const releaseBootstrapLock = (id) => {
+  if (!canUseStorage()) return;
+  const current = readStorageJson(BOOTSTRAP_LOCK_KEY);
+  if (!current || current.id !== id) return;
+  try {
+    window.localStorage.removeItem(BOOTSTRAP_LOCK_KEY);
+  } catch {
+    // ignore storage cleanup errors
+  }
+};
+
+const waitForBootstrapLockRelease = async () => {
+  if (!canUseStorage()) return true;
+
+  const start = Date.now();
+  while (Date.now() - start < BOOTSTRAP_LOCK_WAIT_MS) {
+    const current = readStorageJson(BOOTSTRAP_LOCK_KEY);
+    if (!current || Date.now() >= Number(current.expiresAt || 0)) {
+      return true;
+    }
+    await sleep(BOOTSTRAP_LOCK_POLL_MS);
+  }
+
+  return false;
+};
+
+const markRefreshAttempt = () => {
+  const now = Date.now();
+  lastRefreshAttemptAt = now;
+  if (!canUseStorage()) return;
+  try {
+    window.localStorage.setItem(REFRESH_ATTEMPT_KEY, String(now));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const wasRefreshAttemptedRecently = () => {
+  const now = Date.now();
+  const stored = readStorageNumber(REFRESH_ATTEMPT_KEY);
+  const lastAttempt = Math.max(lastRefreshAttemptAt || 0, stored || 0);
+  return Boolean(lastAttempt && now - lastAttempt < REFRESH_ATTEMPT_COOLDOWN_MS);
+};
 
 const CSRF_COOKIE_KEYS = [
   "csrf_token_property",
@@ -113,10 +251,18 @@ const requestRefresh = async () => {
   const headers = buildAuthProbeHeaders();
   headers.set("content-type", "application/json");
 
+  const lockReleased = await waitForSsoLockRelease();
+  if (!lockReleased) {
+    const lockError = new Error("SSO lock active");
+    lockError.code = "SSO_LOCK_ACTIVE";
+    throw lockError;
+  }
+
   return fetch("/api/auth/refresh", {
     method: "POST",
     credentials: "include",
     cache: "no-store",
+    keepalive: true,
     headers,
     body: JSON.stringify({
       product_key: PRODUCT_KEY,
@@ -164,7 +310,17 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
   }
 
   inFlightEnsureSessionPromise = (async () => {
+    const bootstrapLock = acquireBootstrapLock();
+
     try {
+      if (!bootstrapLock.acquired) {
+        await waitForBootstrapLockRelease();
+
+        const postLockMe = await requestMe();
+        if (postLockMe.ok) {
+          return true;
+        }
+      }
 
       // Fast-path: if there are no client-side hints of a session (in-memory
       // access token or a client-readable CSRF cookie) skip the server probe
@@ -194,7 +350,18 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
       logAuthDebug("[auth.bootstrap] session hint", { hasRefreshSession });
 
       const hydrateTokenFromRefresh = async () => {
+        if (!force && wasRefreshAttemptedRecently()) {
+          return {
+            ok: false,
+            refreshStatus: 0,
+            canRetry: true,
+            deferred: true,
+          };
+        }
+
         try {
+          markRefreshAttempt();
+
           const refreshResponse = await requestRefresh();
 
           if (!refreshResponse.ok) {
@@ -259,7 +426,7 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
 
       const firstStatus = Number(firstMe.status || 0);
 
-      if (![401, 403, 500, 502, 503, 504].includes(firstStatus)) {
+      if (![401, 403, 429, 500, 502, 503, 504].includes(firstStatus)) {
         console.warn("[auth.bootstrap] /api/auth/me failed", {
           status: firstStatus,
         });
@@ -319,7 +486,7 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
         const retryStatus = Number(retryMe.status || 0);
 
         const shouldRetry =
-          [401, 403, 500, 502, 503, 504].includes(retryStatus) && attempt < 2;
+          [401, 403, 429, 500, 502, 503, 504].includes(retryStatus) && attempt < 2;
 
         if (shouldRetry) {
           await sleep(200 * 2 ** attempt);
@@ -352,6 +519,10 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
       lastFailureAt = Date.now();
 
       return false;
+    } finally {
+      if (bootstrapLock?.acquired) {
+        releaseBootstrapLock(bootstrapLock.id);
+      }
     }
   })();
 

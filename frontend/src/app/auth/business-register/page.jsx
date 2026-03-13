@@ -122,6 +122,11 @@ const normalizeBusinessLabel = (value) =>
     .trim()
     .slice(0, 30)
 
+const normalizeMobileNumber = (value) =>
+  String(value || "")
+    .replace(/\D/g, "")
+    .trim()
+
 const getBusinessSuggestionLabel = (item) =>
   String(
     item?.description ||
@@ -314,6 +319,7 @@ export default function BusinessRegisterPage() {
   const [mobileEditCooldown, setMobileEditCooldown] = useState(0)
   const [mobileOtpVia, setMobileOtpVia] = useState(OTP_VIA_SMS)
   const [whatsappVerified, setWhatsappVerified] = useState(false)
+  const [whatsappAutoVerified, setWhatsappAutoVerified] = useState(false)
   const [whatsappLoading, setWhatsappLoading] = useState(false)
   const [whatsappEditCooldown, setWhatsappEditCooldown] = useState(0)
   const [selectedCountry, setSelectedCountry] = useState(() => {
@@ -351,6 +357,13 @@ export default function BusinessRegisterPage() {
     form.businessLocation.trim().length > 0 &&
     form.placeId.trim().length > 0 &&
     form.agree
+  const normalizedPrimaryNumber = normalizeMobileNumber(form.primaryNumber)
+  const normalizedWhatsappNumber = normalizeMobileNumber(form.whatsappNumber)
+  const isWhatsappSameAsPrimary =
+    Boolean(normalizedPrimaryNumber) &&
+    Boolean(normalizedWhatsappNumber) &&
+    normalizedPrimaryNumber === normalizedWhatsappNumber
+  const whatsappIsVerified = whatsappVerified || whatsappAutoVerified
 
   const validateStep = (step) => {
     if (step === 1) {
@@ -701,6 +714,45 @@ export default function BusinessRegisterPage() {
   }, [form.gstin])
 
   useEffect(() => {
+    const whatsappCookie = getJsonCookie("verified_business_whatsapp")
+    const cookieNumber = normalizeMobileNumber(whatsappCookie?.mobile_number)
+    const isCookieVerified =
+      Boolean(normalizedWhatsappNumber) && normalizedWhatsappNumber === cookieNumber
+
+    if (isCookieVerified) {
+      if (!whatsappVerified) {
+        setWhatsappVerified(true)
+      }
+      if (whatsappAutoVerified) {
+        setWhatsappAutoVerified(false)
+      }
+      return
+    }
+
+    if (isWhatsappSameAsPrimary) {
+      if (!whatsappVerified) {
+        setWhatsappVerified(true)
+      }
+      if (!whatsappAutoVerified) {
+        setWhatsappAutoVerified(true)
+      }
+      return
+    }
+
+    if (whatsappAutoVerified) {
+      setWhatsappAutoVerified(false)
+    }
+    if (whatsappVerified) {
+      setWhatsappVerified(false)
+    }
+  }, [
+    isWhatsappSameAsPrimary,
+    normalizedWhatsappNumber,
+    whatsappAutoVerified,
+    whatsappVerified,
+  ])
+
+  useEffect(() => {
     let active = true
     const query = debouncedBusinessName?.trim()
 
@@ -851,7 +903,7 @@ export default function BusinessRegisterPage() {
     const mobile = form.whatsappNumber.trim()
     const selectedCountryCode = normalizeCountryCode(selectedCountry?.dialCode)
 
-    if (!mobile || whatsappLoading || whatsappVerified) return false
+    if (!mobile || whatsappLoading || whatsappVerified || whatsappAutoVerified) return false
 
     if (!MOBILE_REGEX.test(mobile)) {
       setSubmitError("Enter a valid WhatsApp number to verify")
@@ -1705,26 +1757,48 @@ export default function BusinessRegisterPage() {
                   <div className="business-phone-input-wrap">
                     <input
                       type="text"
-                      className={`business-form-input ${whatsappVerified ? "border-emerald-300 bg-emerald-50" : ""}`}
+                      className={`business-form-input ${whatsappIsVerified ? "border-emerald-300 bg-emerald-50" : ""}`}
                       value={form.whatsappNumber}
-                      disabled={whatsappVerified}
+                      disabled={whatsappIsVerified && !whatsappAutoVerified}
                       onChange={(e) => setField("whatsappNumber", e.target.value.replace(/\D/g, ""))}
                       placeholder="Enter WhatsApp number"
                     />
                   </div>
                   <button
                     type="button"
-                    onClick={whatsappVerified ? handleEnableWhatsappEdit : handleWhatsappVerify}
-                    disabled={whatsappLoading || (!whatsappVerified && !form.whatsappNumber.trim()) || (whatsappVerified && whatsappEditCooldown > 0)}
+                    onClick={
+                      whatsappAutoVerified
+                        ? undefined
+                        : whatsappIsVerified
+                          ? handleEnableWhatsappEdit
+                          : handleWhatsappVerify
+                    }
+                    disabled={
+                      whatsappLoading ||
+                      whatsappAutoVerified ||
+                      (!whatsappIsVerified && !form.whatsappNumber.trim()) ||
+                      (!whatsappAutoVerified && whatsappIsVerified && whatsappEditCooldown > 0)
+                    }
                     className="business-inline-action-btn"
                   >
-                    {whatsappLoading ? "Sending..." : whatsappVerified ? "Edit" : "Verify"}
+                    {whatsappLoading
+                      ? "Sending..."
+                      : whatsappIsVerified
+                        ? whatsappAutoVerified
+                          ? "Verified"
+                          : "Edit"
+                        : "Verify"}
                   </button>
                 </div>
-                {!whatsappVerified && form.whatsappNumber.trim() && (
+                {!whatsappIsVerified && form.whatsappNumber.trim() && (
                   <p className="business-verify-note">OTP will be sent on WhatsApp to this number.</p>
                 )}
-                {whatsappVerified && whatsappEditCooldown > 0 && (
+                {whatsappAutoVerified && (
+                  <p className="business-verify-note">
+                    Using the same number as primary. WhatsApp verification not required.
+                  </p>
+                )}
+                {whatsappIsVerified && !whatsappAutoVerified && whatsappEditCooldown > 0 && (
                   <p className="business-verify-note">Try to edit in {formatCooldown(whatsappEditCooldown)}</p>
                 )}
               </Field>

@@ -26,12 +26,61 @@ const REFRESH_TIMEOUT_MS = toPositiveNumber(
   7000
 );
 
+const normalizeBaseUrl = (value) =>
+  String(value || "").trim().replace(/\/+$/, "");
+
+const AUTH_BASE_URL =
+  normalizeBaseUrl(API_BASE_URL || "") ||
+  normalizeBaseUrl(API_REMOTE_FALLBACK_BASE_URL || "");
+
+const buildAuthUrl = (path) => {
+  const target = String(path || "").trim();
+  if (!target) throw new Error("Missing request path");
+  if (/^https?:\/\//i.test(target)) return target;
+  if (!target.startsWith("/")) {
+    return AUTH_BASE_URL ? `${AUTH_BASE_URL}/${target}` : `/${target}`;
+  }
+  return AUTH_BASE_URL ? `${AUTH_BASE_URL}${target}` : target;
+};
+
 axios.defaults.headers.common["x-product-key"] = DEFAULT_PRODUCT_KEY;
 axios.defaults.withCredentials = true;
 
 let inMemoryCsrfToken = "";
 let inMemoryAccessToken = "";
 let refreshPromise = null;
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null, csrf = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve({ token, csrf });
+    }
+  });
+  failedQueue = [];
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const SSO_LOCK_WAIT_MS = 2000;
+const SSO_LOCK_POLL_MS = 50;
+
+const isSsoLockActive = () =>
+  typeof window !== "undefined" && Boolean(window.__ACTIVE_SSO_LOCK__);
+
+const waitForSsoLockRelease = async () => {
+  if (!isSsoLockActive()) return true;
+
+  const start = Date.now();
+  while (isSsoLockActive() && Date.now() - start < SSO_LOCK_WAIT_MS) {
+    await sleep(SSO_LOCK_POLL_MS);
+  }
+
+  return !isSsoLockActive();
+};
 
 const TRANSIENT_BACKEND_STATUSES = new Set([500, 502, 503, 504, 522, 524]);
 const CSRF_COOKIE_NAMES = [
@@ -205,6 +254,9 @@ const shouldRetryRefresh = (error) => {
   if (!error?.response) return true;
   return TRANSIENT_BACKEND_STATUSES.has(status) || status === 429;
 };
+
+const getErrorStatus = (error) =>
+  Number(error?.response?.status || error?.status || 0);
 
 /* -----------------------------
    REDIRECT
@@ -380,16 +432,6 @@ const api = axios.create({
   },
 });
 
-const refreshClient = axios.create({
-  baseURL: API_BASE_URL,
-  withCredentials: true,
-  headers: {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-    "x-product-key": DEFAULT_PRODUCT_KEY,
-  },
-});
-
 /* -----------------------------
    REFRESH TOKEN
 ----------------------------- */
@@ -398,18 +440,16 @@ export const refreshAccessToken = async () => {
   const csrfToken = getCsrfToken();
   const csrfHeaderValue = String(csrfToken || "").trim();
 
-  const config = {
-    timeout: REFRESH_TIMEOUT_MS,
-    withCredentials: true,
-    headers: {
-      "x-product-key": DEFAULT_PRODUCT_KEY,
-      "x-csrf-token": csrfHeaderValue,
-      "x-xsrf-token": csrfHeaderValue,
-      "csrf-token": csrfHeaderValue,
-    },
+  const headers = {
+    "Content-Type": "application/json",
+    "x-product-key": DEFAULT_PRODUCT_KEY,
   };
 
-  delete refreshClient.defaults.headers.common["Authorization"];
+  if (csrfHeaderValue) {
+    headers["x-csrf-token"] = csrfHeaderValue;
+    headers["x-xsrf-token"] = csrfHeaderValue;
+    headers["csrf-token"] = csrfHeaderValue;
+  }
 
   const applyRefreshResponse = (response) => {
     const newAccessToken = readAccessTokenFromResponse(response);
@@ -423,19 +463,65 @@ export const refreshAccessToken = async () => {
     return true;
   };
 
+  const runRefresh = async () => {
+    const lockReleased = await waitForSsoLockRelease();
+    if (!lockReleased) {
+      const lockError = new Error("SSO lock active");
+      lockError.code = "SSO_LOCK_ACTIVE";
+      throw lockError;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(buildAuthUrl(REFRESH_ENDPOINT), {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        keepalive: true,
+        headers,
+        body: JSON.stringify({ product_key: DEFAULT_PRODUCT_KEY }),
+        signal: controller.signal,
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      const axiosLikeResponse = {
+        data: payload || {},
+        headers: {
+          authorization: response.headers.get("authorization") || "",
+          "x-csrf-token": response.headers.get("x-csrf-token") || "",
+        },
+      };
+
+      if (!response.ok) {
+        const error = new Error(
+          payload?.message || `Refresh failed (${response.status})`
+        );
+        error.response = { status: response.status, data: payload };
+        throw error;
+      }
+
+      return applyRefreshResponse(axiosLikeResponse);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
   try {
     logAuthDebug("[auth] refreshAccessToken: start", {
       hasCsrfHeader: Boolean(csrfHeaderValue),
     });
-    const response = await refreshClient.post(
-      REFRESH_ENDPOINT,
-      { product_key: DEFAULT_PRODUCT_KEY },
-      config
-    );
 
-    return applyRefreshResponse(response);
+    return await runRefresh();
   } catch (error) {
-    const status = Number(error?.response?.status || 0);
+    const status = getErrorStatus(error);
     logAuthDebug("[auth] refreshAccessToken failed", {
       status,
       message: error?.message || "unknown_error",
@@ -444,16 +530,25 @@ export const refreshAccessToken = async () => {
     if (status === 401 || status === 403) {
       await new Promise((r) => setTimeout(r, 120));
       try {
-        const retry = await refreshClient.post(
-          REFRESH_ENDPOINT,
-          { product_key: DEFAULT_PRODUCT_KEY },
-          config
-        );
-        return applyRefreshResponse(retry);
+        return await runRefresh();
       } catch (retryError) {
+        retryError.__authHandled = true;
         handleUnauthorizedResponse(retryError, { redirect: true });
         throw retryError;
       }
+    }
+
+    if (error?.code === "SSO_LOCK_ACTIVE") {
+      console.warn("[auth] refresh skipped: sso exchange in progress");
+      throw error;
+    }
+
+    if (!status || error?.name === "AbortError" || axios.isCancel?.(error)) {
+      console.warn(
+        "[auth] token refresh interrupted by page reload. Tokens preserved."
+      );
+    } else if (status >= 500) {
+      console.warn("[auth] server error during refresh. Tokens preserved.");
     }
 
     throw error;
@@ -473,6 +568,16 @@ const refreshAccessTokenWithRetry = async () => {
   }
 };
 
+const getRefreshPromise = () => {
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessTokenWithRetry().finally(() => {
+      refreshPromise = null;
+    });
+  }
+
+  return refreshPromise;
+};
+
 /* -----------------------------
    ENSURE ACCESS TOKEN
 ----------------------------- */
@@ -480,11 +585,7 @@ const refreshAccessTokenWithRetry = async () => {
 export const ensureAccessToken = async () => {
   if (getAccessToken()) return true;
 
-  if (!refreshPromise) {
-    refreshPromise = refreshAccessTokenWithRetry().finally(() => {
-      refreshPromise = null;
-    });
-  }
+  getRefreshPromise();
 
   try {
     await refreshPromise;
@@ -581,24 +682,119 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    if (isRefreshing) {
+      originalRequest._retry = true;
+
+      return new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      }).then(({ token, csrf }) => {
+        originalRequest.headers = originalRequest.headers || {};
+        if (token) {
+          originalRequest.headers.authorization = `Bearer ${token}`;
+        }
+        if (csrf) {
+          originalRequest.headers["x-csrf-token"] = csrf;
+          originalRequest.headers["x-xsrf-token"] = csrf;
+          originalRequest.headers["csrf-token"] = csrf;
+        }
+        return api(originalRequest);
+      });
+    }
+
+    if (refreshPromise) {
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        await refreshPromise;
+        const token = getAccessToken();
+        const csrf = getCsrfToken();
+        processQueue(null, token, csrf);
+        originalRequest.headers = originalRequest.headers || {};
+        if (token) {
+          originalRequest.headers.authorization = `Bearer ${token}`;
+        }
+        if (csrf) {
+          originalRequest.headers["x-csrf-token"] = csrf;
+          originalRequest.headers["x-xsrf-token"] = csrf;
+          originalRequest.headers["csrf-token"] = csrf;
+        }
+        return api(originalRequest);
+      } catch (refreshError) {
+        processQueue(refreshError, null, null);
+
+        const refreshStatus = getErrorStatus(refreshError);
+        if (
+          (refreshStatus === 401 || refreshStatus === 403) &&
+          !refreshError?.__authHandled
+        ) {
+          handleUnauthorizedResponse(refreshError, {
+            redirect: !skipAuthRedirect,
+            skipIfAuthRoute: true,
+          });
+        } else if (
+          !refreshStatus ||
+          refreshError?.name === "AbortError" ||
+          axios.isCancel?.(refreshError)
+        ) {
+          console.warn(
+            "[auth] token refresh interrupted by page reload. Tokens preserved."
+          );
+        } else if (refreshStatus >= 500) {
+          console.warn("[auth] server error during refresh. Tokens preserved.");
+        }
+
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
+      }
+    }
+
     originalRequest._retry = true;
+    isRefreshing = true;
 
     try {
-      if (!refreshPromise) {
-        refreshPromise = refreshAccessTokenWithRetry().finally(() => {
-          refreshPromise = null;
-        });
+      await getRefreshPromise();
+      const token = getAccessToken();
+      const csrf = getCsrfToken();
+      processQueue(null, token, csrf);
+      originalRequest.headers = originalRequest.headers || {};
+      if (token) {
+        originalRequest.headers.authorization = `Bearer ${token}`;
       }
-
-      await refreshPromise;
+      if (csrf) {
+        originalRequest.headers["x-csrf-token"] = csrf;
+        originalRequest.headers["x-xsrf-token"] = csrf;
+        originalRequest.headers["csrf-token"] = csrf;
+      }
       return api(originalRequest);
     } catch (refreshError) {
-      handleUnauthorizedResponse(refreshError, {
-        redirect: !skipAuthRedirect,
-        skipIfAuthRoute: true,
-      });
+      processQueue(refreshError, null, null);
+
+      const refreshStatus = getErrorStatus(refreshError);
+      if (
+        (refreshStatus === 401 || refreshStatus === 403) &&
+        !refreshError?.__authHandled
+      ) {
+        handleUnauthorizedResponse(refreshError, {
+          redirect: !skipAuthRedirect,
+          skipIfAuthRoute: true,
+        });
+      } else if (
+        !refreshStatus ||
+        refreshError?.name === "AbortError" ||
+        axios.isCancel?.(refreshError)
+      ) {
+        console.warn(
+          "[auth] token refresh interrupted by page reload. Tokens preserved."
+        );
+      } else if (refreshStatus >= 500) {
+        console.warn("[auth] server error during refresh. Tokens preserved.");
+      }
 
       return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
     }
   }
 );

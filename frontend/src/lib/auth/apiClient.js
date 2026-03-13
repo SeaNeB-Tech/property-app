@@ -32,6 +32,25 @@ const ME_ENDPOINT = "/auth/me";
 let _refreshLock = null;
 let authFailureHandler = null;
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const SSO_LOCK_WAIT_MS = 2000;
+const SSO_LOCK_POLL_MS = 50;
+
+const isSsoLockActive = () =>
+  typeof window !== "undefined" && Boolean(window.__ACTIVE_SSO_LOCK__);
+
+const waitForSsoLockRelease = async () => {
+  if (!isSsoLockActive()) return true;
+
+  const start = Date.now();
+  while (isSsoLockActive() && Date.now() - start < SSO_LOCK_WAIT_MS) {
+    await sleep(SSO_LOCK_POLL_MS);
+  }
+
+  return !isSsoLockActive();
+};
+
 /* ---------------------------------------
  URL HELPERS
 --------------------------------------- */
@@ -145,11 +164,18 @@ const extractCsrfToken = (payload) => {
 const executeRefresh = async () => {
   const productKey = getProductKey();
 
+  const lockReleased = await waitForSsoLockRelease();
+  if (!lockReleased) {
+    console.warn("[auth] refresh skipped: sso exchange in progress");
+    return false;
+  }
+
   const response = await fetch(toAbsoluteUrl(REFRESH_ENDPOINT), {
     method: "POST",
     headers: buildHeaders({ includeCsrf: true }),
     credentials: "include",
     cache: "no-store",
+    keepalive: true,
     body: JSON.stringify({ product_key: productKey }),
   });
 
@@ -162,7 +188,16 @@ const executeRefresh = async () => {
   }
 
   if (!response.ok) {
-    clearAccessToken();
+    const status = Number(response.status || 0);
+    if (status === 401 || status === 403) {
+      clearAccessToken();
+    } else if (!status) {
+      console.warn(
+        "[auth] token refresh interrupted by page reload. Tokens preserved."
+      );
+    } else if (status >= 500) {
+      console.warn("[auth] server error during refresh. Tokens preserved.");
+    }
     return false;
   }
 
@@ -186,7 +221,17 @@ const executeRefreshWithRetry = async () => {
 
     try {
       return await executeRefresh();
-    } catch {
+    } catch (retryErr) {
+      const status = Number(
+        retryErr?.response?.status || retryErr?.status || 0
+      );
+      if (!status || retryErr?.name === "AbortError") {
+        console.warn(
+          "[auth] token refresh interrupted by page reload. Tokens preserved."
+        );
+      } else if (status >= 500) {
+        console.warn("[auth] server error during refresh. Tokens preserved.");
+      }
       return false;
     }
   }

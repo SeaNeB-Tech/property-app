@@ -151,13 +151,36 @@ export function AuthProvider({ children }) {
   }, [restoreSession]);
 
   useEffect(() => {
-    void restoreSession();
+    let isMounted = true;
+    let timer;
+
+    const runRestore = () => {
+      if (!isMounted) return;
+      void restoreSession();
+    };
+
+    const isSso =
+      typeof window !== "undefined" &&
+      new URL(window.location.href).searchParams.has("bridge_token");
+
+    if (isSso) {
+      runRestore();
+    } else {
+      timer = setTimeout(() => {
+        runRestore();
+      }, 300);
+    }
 
     const unsubscribe = subscribeAuthState(() => {
+      if (!isMounted) return;
       void restoreSession();
     });
 
-    return unsubscribe;
+    return () => {
+      isMounted = false;
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
   }, [restoreSession]);
 
   useEffect(() => {
