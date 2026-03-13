@@ -3,7 +3,7 @@ import { getCookie } from "@/lib/auth/cookieManager";
 import {
   clearAccessToken,
 } from "@/lib/auth/tokenStorage";
-import { hydrateAuthSession } from "@/lib/api/client";
+import { handleUnauthorizedResponse, hydrateAuthSession } from "@/lib/api/client";
 import {
   attachAuthorizationHeader,
   requestWithAuthSafeRetry,
@@ -92,8 +92,9 @@ const buildHeaders = ({ headers, includeCsrf = true }) => {
  AUTH FAILURE HANDLING
 --------------------------------------- */
 
-const triggerAuthFailure = async () => {
+const triggerAuthFailure = async (responseOrError) => {
   clearAccessToken();
+  handleUnauthorizedResponse(responseOrError || { status: 401 }, { redirect: true });
 
   if (typeof authFailureHandler === "function") {
     await authFailureHandler();
@@ -245,7 +246,7 @@ export const apiRequest = async (
     return response;
   }
 
-  await triggerAuthFailure();
+  await triggerAuthFailure(response);
 
   return response;
 };

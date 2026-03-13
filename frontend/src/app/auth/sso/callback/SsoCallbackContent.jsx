@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { hydrateAuthSession } from "@/lib/api/client";
+import { getDeviceInfo } from "@/lib/deviceInfo";
+import { clearAuthFailureArtifacts, shouldClearAuthOnError } from "@/services/auth.service";
 
 const AUTH_SSO_RESULT_KEY = "seaneb_sso_exchange_result";
 const AUTH_SSO_MESSAGE_TYPE = "seaneb:sso:exchange";
@@ -106,6 +108,7 @@ export default function SsoCallbackContent() {
     async function exchange() {
       const bridgeToken = params.get("bridge_token");
       const source = resolveSafeSource(params.get("source"));
+      const deviceInfo = getDeviceInfo();
 
       if (!bridgeToken) {
         publishSsoResult({ ok: false, source, error: "bridge_token missing in callback URL" });
@@ -125,18 +128,28 @@ export default function SsoCallbackContent() {
             target_product_key:
               String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() ||
               "property",
+            device_id: deviceInfo.device_id,
+            device_type: deviceInfo.device_type,
           }),
         });
 
+        let payload = {};
+        try {
+          payload = await res.clone().json();
+        } catch {
+          payload = {};
+        }
+
         if (!res.ok) {
+          if (shouldClearAuthOnError({ status: res.status, data: payload })) {
+            clearAuthFailureArtifacts();
+          }
           publishSsoResult({ ok: false, source, error: "Bridge exchange failed" });
           redirectToSource(source);
           return;
         }
 
         try {
-          const payload = await res.clone().json();
-
           const accessToken = String(
             payload?.accessToken ||
               payload?.access_token ||

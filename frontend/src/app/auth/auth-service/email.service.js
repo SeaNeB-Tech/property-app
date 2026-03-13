@@ -1,5 +1,7 @@
 import api from "@/lib/api/client";
 import { pickErrorMessage } from "@/app/auth/auth-service/service.utils";
+import { getDeviceInfo } from "@/lib/deviceInfo";
+import { clearAuthFailureArtifacts, shouldClearAuthOnError } from "@/services/auth.service";
 
 const PURPOSE_SIGNUP_EMAIL_VERIFICATION = 1;
 
@@ -30,15 +32,21 @@ export const verifyEmailOtp = async ({
   if (!email || !otp) {
     throw new Error("Email and OTP are required");
   }
+  const deviceInfo = getDeviceInfo();
 
   try {
     const response = await api.post("/v1/auth/email/verify-otp", {
       email: email.trim(),
       otp: String(otp),
       purpose,
+      device_id: deviceInfo.device_id,
+      device_type: deviceInfo.device_type,
     });
     return response.data;
   } catch (error) {
+    if (shouldClearAuthOnError(error)) {
+      clearAuthFailureArtifacts();
+    }
     throw new Error(pickErrorMessage(error, "Invalid email OTP"));
   }
 };

@@ -4,13 +4,19 @@ import {
   getDefaultProductKey,
   getDefaultProductName,
 } from "@/services/dashboard.service";
-import { getJsonCookie, setJsonCookie } from "@/services/auth.service";
+import {
+  clearAuthFailureArtifacts,
+  getJsonCookie,
+  setJsonCookie,
+  shouldClearAuthOnError,
+} from "@/services/auth.service";
 import {
   getErrorStatus,
   getErrorText,
   pickFirst,
   toText,
 } from "@/app/auth/auth-service/service.utils";
+import { getDeviceInfo } from "@/lib/deviceInfo";
 
 const IDENTIFIER_TYPE_MOBILE = 0;
 const PURPOSE_SIGNUP_OR_LOGIN = 0;
@@ -223,6 +229,7 @@ export const sendOtp = async ({ via, disableFallback = false } = {}) => {
 
 export const verifyOtp = async ({ otp }) => {
   const ctx = getOtpContext();
+  const deviceInfo = getDeviceInfo();
 
   const code = toText(otp);
 
@@ -237,28 +244,37 @@ export const verifyOtp = async ({ otp }) => {
     otp: code,
     purpose: getPurpose(ctx),
     product_key: getDefaultProductKey(),
+    device_id: deviceInfo.device_id,
+    device_type: deviceInfo.device_type,
   };
 
   let res = null;
   let lastError = null;
 
-  for (const path of OTP_VERIFY_PATHS) {
-    try {
-      res = await requestWithProductRecovery(path, payload);
-      break;
-    } catch (err) {
-      lastError = err;
+  try {
+    for (const path of OTP_VERIFY_PATHS) {
+      try {
+        res = await requestWithProductRecovery(path, payload);
+        break;
+      } catch (err) {
+        lastError = err;
 
-      const status = Number(err?.response?.status || 0);
+        const status = Number(err?.response?.status || 0);
 
-      if (status !== 404 && status !== 405) {
-        throw err;
+        if (status !== 404 && status !== 405) {
+          throw err;
+        }
       }
     }
-  }
 
-  if (!res || !res?.data) {
-    throw lastError || new Error("OTP verification failed");
+    if (!res || !res?.data) {
+      throw lastError || new Error("OTP verification failed");
+    }
+  } catch (error) {
+    if (shouldClearAuthOnError(error)) {
+      clearAuthFailureArtifacts();
+    }
+    throw error;
   }
 
   saveTokensFromVerifyResponse(res);

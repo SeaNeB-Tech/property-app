@@ -1,6 +1,8 @@
 import axios from "axios";
 import { ssoDebugLog } from "@/lib/observability/ssoDebug";
 import { hydrateAuthSession } from "@/lib/api/client";
+import { getDeviceInfo } from "@/lib/deviceInfo";
+import { clearAuthFailureArtifacts, shouldClearAuthOnError } from "@/services/auth.service";
 
 const DEFAULT_PRODUCT_KEY = String(
   process.env.NEXT_PUBLIC_PRODUCT_KEY || "property"
@@ -30,6 +32,7 @@ const pickTokenValue = (payload, keys) => {
 
 export const exchangeSsoBridgeToken = async (bridgeToken) => {
   const token = String(bridgeToken || "").trim();
+  const deviceInfo = getDeviceInfo();
 
   if (!token) {
     throw new Error("Missing bridge token");
@@ -51,6 +54,8 @@ export const exchangeSsoBridgeToken = async (bridgeToken) => {
       {
         bridge_token: token,
         target_product_key: DEFAULT_PRODUCT_KEY,
+        device_id: deviceInfo.device_id,
+        device_type: deviceInfo.device_type,
       },
       {
         withCredentials: true,
@@ -68,6 +73,10 @@ export const exchangeSsoBridgeToken = async (bridgeToken) => {
       route: "/api/v1/sso/exchange",
       status,
     });
+
+    if (shouldClearAuthOnError(error)) {
+      clearAuthFailureArtifacts();
+    }
 
     throw new Error(`SSO exchange failed${status ? ` (${status})` : ""}`);
   }

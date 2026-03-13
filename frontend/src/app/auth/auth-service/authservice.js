@@ -1,9 +1,16 @@
 import { authApi, hydrateAuthSession } from "@/lib/api/client";
-import { getJsonCookie, getCookie, removeCookie } from "@/services/auth.service";
+import {
+  clearAuthFailureArtifacts,
+  clearPanelAuthSession,
+  getCookie,
+  getJsonCookie,
+  removeCookie,
+  shouldClearAuthOnError,
+} from "@/services/auth.service";
 import { authStore } from "./store/authStore";
-import { clearPanelAuthSession } from "@/services/auth.service";
 import { getAuthAppUrl } from "@/lib/core/appUrls";
 import { postLogoutToOpener } from "@/lib/auth/crossTabMessaging";
+import { getDeviceInfo } from "@/lib/deviceInfo";
 
 const IDENTIFIER_TYPE_MOBILE = 0;
 const PURPOSE_SIGNUP_OR_LOGIN = 0;
@@ -185,6 +192,7 @@ const verifyOtpRequest = async (payload) => {
 export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
   const ctx = context || getJsonCookie("otp_context");
   if (!ctx) throw new Error("OTP context missing");
+  const deviceInfo = getDeviceInfo();
 
   const otpPurpose =
     Number.isFinite(Number(ctx.purpose)) &&
@@ -199,9 +207,20 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
     otp: String(otp).trim(),
     purpose: otpPurpose,
     product_key: PRODUCT_KEY,
+    device_id: deviceInfo.device_id,
+    device_type: deviceInfo.device_type,
   };
 
-  const res = await verifyOtpRequest(verifyPayload);
+  let res;
+  try {
+    res = await verifyOtpRequest(verifyPayload);
+  } catch (error) {
+    if (shouldClearAuthOnError(error)) {
+      clearAuthFailureArtifacts();
+    }
+    throw error;
+  }
+
   const data = res.data || {};
 
   const responseAccessToken = readAccessValueFromResponse(res);

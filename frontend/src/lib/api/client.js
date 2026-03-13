@@ -4,7 +4,7 @@ import { getAuthAppUrl } from "@/lib/core/appUrls";
 import { getCookie as getCookieShared } from "@/lib/auth/cookieManager";
 import { setAuthFlowContext } from "@/lib/auth/flowContext";
 import { authStore } from "@/app/auth/auth-service/store/authStore";
-import { notifyAuthChanged } from "@/services/auth.service";
+import { clearAuthFailureArtifacts, notifyAuthChanged } from "@/services/auth.service";
 
 const REFRESH_ENDPOINT = "/auth/refresh";
 const DEFAULT_PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
@@ -44,6 +44,24 @@ const CSRF_COOKIE_NAMES = [
   "XSRF_TOKEN",
   "_csrf",
 ];
+const REFRESH_COOKIE_NAMES = [
+  "refresh_token_property",
+  "refresh_token",
+  "refreshToken",
+  "refreshToken_property",
+  "property_refresh_token",
+  "refreshtoken",
+];
+const ACCESS_COOKIE_NAMES = ["access_token", "accessToken", "access_token_property"];
+const SESSION_COOKIE_NAMES = ["auth_session", "auth_session_start", "auth_redirect_in_progress"];
+const AUTH_COOKIE_NAMES = Array.from(
+  new Set([
+    ...CSRF_COOKIE_NAMES,
+    ...REFRESH_COOKIE_NAMES,
+    ...ACCESS_COOKIE_NAMES,
+    ...SESSION_COOKIE_NAMES,
+  ])
+);
 
 /* -----------------------------
    MULTI TAB TOKEN SYNC
@@ -182,16 +200,6 @@ const stripAuthorizationHeader = (headers) => {
   return nextHeaders;
 };
 
-const shouldInvalidateClientSession = (error) => {
-  const status = Number(error?.response?.status || 0);
-  return status === 401;
-};
-
-const isInvalidRefreshSession = (error) => {
-  const status = Number(error?.response?.status || 0);
-  return status === 401;
-};
-
 const shouldRetryRefresh = (error) => {
   const status = Number(error?.response?.status || 0);
   if (!error?.response) return true;
@@ -219,6 +227,109 @@ const redirectToAuthLogin = () => {
 
   setAuthFlowContext({ source, returnTo });
   window.location.href = getAuthAppUrl("/auth/login");
+};
+
+/* -----------------------------
+   UNAUTHORIZED HANDLING
+----------------------------- */
+
+const isAuthRoute = () => {
+  if (typeof window === "undefined") return false;
+  const path = String(window.location.pathname || "");
+  return path.startsWith("/auth");
+};
+
+const getAuthCookieDomains = () => {
+  if (typeof window === "undefined") return [""];
+  const configuredDomain = String(process.env.NEXT_PUBLIC_COOKIE_DOMAIN || "").trim();
+  const host = String(window.location.hostname || "").toLowerCase();
+  const maybeParentDomain = host.includes(".")
+    ? `.${host.split(".").slice(-2).join(".")}`
+    : "";
+  return Array.from(new Set(["", configuredDomain, maybeParentDomain].filter(Boolean)));
+};
+
+const expireCookie = (name, domain = "") => {
+  if (typeof document === "undefined") return;
+  const isSecure = window.location.protocol === "https:";
+  const sameSite = isSecure ? "; SameSite=None" : "";
+  const secure = isSecure ? "; Secure" : "";
+  const base = `${encodeURIComponent(name)}=; path=/; max-age=0${sameSite}`;
+  const domainAttr = domain ? `; domain=${domain}` : "";
+  document.cookie = `${base}${domainAttr}${secure}`;
+};
+
+const expireAuthCookies = () => {
+  if (typeof document === "undefined") return;
+  const domains = getAuthCookieDomains();
+  for (const name of AUTH_COOKIE_NAMES) {
+    for (const domain of domains) {
+      expireCookie(name, domain);
+    }
+  }
+};
+
+const clearStoredAccessToken = () => {
+  if (typeof window === "undefined") return;
+  const keys = ["access_token", "property:volatile:access_token"];
+  for (const key of keys) {
+    try {
+      window.localStorage.removeItem(key);
+      window.sessionStorage.removeItem(key);
+    } catch {
+      // ignore storage errors
+    }
+  }
+};
+
+const resetAuthSession = ({ clearCookies = true, broadcast = true } = {}) => {
+  const canUseAuthService =
+    clearCookies && typeof clearAuthFailureArtifacts === "function";
+
+  if (canUseAuthService) {
+    clearAuthFailureArtifacts();
+  } else {
+    authStore?.clearAll?.();
+    clearInMemoryAccessToken();
+    authStore?.setRefreshToken?.("");
+  }
+
+  clearStoredAccessToken();
+
+  if (clearCookies) {
+    // HttpOnly cookies are cleared by the backend via Set-Cookie Max-Age=0.
+    expireAuthCookies();
+  }
+
+  if (broadcast && !canUseAuthService) {
+    notifyAuthChanged();
+  }
+};
+
+export const handleUnauthorizedResponse = (
+  errorOrResponse,
+  { redirect = false, skipIfAuthRoute = true, onUnauthorized } = {}
+) => {
+  const status = Number(errorOrResponse?.response?.status || errorOrResponse?.status || 0);
+  if (status !== 401) return false;
+
+  logAuthDebug("[auth] unauthorized response: clearing auth state", {
+    redirect: Boolean(redirect),
+  });
+
+  resetAuthSession();
+
+  if (typeof onUnauthorized === "function") {
+    try {
+      onUnauthorized();
+    } catch {}
+  }
+
+  if (redirect && !(skipIfAuthRoute && isAuthRoute())) {
+    redirectToAuthLogin();
+  }
+
+  return true;
 };
 
 /* -----------------------------
@@ -332,12 +443,17 @@ export const refreshAccessToken = async () => {
 
     if (status === 401 || status === 403) {
       await new Promise((r) => setTimeout(r, 120));
-      const retry = await refreshClient.post(
-        REFRESH_ENDPOINT,
-        { product_key: DEFAULT_PRODUCT_KEY },
-        config
-      );
-      return applyRefreshResponse(retry);
+      try {
+        const retry = await refreshClient.post(
+          REFRESH_ENDPOINT,
+          { product_key: DEFAULT_PRODUCT_KEY },
+          config
+        );
+        return applyRefreshResponse(retry);
+      } catch (retryError) {
+        handleUnauthorizedResponse(retryError, { redirect: true });
+        throw retryError;
+      }
     }
 
     throw error;
@@ -451,8 +567,17 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error?.config || {};
     const status = Number(error?.response?.status || 0);
+    const skipAuthRedirect = Boolean(originalRequest?.skipAuthRedirect);
 
-    if (status !== 401 || originalRequest._retry) {
+    if (status !== 401) {
+      return Promise.reject(error);
+    }
+
+    if (originalRequest._retry) {
+      handleUnauthorizedResponse(error, {
+        redirect: !skipAuthRedirect,
+        skipIfAuthRoute: true,
+      });
       return Promise.reject(error);
     }
 
@@ -468,13 +593,10 @@ api.interceptors.response.use(
       await refreshPromise;
       return api(originalRequest);
     } catch (refreshError) {
-      if (shouldInvalidateClientSession(refreshError)) {
-        setCsrfTokenInMemory("");
-      }
-
-      if (isInvalidRefreshSession(refreshError)) {
-        redirectToAuthLogin();
-      }
+      handleUnauthorizedResponse(refreshError, {
+        redirect: !skipAuthRedirect,
+        skipIfAuthRoute: true,
+      });
 
       return Promise.reject(refreshError);
     }
