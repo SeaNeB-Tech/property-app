@@ -17,6 +17,7 @@ const logAuthDebug = (...args) => {
 
 const FAILURE_COOLDOWN_MS = 5000;
 const BOOTSTRAP_LOCK_KEY = "seaneb:auth:bootstrap:lock";
+const BOOTSTRAP_TAB_KEY = "seaneb:auth:bootstrap:tab";
 const BOOTSTRAP_LOCK_TTL_MS = 8000;
 const BOOTSTRAP_LOCK_WAIT_MS = 2500;
 const BOOTSTRAP_LOCK_POLL_MS = 100;
@@ -52,6 +53,28 @@ const canUseStorage = () => {
     return Boolean(window.localStorage);
   } catch {
     return false;
+  }
+};
+
+const canUseSessionStorage = () => {
+  if (typeof window === "undefined") return false;
+  try {
+    return Boolean(window.sessionStorage);
+  } catch {
+    return false;
+  }
+};
+
+const getBootstrapTabId = () => {
+  if (!canUseSessionStorage()) return "";
+  try {
+    const existing = window.sessionStorage.getItem(BOOTSTRAP_TAB_KEY);
+    if (existing) return existing;
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    window.sessionStorage.setItem(BOOTSTRAP_TAB_KEY, id);
+    return id;
+  } catch {
+    return "";
   }
 };
 
@@ -94,14 +117,20 @@ const acquireBootstrapLock = () => {
 
   const now = Date.now();
   const existing = readStorageJson(BOOTSTRAP_LOCK_KEY);
+  const tabId = getBootstrapTabId();
 
   if (existing && now < Number(existing.expiresAt || 0)) {
+    if (tabId && existing.tabId === tabId) {
+      // Same-tab hard refresh: reclaim stale lock immediately.
+    } else {
     return { acquired: false, id: existing.id || "" };
+    }
   }
 
   const id = `${now}-${Math.random().toString(36).slice(2, 8)}`;
   const entry = {
     id,
+    tabId,
     startedAt: now,
     expiresAt: now + BOOTSTRAP_LOCK_TTL_MS,
   };
@@ -130,10 +159,14 @@ const releaseBootstrapLock = (id) => {
 const waitForBootstrapLockRelease = async () => {
   if (!canUseStorage()) return true;
 
+  const tabId = getBootstrapTabId();
   const start = Date.now();
   while (Date.now() - start < BOOTSTRAP_LOCK_WAIT_MS) {
     const current = readStorageJson(BOOTSTRAP_LOCK_KEY);
     if (!current || Date.now() >= Number(current.expiresAt || 0)) {
+      return true;
+    }
+    if (tabId && current.tabId === tabId) {
       return true;
     }
     await sleep(BOOTSTRAP_LOCK_POLL_MS);

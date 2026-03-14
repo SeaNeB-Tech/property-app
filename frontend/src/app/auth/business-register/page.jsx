@@ -448,7 +448,7 @@ export default function BusinessRegisterPage() {
   useEffect(() => {
     const init = async () => {
       const profileCompleted = getCookie("profile_completed")
-      const hasSession = await ensureSessionReady()
+      const hasSession = await ensureAuthSessionReady()
       const forceRegister =
         typeof window !== "undefined" &&
         new URLSearchParams(window.location.search).get("force") === "1"

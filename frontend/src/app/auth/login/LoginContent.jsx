@@ -149,11 +149,7 @@ export default function LoginContent() {
   const [error, setError] = useState("");
   const [autoRedirecting, setAutoRedirecting] = useState(false);
   const [allowLoginForm, setAllowLoginForm] = useState(true);
-  const [flowContext] = useState(() => {
-    if (typeof window === "undefined") return getAuthFlowContext();
-    ingestAuthFlowContextFromWindowName();
-    return ingestAuthFlowContextFromUrl();
-  });
+  const [flowContext, setFlowContext] = useState(() => getAuthFlowContext());
   const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition();
   const source = String(flowContext?.source || "").trim().toLowerCase();
   const returnToParam = String(flowContext?.returnTo || "").trim();
@@ -168,6 +164,13 @@ export default function LoginContent() {
       window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
     }
   }, [language]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    ingestAuthFlowContextFromWindowName();
+    const nextContext = ingestAuthFlowContextFromUrl();
+    setFlowContext(nextContext);
+  }, []);
 
   useEffect(() => {
     stripAuthFlowParamsFromAddressBar();
