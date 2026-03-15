@@ -76,7 +76,8 @@ export default function RequireAuth({
 
         if ((hasRefresh || hasCsrf) && !retryRestoreRef.current) {
           retryRestoreRef.current = true;
-          await restoreSession?.();
+          // Force a fresh restore when server hints say a session exists.
+          await restoreSession?.({ force: true });
         }
       } catch {
         if (!active) return;

@@ -24,6 +24,8 @@ import { verifyOtpAndLogin, waitForAuthCookies } from "@/app/auth/auth-service/a
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
 import { hydrateAuthSession, refreshAccessToken } from "@/lib/api/client"
 import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage"
+import { getSessionHint } from "@/lib/auth/sessionHint"
+import { clearRefreshBudget } from "@/lib/auth/refreshBudget"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
@@ -788,14 +790,29 @@ export default function BusinessRegisterPage() {
 
   const hasAccessToken = () => Boolean(String(getAccessToken() || "").trim())
 
+  const tryRefreshAccessToken = async () => {
+    try {
+      await refreshAccessToken()
+      return true
+    } catch (err) {
+      const code = String(err?.response?.data?.code || err?.data?.code || "").trim().toUpperCase()
+      if (code === "REFRESH_LIMIT_REACHED") {
+        clearRefreshBudget()
+        try {
+          await refreshAccessToken()
+          return true
+        } catch {
+          return false
+        }
+      }
+      return false
+    }
+  }
+
   const ensureAuthSessionReady = async () => {
     const ready = await ensureSessionReady({ force: true })
     if (ready && !hasAccessToken()) {
-      try {
-        await refreshAccessToken()
-      } catch {
-        // ignore refresh failures; session may still be cookie-backed
-      }
+      await tryRefreshAccessToken()
     }
 
     if (ready) return true
@@ -805,16 +822,26 @@ export default function BusinessRegisterPage() {
       if (waitResult?.ok) {
         const retried = await ensureSessionReady({ force: true })
         if (retried && !hasAccessToken()) {
-          try {
-            await refreshAccessToken()
-          } catch {
-            // ignore refresh failures
-          }
+          await tryRefreshAccessToken()
         }
         return retried
       }
     } catch {
       // ignore cookie wait failures
+    }
+
+    try {
+      const hint = await getSessionHint({ force: true })
+      if (hint?.hasRefreshSession || hint?.hasCsrfCookie) {
+        await tryRefreshAccessToken()
+        const retried = await ensureSessionReady({ force: true })
+        if (retried && !hasAccessToken()) {
+          await tryRefreshAccessToken()
+        }
+        return retried
+      }
+    } catch {
+      // ignore session hint failures
     }
 
     return false
