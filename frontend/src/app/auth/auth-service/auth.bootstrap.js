@@ -9,6 +9,7 @@ import { getSessionHint } from "@/lib/auth/sessionHint";
 import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 import { clearRefreshBudget, tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { acquireRefreshLock, releaseRefreshLock } from "@/lib/auth/refreshLock";
 
 const PRODUCT_KEY = process.env.NEXT_PUBLIC_PRODUCT_KEY?.trim() || "property";
 const AUTH_DEBUG =
@@ -261,16 +262,27 @@ const requestRefresh = async () => {
     throw lockError;
   }
 
-  return fetch(buildApiPath("/auth/refresh"), {
-    method: "POST",
-    credentials: "include",
-    cache: "no-store",
-    keepalive: true,
-    headers,
-    body: JSON.stringify({
-      product_key: PRODUCT_KEY,
-    }),
-  });
+  const refreshLock = await acquireRefreshLock({ source: "auth-bootstrap" });
+  if (!refreshLock.acquired) {
+    const lockError = new Error("Refresh lock unavailable");
+    lockError.code = "REFRESH_LOCKED";
+    throw lockError;
+  }
+
+  try {
+    return fetch(buildApiPath("/auth/refresh"), {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      keepalive: true,
+      headers,
+      body: JSON.stringify({
+        product_key: PRODUCT_KEY,
+      }),
+    });
+  } finally {
+    releaseRefreshLock(refreshLock.id);
+  }
 };
 
 const requestSessionHint = async ({ force = false } = {}) => {
@@ -383,7 +395,14 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
 
           if (!refreshResponse.ok) {
             const status = Number(refreshResponse.status || 0);
-
+            if ([401, 403].includes(status)) {
+              return {
+                ok: false,
+                refreshStatus: status,
+                canRetry: false,
+                invalidSession: true,
+              };
+            }
             const canRetry = [429, 500, 502, 503, 504].includes(status);
 
             return {
@@ -457,6 +476,13 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
           return confirmMe.ok;
         }
 
+        const status = Number(refresh.refreshStatus || 0);
+        if ([401, 403].includes(status)) {
+          clearAccessToken();
+          lastFailureAt = Date.now();
+          return false;
+        }
+
         return true;
       }
 
@@ -476,6 +502,12 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
         const refresh = await hydrateTokenFromRefresh();
 
         if (!refresh.ok) {
+          if (refresh.invalidSession) {
+            clearAccessToken();
+            lastFailureAt = Date.now();
+            return false;
+          }
+
           if (refresh.limited) {
             lastFailureAt = Date.now();
             return false;
@@ -489,13 +521,6 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
           }
 
           if ([401, 403].includes(status)) {
-            if (hasRefreshSession) {
-              logAuthDebug("[auth.bootstrap] refresh rejected but session hint true", {
-                status,
-              });
-              return true;
-            }
-
             clearAccessToken();
             lastFailureAt = Date.now();
             return false;

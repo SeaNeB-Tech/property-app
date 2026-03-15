@@ -108,7 +108,10 @@ const readCsrfValueFromResponse = (response) => {
   const data = response?.data || {};
   const fromBody = deepTokenValue(data, ["csrf_token_property"]);
   const fromHeader = String(
-    response?.headers?.["x-csrf-token"] || ""
+    response?.headers?.["x-csrf-token"] ||
+      response?.headers?.["csrf-token"] ||
+      response?.headers?.["x-xsrf-token"] ||
+      ""
   ).trim();
   return String(fromBody || fromHeader || "").trim();
 };

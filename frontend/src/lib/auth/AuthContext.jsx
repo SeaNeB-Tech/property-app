@@ -167,24 +167,13 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let isMounted = true;
-    let timer;
 
     const runRestore = () => {
       if (!isMounted) return;
       void restoreSession();
     };
 
-    const isSso =
-      typeof window !== "undefined" &&
-      new URL(window.location.href).searchParams.has("bridge_token");
-
-    if (isSso) {
-      runRestore();
-    } else {
-      timer = setTimeout(() => {
-        runRestore();
-      }, 300);
-    }
+    runRestore();
 
     const unsubscribe = subscribeAuthState(() => {
       if (!isMounted) return;
@@ -193,7 +182,6 @@ export function AuthProvider({ children }) {
 
     return () => {
       isMounted = false;
-      if (timer) clearTimeout(timer);
       unsubscribe();
     };
   }, [restoreSession]);

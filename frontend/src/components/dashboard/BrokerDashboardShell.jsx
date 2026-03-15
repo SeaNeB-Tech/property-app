@@ -6,7 +6,6 @@ import { getCookie, setCookie } from "@/services/auth.service";
 import BrandLogo from "@/components/ui/BrandLogo";
 import { getAuthLoginUrl, getListingAppUrl } from "@/lib/core/appUrls";
 import { useAuth } from "@/lib/auth/AuthContext";
-import { getSessionHint } from "@/lib/auth/sessionHint";
 import { logoutPanelSession } from "@/services/auth.service";
 import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
 import { refreshAccessToken } from "@/lib/api/client";
@@ -39,11 +38,10 @@ const hasBusinessRegistration = (user = null) => {
 
 export default function BrokerDashboardShell() {
   const router = useRouter();
-  const { status, isRestoring, isReady, user, logout, restoreSession } = useAuth();
+  const { status, isRestoring, isReady, user, logout } = useAuth();
   const [sessionChecked, setSessionChecked] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const dropdownRef = useRef(null);
-  const graceTimerRef = useRef(null);
   const tokenHydrateAttemptedRef = useRef(false);
 
   const userName = useMemo(
@@ -66,31 +64,7 @@ export default function BrokerDashboardShell() {
     const validate = async () => {
       if (!active || !isReady || isRestoring || status === "restoring") return;
 
-      if (status !== "authenticated") {
-        try {
-          const hint = await getSessionHint({ force: true });
-          if (!active) return;
-          if (hint?.hasRefreshSession || hint?.hasCsrfCookie) {
-            await restoreSession?.({ force: true });
-            return;
-          }
-        } catch {
-          // ignore hint failures
-        }
-
-        const returnTo =
-          typeof window !== "undefined" ? window.location.href : "/dashboard/broker";
-        const loginUrl = getAuthLoginUrl({
-          returnTo,
-          source: "main-app",
-        });
-        if (/^https?:\/\//i.test(loginUrl)) {
-          window.location.href = loginUrl;
-        } else {
-          router.replace(loginUrl);
-        }
-        return;
-      }
+      if (status !== "authenticated") return;
 
       if (!tokenHydrateAttemptedRef.current) {
         tokenHydrateAttemptedRef.current = true;
@@ -138,14 +112,7 @@ export default function BrokerDashboardShell() {
     return () => {
       active = false;
     };
-  }, [isReady, isRestoring, restoreSession, router, status, user]);
-
-  useEffect(() => {
-    const timer = graceTimerRef.current;
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
+  }, [isReady, isRestoring, router, status, user]);
 
   useEffect(() => {
     if (!isProfileOpen) return undefined;

@@ -1,7 +1,7 @@
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
-import { getCookie } from "@/lib/auth/cookieManager";
 import {
   clearAccessToken,
+  getCsrfToken as getStoredCsrfToken,
 } from "@/lib/auth/tokenStorage";
 import { handleUnauthorizedResponse, hydrateAuthSession } from "@/lib/api/client";
 import { getSessionHint } from "@/lib/auth/sessionHint";
@@ -9,8 +9,8 @@ import {
   attachAuthorizationHeader,
   requestWithAuthSafeRetry,
 } from "@/lib/auth/apiClientSafe";
-import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 import { clearRefreshBudget, tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
+import { acquireRefreshLock, releaseRefreshLock } from "@/lib/auth/refreshLock";
 
 const normalizeBaseUrl = (value) =>
   String(value || "").trim().replace(/\/+$/, "");
@@ -20,8 +20,6 @@ const RESOLVED_API_BASE_URL = normalizeBaseUrl(API_BASE_URL || "");
 const DEFAULT_PRODUCT_KEY =
   String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() ||
   "property";
-
-const CSRF_COOKIE_CANDIDATES = CSRF_COOKIE_KEYS;
 
 const LOGIN_ENDPOINT = "/auth/login";
 const REFRESH_ENDPOINT = "/auth/refresh";
@@ -75,13 +73,7 @@ const toAbsoluteUrl = (path) => {
  TOKEN / COOKIE HELPERS
 --------------------------------------- */
 
-const getCsrfToken = () => {
-  for (const name of CSRF_COOKIE_CANDIDATES) {
-    const value = String(getCookie(name) || "").trim();
-    if (value) return value;
-  }
-  return "";
-};
+const getCsrfToken = () => String(getStoredCsrfToken() || "").trim();
 
 const getProductKey = () => DEFAULT_PRODUCT_KEY;
 
@@ -153,12 +145,15 @@ const extractAccessToken = (payload) => {
   ).trim();
 };
 
-const extractCsrfToken = (payload) => {
+const extractCsrfToken = (payload, headers = null) => {
   return String(
     payload?.csrfToken ||
       payload?.csrf_token ||
       payload?.data?.csrfToken ||
       payload?.data?.csrf_token ||
+      headers?.get?.("x-csrf-token") ||
+      headers?.get?.("csrf-token") ||
+      headers?.get?.("x-xsrf-token") ||
       ""
   ).trim();
 };
@@ -181,14 +176,25 @@ const executeRefresh = async () => {
     return false;
   }
 
-  const response = await fetch(LOCAL_REFRESH_ENDPOINT, {
-    method: "POST",
-    headers: buildHeaders({ includeCsrf: true }),
-    credentials: "include",
-    cache: "no-store",
-    keepalive: true,
-    body: JSON.stringify({ product_key: productKey }),
-  });
+  const refreshLock = await acquireRefreshLock({ source: "auth-api-client" });
+  if (!refreshLock.acquired) {
+    console.warn("[auth] refresh skipped: lock unavailable");
+    return false;
+  }
+
+  let response;
+  try {
+    response = await fetch(LOCAL_REFRESH_ENDPOINT, {
+      method: "POST",
+      headers: buildHeaders({ includeCsrf: true }),
+      credentials: "include",
+      cache: "no-store",
+      keepalive: true,
+      body: JSON.stringify({ product_key: productKey }),
+    });
+  } finally {
+    releaseRefreshLock(refreshLock.id);
+  }
 
   let payload = null;
 
@@ -213,7 +219,7 @@ const executeRefresh = async () => {
   }
 
   const accessToken = extractAccessToken(payload);
-  const csrfToken = extractCsrfToken(payload);
+  const csrfToken = extractCsrfToken(payload, response.headers);
 
   if (accessToken || csrfToken) {
     hydrateAuthSession({ accessToken, csrfToken, broadcast: true });

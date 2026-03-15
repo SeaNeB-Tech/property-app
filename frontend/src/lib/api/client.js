@@ -6,6 +6,7 @@ import { setAuthFlowContext } from "@/lib/auth/flowContext";
 import { authStore } from "@/app/auth/auth-service/store/authStore";
 import { clearAuthFailureArtifacts, notifyAuthChanged } from "@/services/auth.service";
 import { clearRefreshBudget, tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
+import { acquireRefreshLock, releaseRefreshLock } from "@/lib/auth/refreshLock";
 import {
   ACCESS_COOKIE_KEYS,
   CSRF_COOKIE_KEYS,
@@ -175,8 +176,16 @@ const getFirstCookieValue = (names = []) => {
   return "";
 };
 
+const getStoredCsrfToken = () =>
+  String(authStore?.getCsrfToken?.() || "").trim();
+
 const getCsrfToken = () =>
-  String(getFirstCookieValue(CSRF_COOKIE_NAMES) || inMemoryCsrfToken || "").trim();
+  String(
+    getStoredCsrfToken() ||
+      getFirstCookieValue(CSRF_COOKIE_NAMES) ||
+      inMemoryCsrfToken ||
+      ""
+  ).trim();
 
 const getAccessToken = () => String(inMemoryAccessToken || "").trim();
 
@@ -388,6 +397,9 @@ const readCsrfTokenFromResponse = (response) => {
       data?.csrf_token ||
       data?.csrfToken ||
       response?.headers?.["x-csrf-token"] ||
+      response?.headers?.["csrf-token"] ||
+      response?.headers?.["x-xsrf-token"] ||
+      response?.headers?.["xsrf-token"] ||
       ""
   ).trim();
 };
@@ -476,6 +488,13 @@ export const refreshAccessToken = async () => {
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+    const refreshLock = await acquireRefreshLock({ source: "api-client" });
+    if (!refreshLock.acquired) {
+      const lockError = new Error("Refresh lock unavailable");
+      lockError.code = "REFRESH_LOCKED";
+      clearTimeout(timeoutId);
+      throw lockError;
+    }
 
     try {
       const response = await fetch(LOCAL_REFRESH_ENDPOINT, {
@@ -513,6 +532,7 @@ export const refreshAccessToken = async () => {
 
       return applyRefreshResponse(axiosLikeResponse);
     } finally {
+      releaseRefreshLock(refreshLock.id);
       clearTimeout(timeoutId);
     }
   };

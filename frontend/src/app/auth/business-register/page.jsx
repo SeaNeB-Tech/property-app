@@ -27,6 +27,7 @@ import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage"
 import { getSessionHint } from "@/lib/auth/sessionHint"
 import { clearRefreshBudget } from "@/lib/auth/refreshBudget"
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl"
+import { acquireRefreshLock, releaseRefreshLock } from "@/lib/auth/refreshLock"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
@@ -1415,17 +1416,27 @@ export default function BusinessRegisterPage() {
               logAuthDebug("[business-register] manual refresh after register", {
                 hasCsrfHeader: Boolean(csrfToken),
               })
-              const refreshResp = await fetch(refreshUrl, {
-                method: "POST",
-                credentials: "include",
-                cache: "no-store",
-                headers: {
-                  "content-type": "application/json",
-                  "x-product-key": productKey,
-                  ...buildCsrfHeaders(csrfToken),
-                },
-                body: JSON.stringify({ product_key: productKey }),
-              })
+              const refreshLock = await acquireRefreshLock({ source: "business-register" })
+              if (!refreshLock.acquired) {
+                throw new Error("Refresh lock unavailable")
+              }
+
+              let refreshResp
+              try {
+                refreshResp = await fetch(refreshUrl, {
+                  method: "POST",
+                  credentials: "include",
+                  cache: "no-store",
+                  headers: {
+                    "content-type": "application/json",
+                    "x-product-key": productKey,
+                    ...buildCsrfHeaders(csrfToken),
+                  },
+                  body: JSON.stringify({ product_key: productKey }),
+                })
+              } finally {
+                releaseRefreshLock(refreshLock.id)
+              }
 
               let refreshPayload = null
               try {

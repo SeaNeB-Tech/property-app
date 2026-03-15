@@ -17,8 +17,9 @@ const AuthHoldFallback = () => (
   </div>
 );
 
-export default function LoginPage({ searchParams }) {
-  const hasReturnTo = Boolean(searchParams?.returnTo);
+export default async function LoginPage({ searchParams }) {
+  const params = await searchParams;
+  const hasReturnTo = Boolean(params?.returnTo);
   return (
     <Suspense fallback={<AuthHoldFallback />}>
       <LoginContent initialHold={hasReturnTo} />

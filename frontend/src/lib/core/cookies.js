@@ -8,17 +8,28 @@ const envSameSite = process.env.NEXT_PUBLIC_COOKIE_SAMESITE || "None";
 const COOKIE_CHANGE_EVENT = "property:cookie-change";
 const STORAGE_PREFIX = "property:volatile:";
 const volatileMemoryStore = new Map();
-const REAL_COOKIE_KEYS = new Set([
+const CSRF_COOKIE_NAME_SET = new Set([
+  "csrf_token_property",
+  "csrf_token",
+  "csrftoken",
+  "csrftoken_property",
+  "property_csrf_token",
+  "csrf-token",
+  "xsrf-token",
+  "xsrf_token",
+  "x-xsrf-token",
+  "_csrf",
+]);
+const REFRESH_COOKIE_NAME_SET = new Set([
   "refresh_token_property",
   "refresh_token",
   "refreshtoken",
   "refreshtoken_property",
   "property_refresh_token",
-  "csrf_token_property",
-  "csrf_token",
-  "csrftoken",
-  "xsrf-token",
-  "x-xsrf-token",
+]);
+const REAL_COOKIE_KEYS = new Set([
+  ...REFRESH_COOKIE_NAME_SET,
+  ...CSRF_COOKIE_NAME_SET,
   // Server-visible marker to allow profile completion right after OTP verification.
   "post_otp_verified",
 ]);
@@ -78,18 +89,18 @@ if (isBrowser) {
     // ignore storage read/write errors
   }
 }
+const isCsrfCookieName = (name) => {
+  const key = String(name || "").trim().toLowerCase();
+  if (!key) return false;
+  return CSRF_COOKIE_NAME_SET.has(key) || key.startsWith("csrf_token_property");
+};
+
 const isAuthCookieName = (name) => {
   const key = String(name || "").trim().toLowerCase();
   if (!key) return false;
   return (
-    key === "csrf_token_property" ||
-    key === "csrf_token" ||
-    key === "csrftoken" ||
-    key === "xsrf-token" ||
-    key === "x-xsrf-token" ||
-    key === "refresh_token_property" ||
-    key === "refresh_token" ||
-    key === "refreshtoken" ||
+    CSRF_COOKIE_NAME_SET.has(key) ||
+    REFRESH_COOKIE_NAME_SET.has(key) ||
     key === "access_token" ||
     key === "auth_session" ||
     key.startsWith("csrf_token_property") ||
@@ -305,7 +316,7 @@ export const getCookie = (name) => {
 export const removeCookie = (name, options = {}) => {
   if (!isBrowser) return;
   const key = String(name || "").trim().toLowerCase();
-  if (isAuthCookieName(name) && key !== "csrf_token_property" && key !== "access_token") return;
+  if (isAuthCookieName(name) && !isCsrfCookieName(name) && key !== "access_token") return;
   removeVolatileValue(name);
   const { path, domain, sameSite, secure } = resolveCookieOptions(options);
   let cookie = `${encodeURIComponent(name)}=; path=${path}; max-age=0`;
