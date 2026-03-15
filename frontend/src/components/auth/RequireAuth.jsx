@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { getSessionHint } from "@/lib/auth/sessionHint";
 import { getAuthLoginUrl } from "@/lib/core/appUrls";
 
 const AUTH_GRACE_MS = 5000;
@@ -52,12 +53,7 @@ export default function RequireAuth({
 
     const checkSessionHint = async () => {
       try {
-        const response = await fetch("/api/auth/session", {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
-        const payload = await response.json().catch(() => ({}));
+        const payload = await getSessionHint();
         if (!active) return;
         const hasRefresh = Boolean(payload?.hasRefreshSession);
         setSessionHint({ checked: true, hasRefresh });

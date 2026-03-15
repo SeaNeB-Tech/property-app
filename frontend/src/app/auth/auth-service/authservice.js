@@ -11,6 +11,7 @@ import { authStore } from "./store/authStore";
 import { getAuthAppUrl } from "@/lib/core/appUrls";
 import { postLogoutToOpener } from "@/lib/auth/crossTabMessaging";
 import { getDeviceInfo } from "@/lib/deviceInfo";
+import { getSessionHint } from "@/lib/auth/sessionHint";
 
 const IDENTIFIER_TYPE_MOBILE = 0;
 const PURPOSE_SIGNUP_OR_LOGIN = 0;
@@ -58,20 +59,8 @@ const getFirstCookieValue = (names = []) => {
 };
 
 const requestSessionHint = async () => {
-  try {
-    const res = await fetch("/api/auth/session", {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-    });
-
-    if (!res.ok) return false;
-
-    const payload = await res.json().catch(() => ({}));
-    return Boolean(payload?.hasRefreshSession);
-  } catch {
-    return false;
-  }
+  const hint = await getSessionHint();
+  return Boolean(hint?.hasRefreshSession);
 };
 
 export const waitForAuthCookies = async ({

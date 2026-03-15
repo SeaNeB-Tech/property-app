@@ -5,6 +5,7 @@ import {
 } from "@/lib/api/client";
 
 import { clearAccessToken, getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
+import { getSessionHint } from "@/lib/auth/sessionHint";
 
 const PRODUCT_KEY = process.env.NEXT_PUBLIC_PRODUCT_KEY?.trim() || "property";
 const AUTH_DEBUG =
@@ -303,24 +304,12 @@ const requestRefresh = async () => {
   });
 };
 
-const requestSessionHint = async () => {
-  try {
-    const res = await fetch("/api/auth/session", {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-    });
-
-    if (!res.ok) return { hasRefreshSession: false };
-
-    const payload = await res.json().catch(() => ({}));
-
-    return {
-      hasRefreshSession: Boolean(payload?.hasRefreshSession),
-    };
-  } catch {
-    return { hasRefreshSession: false };
-  }
+const requestSessionHint = async ({ force = false } = {}) => {
+  const hint = await getSessionHint({ force });
+  return {
+    hasRefreshSession: Boolean(hint?.hasRefreshSession),
+    hasCsrfCookie: Boolean(hint?.hasCsrfCookie),
+  };
 };
 
 const readRefreshPayload = async (response) => {
@@ -368,7 +357,7 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
 
       let sessionHint = null;
       if (!force && !hasAccessToken && !hasCsrfCookie) {
-        sessionHint = await requestSessionHint();
+        sessionHint = await requestSessionHint({ force });
         if (!sessionHint?.hasRefreshSession) {
           lastFailureAt = Date.now();
           return false;
@@ -377,10 +366,11 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
 
       // If client hints exist, ask the server whether a refresh session exists.
       if (!sessionHint) {
-        sessionHint = await requestSessionHint();
+        sessionHint = await requestSessionHint({ force });
       }
       const hasRefreshSession = Boolean(sessionHint?.hasRefreshSession);
-      logAuthDebug("[auth.bootstrap] session hint", { hasRefreshSession });
+      const hasSessionCsrfCookie = Boolean(sessionHint?.hasCsrfCookie);
+      logAuthDebug("[auth.bootstrap] session hint", { hasRefreshSession, hasSessionCsrfCookie });
 
       const hydrateTokenFromRefresh = async () => {
         if (!force && wasRefreshAttemptedRecently()) {
@@ -441,7 +431,25 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
         }
       };
 
-      const firstMe = await requestMe();
+      let firstMe = null;
+
+      const shouldRefreshFirst =
+        hasRefreshSession && !hasAccessToken && !hasCsrfCookie && !hasSessionCsrfCookie;
+
+      if (shouldRefreshFirst) {
+        const refresh = await hydrateTokenFromRefresh();
+        if (refresh.ok) {
+          if (hasClientSession()) return true;
+          firstMe = await requestMe();
+          if (firstMe.ok) {
+            return true;
+          }
+        }
+      }
+
+      if (!firstMe) {
+        firstMe = await requestMe();
+      }
 
       if (firstMe.ok) {
         if (hasClientSession()) return true;

@@ -4,6 +4,7 @@ import {
   clearAccessToken,
 } from "@/lib/auth/tokenStorage";
 import { handleUnauthorizedResponse, hydrateAuthSession } from "@/lib/api/client";
+import { getSessionHint } from "@/lib/auth/sessionHint";
 import {
   attachAuthorizationHeader,
   requestWithAuthSafeRetry,
@@ -163,6 +164,10 @@ const extractCsrfToken = (payload) => {
 
 const executeRefresh = async () => {
   const productKey = getProductKey();
+  const sessionHint = await getSessionHint();
+  if (!sessionHint?.hasRefreshSession) {
+    return false;
+  }
 
   const lockReleased = await waitForSsoLockRelease();
   if (!lockReleased) {

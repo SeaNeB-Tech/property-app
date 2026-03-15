@@ -7,6 +7,7 @@ import { notifyAuthChanged, subscribeAuthState } from "@/services/auth.service";
 import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
 import { hydrateAuthSession } from "@/lib/api/client";
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap";
+import { clearSessionHintCache } from "@/lib/auth/sessionHint";
 
 const AuthContext = createContext(null);
 
@@ -46,12 +47,13 @@ export function AuthProvider({ children }) {
     return false;
   }, []);
 
-  const restoreSession = useCallback(async () => {
+  const restoreSession = useCallback(async ({ force = false } = {}) => {
     const now = Date.now();
 
     if (
       lastAuthProbeFailureAt &&
-      now - lastAuthProbeFailureAt < AUTH_PROBE_FAILURE_COOLDOWN_MS
+      now - lastAuthProbeFailureAt < AUTH_PROBE_FAILURE_COOLDOWN_MS &&
+      !force
     ) {
       setUser(null);
       setStatus("logged_out");
@@ -68,7 +70,7 @@ export function AuthProvider({ children }) {
 
         // Single-flight bootstrap: ensure refresh-cookie session is converted into a usable
         // access token/CSRF memory state before probing /me.
-        const sessionOk = await ensureSessionReady();
+        const sessionOk = await ensureSessionReady({ force });
         if (!sessionOk) {
           lastAuthProbeFailureAt = Date.now();
           setUser(null);
@@ -131,6 +133,7 @@ export function AuthProvider({ children }) {
       await authApi.logout();
     } catch {}
 
+    clearSessionHintCache();
     setUser(null);
     setStatus("logged_out");
 
@@ -141,7 +144,8 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (credentials) => {
     await authApi.login(credentials || {});
-    const success = await restoreSession();
+    clearSessionHintCache();
+    const success = await restoreSession({ force: true });
 
     if (success) {
       notifyAuthChanged();
