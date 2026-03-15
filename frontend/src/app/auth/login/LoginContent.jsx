@@ -14,7 +14,6 @@ import AuthCard from "@/components/ui/AuthCard";
 import AuthHeader from "@/components/ui/AuthHeader";
 import Button from "@/components/ui/Button";
 import PhoneInput from "@/components/ui/PhoneInput";
-import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay";
 
 // Service
 import { sendOtp } from "@/app/auth/auth-service/otp.service";
@@ -35,7 +34,6 @@ const LANG_MAP = { eng, guj, hindi };
 const LANGUAGE_STORAGE_KEY = "auth_language";
 const RETURN_TO_COOKIE = "auth_return_to";
 const POST_OTP_VERIFIED_COOKIE = "post_otp_verified";
-const RETURN_TO_GRACE_MS = 5000;
 // Use shared signup/login purpose so first OTP can continue directly into complete-profile
 // without requiring a second mobile OTP verification.
 const PURPOSE_LOGIN = 0;
@@ -130,7 +128,7 @@ const getFriendlyOtpError = (err) => {
   return "Unable to send OTP right now. Please try again.";
 };
 
-export default function LoginContent() {
+export default function LoginContent({ initialHold = false } = {}) {
   const router = useRouter();
   const { authInitialized, isAuthenticated, isLoading, restoreSession } = useAuth();
 
@@ -147,10 +145,8 @@ export default function LoginContent() {
   const [country, setCountry] = useState(phoneCodes[0]);
   const [method, setMethod] = useState("whatsapp");
   const [error, setError] = useState("");
-  const [autoRedirecting, setAutoRedirecting] = useState(false);
-  const [allowLoginForm, setAllowLoginForm] = useState(true);
   const [flowContext, setFlowContext] = useState(() => getAuthFlowContext());
-  const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition();
+  const { isTransitioning, runWithTransition } = useAuthSubmitTransition();
   const source = String(flowContext?.source || "").trim().toLowerCase();
   const returnToParam = String(flowContext?.returnTo || "").trim();
 
@@ -187,46 +183,24 @@ export default function LoginContent() {
   }, [restoreSession]);
 
   useEffect(() => {
-    if (!returnToParam) {
-      setAllowLoginForm(true);
-      return;
-    }
-
-    setAllowLoginForm(false);
-    const timer = setTimeout(() => {
-      if (!isAuthenticated) {
-        setAllowLoginForm(true);
-      }
-    }, RETURN_TO_GRACE_MS);
-
-    return () => clearTimeout(timer);
-  }, [returnToParam, isAuthenticated]);
-
-  useEffect(() => {
     let active = true;
 
     const maybeRedirect = async () => {
       if (!authInitialized || !isAuthenticated) return;
-
-      setAutoRedirecting(true);
       const target = (() => {
         if (returnToParam && isSafeReturnTo(returnToParam)) return returnToParam;
         return resolveRedirectTarget(getPostLoginTarget());
       })();
 
-      try {
-        if (isCrossOriginAbsoluteTarget(target)) {
-          const redirected = await redirectToListingWithBridgeToken({
-            returnTo: target,
-            source,
-          });
-          if (!active) return;
-          if (redirected) return;
-        }
-        router.replace(target);
-      } finally {
-        if (active) setAutoRedirecting(false);
+      if (isCrossOriginAbsoluteTarget(target)) {
+        const redirected = await redirectToListingWithBridgeToken({
+          returnTo: target,
+          source,
+        });
+        if (!active) return;
+        if (redirected) return;
       }
+      router.replace(target);
     };
 
     void maybeRedirect();
@@ -313,22 +287,27 @@ export default function LoginContent() {
     );
   }, [country, isTransitioning, isValidMobile, method, mobile, returnToParam, router, runWithTransition, source]);
 
-  if (
-    showTransition ||
-    autoRedirecting ||
-    isLoading ||
-    !authInitialized ||
-    (!allowLoginForm && returnToParam)
-  ) {
+  const [shouldHoldUi, setShouldHoldUi] = useState(() => Boolean(initialHold));
+
+  useEffect(() => {
+    const nextHold =
+      Boolean(returnToParam) && (!authInitialized || isLoading || isAuthenticated);
+    setShouldHoldUi(nextHold);
+  }, [authInitialized, isAuthenticated, isLoading, returnToParam]);
+
+  if (shouldHoldUi) {
     return (
-      <AuthTransitionOverlay
-        title={autoRedirecting ? "Preparing your dashboard..." : "Please wait..."}
-        description={
-          autoRedirecting
-            ? "Checking your session and redirecting."
-            : "Checking your session."
-        }
-      />
+      <div
+        className="flex min-h-screen items-center justify-center bg-white"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <div className="flex flex-col items-center gap-3 rounded-2xl bg-white px-6 py-5 text-center shadow-sm">
+          <span className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600" />
+          <p className="text-sm text-slate-500">Preparing session...</p>
+        </div>
+      </div>
     );
   }
 

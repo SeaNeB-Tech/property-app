@@ -254,6 +254,8 @@ const forwardRequest = async (request, targetUrl, bodyText) => {
   }
   if (resolvedCsrf) {
     incomingHeaders.set("x-csrf-token", resolvedCsrf);
+    incomingHeaders.set("x-xsrf-token", resolvedCsrf);
+    incomingHeaders.set("csrf-token", resolvedCsrf);
   }
   if (!existingAuthorization) {
     incomingHeaders.delete("authorization");

@@ -288,7 +288,11 @@ const doRefreshRequest = async ({
   if (forwardedHeaders["referer"]) headers.set("referer", forwardedHeaders["referer"]);
   
   if (cookieHeader) headers.set("cookie", cookieHeader);
-  if (includeCsrf && incomingCsrf) headers.set("x-csrf-token", incomingCsrf);
+  if (includeCsrf && incomingCsrf) {
+    headers.set("x-csrf-token", incomingCsrf);
+    headers.set("x-xsrf-token", incomingCsrf);
+    headers.set("csrf-token", incomingCsrf);
+  }
 
   const parsed = requestBody && typeof requestBody === "object" ? requestBody : {};
   const body = JSON.stringify({

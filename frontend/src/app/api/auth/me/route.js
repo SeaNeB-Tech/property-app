@@ -260,7 +260,11 @@ const requestProfile = async ({
   if (forwardedHeaders["referer"]) headers.set("referer", forwardedHeaders["referer"]);
 
   if (cookieHeader) headers.set("cookie", cookieHeader);
-  if (csrfHeader) headers.set("x-csrf-token", csrfHeader);
+  if (csrfHeader) {
+    headers.set("x-csrf-token", csrfHeader);
+    headers.set("x-xsrf-token", csrfHeader);
+    headers.set("csrf-token", csrfHeader);
+  }
   if (authorizationHeader) {
     headers.set("authorization", authorizationHeader);
   } else if (accessToken) {
@@ -291,7 +295,11 @@ const requestRefresh = async ({ base, cookieHeader, csrfHeader, includeCsrf = tr
     if (forwardedHeaders["referer"]) headers.set("referer", forwardedHeaders["referer"]);
 
     if (cookieHeader) headers.set("cookie", cookieHeader);
-    if (includeCsrf && csrfHeader) headers.set("x-csrf-token", csrfHeader);
+    if (includeCsrf && csrfHeader) {
+      headers.set("x-csrf-token", csrfHeader);
+      headers.set("x-xsrf-token", csrfHeader);
+      headers.set("csrf-token", csrfHeader);
+    }
 
     try {
       const response = await fetch(url, {
