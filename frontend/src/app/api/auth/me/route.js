@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
-const CSRF_COOKIE_KEYS = ["csrf_token_property", "csrf_token"];
 
 const getBaseCandidates = () =>
   Array.from(new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean)));

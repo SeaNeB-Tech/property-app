@@ -8,6 +8,7 @@ import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
 import { hydrateAuthSession } from "@/lib/api/client";
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap";
 import { clearSessionHintCache } from "@/lib/auth/sessionHint";
+import { clearRefreshBudget } from "@/lib/auth/refreshBudget";
 
 const AuthContext = createContext(null);
 
@@ -23,7 +24,11 @@ const buildAuthProbeHeaders = () => {
   const csrfToken = String(getCsrfToken() || "").trim();
 
   if (accessToken) headers.set("authorization", `Bearer ${accessToken}`);
-  if (csrfToken) headers.set("x-csrf-token", csrfToken);
+  if (csrfToken) {
+    headers.set("x-csrf-token", csrfToken);
+    headers.set("x-xsrf-token", csrfToken);
+    headers.set("csrf-token", csrfToken);
+  }
 
   return headers;
 };
@@ -133,6 +138,7 @@ export function AuthProvider({ children }) {
       await authApi.logout();
     } catch {}
 
+    clearRefreshBudget();
     clearSessionHintCache();
     setUser(null);
     setStatus("logged_out");
@@ -144,6 +150,7 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (credentials) => {
     await authApi.login(credentials || {});
+    clearRefreshBudget();
     clearSessionHintCache();
     const success = await restoreSession({ force: true });
 

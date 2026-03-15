@@ -1,14 +1,8 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { CSRF_COOKIE_KEYS, REFRESH_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
 const REFRESH_COOKIE_NAME = "refresh_token_property";
-const REFRESH_COOKIE_KEYS = [
-  "refresh_token_property",
-  "refresh_token",
-  "refreshToken",
-  "refreshToken_property",
-  "property_refresh_token",
-];
 
 const getCookieValueFromHeader = (cookieHeader, key) => {
   const source = String(cookieHeader || "");
@@ -121,13 +115,16 @@ const resolveCsrfHeaderValue = (incomingHeader, cookieHeader) => {
   const fromHeader = String(incomingHeader || "").trim();
   if (fromHeader) return fromHeader;
 
-  const fromCookieRaw = getCookieValueFromHeader(cookieHeader, "csrf_token_property");
-  if (!fromCookieRaw) return "";
-  try {
-    return decodeURIComponent(fromCookieRaw);
-  } catch {
-    return fromCookieRaw;
+  for (const key of CSRF_COOKIE_KEYS) {
+    const fromCookieRaw = getCookieValueFromHeader(cookieHeader, key);
+    if (!fromCookieRaw) continue;
+    try {
+      return decodeURIComponent(fromCookieRaw);
+    } catch {
+      return fromCookieRaw;
+    }
   }
+  return "";
 };
 
 const appendSetCookieHeaders = (targetHeaders, upstreamHeaders, context = null) => {

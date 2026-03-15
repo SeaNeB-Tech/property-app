@@ -6,22 +6,7 @@ import {
   setInMemoryAccessToken,
   setInMemoryCsrfToken,
 } from "@/lib/api/client";
-
-const REFRESH_TOKEN_COOKIE_KEYS = [
-  "refresh_token_property",
-  "refresh_token",
-  "refreshToken",
-  "refreshToken_property",
-  "property_refresh_token",
-];
-
-const CSRF_COOKIE_KEYS = [
-  "csrf_token_property",
-  "csrf_token",
-  "csrfToken",
-  "csrfToken_property",
-  "property_csrf_token",
-];
+import { CSRF_COOKIE_KEYS, REFRESH_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 
 const logSafeMode = () => {
   if (typeof globalThis === "undefined") return;
@@ -84,8 +69,8 @@ export const getRefreshToken = () => {
   logSafeMode();
 
   return String(
-    authStore?.getRefreshToken?.() ||
-      readFirstCookie(REFRESH_TOKEN_COOKIE_KEYS) ||
+      authStore?.getRefreshToken?.() ||
+      readFirstCookie(REFRESH_COOKIE_KEYS) ||
       ""
   ).trim();
 };
@@ -100,7 +85,7 @@ export const clearRefreshToken = (options = {}) => {
 
   authStore?.setRefreshToken?.("");
 
-  for (const key of REFRESH_TOKEN_COOKIE_KEYS) {
+  for (const key of REFRESH_COOKIE_KEYS) {
     removeCookie(key, options);
   }
 };
@@ -113,7 +98,7 @@ export const getCsrfToken = () => {
   logSafeMode();
 
   return String(
-    getInMemoryCsrfToken() ||
+      getInMemoryCsrfToken() ||
       authStore?.getCsrfToken?.() ||
       readFirstCookie(CSRF_COOKIE_KEYS) ||
       ""

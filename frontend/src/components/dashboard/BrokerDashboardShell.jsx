@@ -73,12 +73,15 @@ export default function BrokerDashboardShell() {
 
         const returnTo =
           typeof window !== "undefined" ? window.location.href : "/dashboard/broker";
-        router.replace(
-          getAuthLoginUrl({
-            returnTo,
-            source: "main-app",
-          })
-        );
+        const loginUrl = getAuthLoginUrl({
+          returnTo,
+          source: "main-app",
+        });
+        if (/^https?:\/\//i.test(loginUrl)) {
+          window.location.href = loginUrl;
+        } else {
+          router.replace(loginUrl);
+        }
         return;
       }
 

@@ -6,6 +6,8 @@ import {
 
 import { clearAccessToken, getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
 import { getSessionHint } from "@/lib/auth/sessionHint";
+import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
+import { tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
 
 const PRODUCT_KEY = process.env.NEXT_PUBLIC_PRODUCT_KEY?.trim() || "property";
 const AUTH_DEBUG =
@@ -22,14 +24,12 @@ const BOOTSTRAP_TAB_KEY = "seaneb:auth:bootstrap:tab";
 const BOOTSTRAP_LOCK_TTL_MS = 8000;
 const BOOTSTRAP_LOCK_WAIT_MS = 2500;
 const BOOTSTRAP_LOCK_POLL_MS = 100;
-const REFRESH_ATTEMPT_KEY = "seaneb:auth:refresh:attempt";
 const REFRESH_ATTEMPT_COOLDOWN_MS = 1500;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let inFlightEnsureSessionPromise = null;
 let lastFailureAt = 0;
-let lastRefreshAttemptAt = 0;
 
 const SSO_LOCK_WAIT_MS = 2000;
 const SSO_LOCK_POLL_MS = 50;
@@ -100,16 +100,6 @@ const writeStorageJson = (key, value) => {
   }
 };
 
-const readStorageNumber = (key) => {
-  if (!canUseStorage()) return 0;
-  try {
-    const raw = window.localStorage.getItem(key);
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : 0;
-  } catch {
-    return 0;
-  }
-};
 
 const acquireBootstrapLock = () => {
   if (!canUseStorage()) {
@@ -175,34 +165,6 @@ const waitForBootstrapLockRelease = async () => {
 
   return false;
 };
-
-const markRefreshAttempt = () => {
-  const now = Date.now();
-  lastRefreshAttemptAt = now;
-  if (!canUseStorage()) return;
-  try {
-    window.localStorage.setItem(REFRESH_ATTEMPT_KEY, String(now));
-  } catch {
-    // ignore storage errors
-  }
-};
-
-const wasRefreshAttemptedRecently = () => {
-  const now = Date.now();
-  const stored = readStorageNumber(REFRESH_ATTEMPT_KEY);
-  const lastAttempt = Math.max(lastRefreshAttemptAt || 0, stored || 0);
-  return Boolean(lastAttempt && now - lastAttempt < REFRESH_ATTEMPT_COOLDOWN_MS);
-};
-
-const CSRF_COOKIE_KEYS = [
-  "csrf_token_property",
-  "csrf_token",
-  "csrfToken",
-  "xsrf-token",
-  "x-xsrf-token",
-  "XSRF-TOKEN",
-  "X-XSRF-TOKEN",
-];
 
 const hasCsrfTokenCookie = () => {
   if (typeof document === "undefined") return false;
@@ -373,18 +335,21 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
       logAuthDebug("[auth.bootstrap] session hint", { hasRefreshSession, hasSessionCsrfCookie });
 
       const hydrateTokenFromRefresh = async () => {
-        if (!force && wasRefreshAttemptedRecently()) {
+        const budget = tryUseRefreshBudget({
+          source: "bootstrap",
+          cooldownMs: REFRESH_ATTEMPT_COOLDOWN_MS,
+        });
+        if (!budget.allowed) {
           return {
             ok: false,
             refreshStatus: 0,
-            canRetry: true,
-            deferred: true,
+            canRetry: !budget.limited,
+            deferred: budget.deferred,
+            limited: budget.limited,
           };
         }
 
         try {
-          markRefreshAttempt();
-
           const refreshResponse = await requestRefresh();
 
           if (!refreshResponse.ok) {
@@ -481,6 +446,11 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
         const refresh = await hydrateTokenFromRefresh();
 
         if (!refresh.ok) {
+          if (refresh.limited) {
+            lastFailureAt = Date.now();
+            return false;
+          }
+
           const status = Number(refresh.refreshStatus || 0);
 
           if (refresh.canRetry && attempt < 2) {

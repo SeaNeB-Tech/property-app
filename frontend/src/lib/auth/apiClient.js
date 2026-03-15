@@ -9,6 +9,8 @@ import {
   attachAuthorizationHeader,
   requestWithAuthSafeRetry,
 } from "@/lib/auth/apiClientSafe";
+import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
+import { tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
 
 const normalizeBaseUrl = (value) =>
   String(value || "").trim().replace(/\/+$/, "");
@@ -19,16 +21,13 @@ const DEFAULT_PRODUCT_KEY =
   String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() ||
   "property";
 
-const CSRF_COOKIE_CANDIDATES = [
-  "csrf_token_property",
-  "csrf_token",
-  "csrfToken",
-];
+const CSRF_COOKIE_CANDIDATES = CSRF_COOKIE_KEYS;
 
 const LOGIN_ENDPOINT = "/auth/login";
 const REFRESH_ENDPOINT = "/auth/refresh";
 const LOGOUT_ENDPOINT = "/auth/logout";
 const ME_ENDPOINT = "/auth/me";
+const LOCAL_REFRESH_ENDPOINT = "/api/auth/refresh";
 
 let _refreshLock = null;
 let authFailureHandler = null;
@@ -101,8 +100,10 @@ const buildHeaders = ({ headers, includeCsrf = true }) => {
 
   const csrf = getCsrfToken();
 
-  if (includeCsrf && csrf && !next.has("x-csrf-token")) {
-    next.set("x-csrf-token", csrf);
+  if (includeCsrf && csrf) {
+    if (!next.has("x-csrf-token")) next.set("x-csrf-token", csrf);
+    if (!next.has("x-xsrf-token")) next.set("x-xsrf-token", csrf);
+    if (!next.has("csrf-token")) next.set("csrf-token", csrf);
   }
 
   return next;
@@ -169,13 +170,18 @@ const executeRefresh = async () => {
     return false;
   }
 
+  const refreshBudget = tryUseRefreshBudget({ source: "auth-api-client" });
+  if (!refreshBudget.allowed) {
+    return false;
+  }
+
   const lockReleased = await waitForSsoLockRelease();
   if (!lockReleased) {
     console.warn("[auth] refresh skipped: sso exchange in progress");
     return false;
   }
 
-  const response = await fetch(toAbsoluteUrl(REFRESH_ENDPOINT), {
+  const response = await fetch(LOCAL_REFRESH_ENDPOINT, {
     method: "POST",
     headers: buildHeaders({ includeCsrf: true }),
     credentials: "include",

@@ -1,15 +1,7 @@
 "use client";
 
 import { getCookie, removeCookie } from "@/services/auth.service";
-
-const CSRF_COOKIE_KEYS = [
-  "csrf_token",
-  "csrf-token",
-  "XSRF-TOKEN",
-  "xsrf-token",
-  "XSRF_TOKEN",
-  "_csrf",
-];
+import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 
 const AUTH_COOKIE_KEYS = [
   ...CSRF_COOKIE_KEYS,
@@ -87,8 +79,10 @@ const authStore = {
   },
 
   getCsrfToken() {
-    const cookieToken = String(getCookie("csrf_token_property") || "").trim();
-    if (cookieToken) return cookieToken;
+    for (const key of CSRF_COOKIE_KEYS) {
+      const cookieToken = String(getCookie(key) || "").trim();
+      if (cookieToken) return cookieToken;
+    }
     return this.csrfToken || null;
   },
 

@@ -29,8 +29,20 @@ export const getAuthLoginUrl = ({ returnTo = "", source = "" } = {}) => {
     ? getListingAppUrl(safeReturnTo)
     : safeReturnTo;
 
-  const url = new URL(base);
-  if (safeSource) url.searchParams.set("source", safeSource);
-  if (resolvedReturnTo) url.searchParams.set("returnTo", resolvedReturnTo);
-  return url.toString();
+  const params = new URLSearchParams();
+  if (safeSource) params.set("source", safeSource);
+  if (resolvedReturnTo) params.set("returnTo", resolvedReturnTo);
+
+  if (!params.toString()) return base;
+
+  if (/^https?:\/\//i.test(base)) {
+    const url = new URL(base);
+    for (const [key, value] of params.entries()) {
+      url.searchParams.set(key, value);
+    }
+    return url.toString();
+  }
+
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}${params.toString()}`;
 };

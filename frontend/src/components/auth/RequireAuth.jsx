@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { getSessionHint } from "@/lib/auth/sessionHint";
@@ -9,6 +9,20 @@ import { getAuthLoginUrl } from "@/lib/core/appUrls";
 const AUTH_GRACE_MS = 5000;
 const AUTH_RETRY_GRACE_MS = 12000;
 
+const DEFAULT_FALLBACK = (
+  <div
+    role="status"
+    aria-live="polite"
+    aria-busy="true"
+    className="flex min-h-screen items-center justify-center bg-slate-50"
+  >
+    <div className="flex flex-col items-center gap-3 rounded-2xl bg-white px-6 py-5 text-center shadow-sm">
+      <span className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600" />
+      <p className="text-sm text-slate-500">Preparing session...</p>
+    </div>
+  </div>
+);
+
 // NOTE: we avoid peeking at `document.cookie` here. Relying on client-visible
 // cookies is brittle (httpOnly cookies are invisible to JS) and leads to race
 // conditions and redirect loops. Use server-side session hints instead.
@@ -16,19 +30,7 @@ const AUTH_RETRY_GRACE_MS = 12000;
 export default function RequireAuth({
   children,
   redirectTo = "/auth/login",
-  fallback = (
-    <div
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
-      className="flex min-h-screen items-center justify-center bg-slate-50"
-    >
-      <div className="flex flex-col items-center gap-3 rounded-2xl bg-white px-6 py-5 text-center shadow-sm">
-        <span className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600" />
-        <p className="text-sm text-slate-500">Preparing session...</p>
-      </div>
-    </div>
-  ),
+  fallback = DEFAULT_FALLBACK,
 } = {}) {
   const router = useRouter();
   const { authInitialized, isAuthenticated, isLoading, restoreSession } = useAuth();
@@ -36,15 +38,28 @@ export default function RequireAuth({
   const [sessionHint, setSessionHint] = useState({
     checked: false,
     hasRefresh: false,
+    hasCsrf: false,
   });
   const retryRestoreRef = useRef(false);
+  const setSessionHintSafe = useCallback((nextHint) => {
+    setSessionHint((prev) => {
+      if (
+        prev.checked === nextHint.checked &&
+        prev.hasRefresh === nextHint.hasRefresh &&
+        prev.hasCsrf === nextHint.hasCsrf
+      ) {
+        return prev;
+      }
+      return nextHint;
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
 
     if (!authInitialized || isLoading || isAuthenticated) {
       setRedirectReady(false);
-      setSessionHint({ checked: false, hasRefresh: false });
+      setSessionHintSafe({ checked: false, hasRefresh: false, hasCsrf: false });
       retryRestoreRef.current = false;
       return () => {
         active = false;
@@ -56,15 +71,16 @@ export default function RequireAuth({
         const payload = await getSessionHint();
         if (!active) return;
         const hasRefresh = Boolean(payload?.hasRefreshSession);
-        setSessionHint({ checked: true, hasRefresh });
+        const hasCsrf = Boolean(payload?.hasCsrfCookie);
+        setSessionHintSafe({ checked: true, hasRefresh, hasCsrf });
 
-        if (hasRefresh && !retryRestoreRef.current) {
+        if ((hasRefresh || hasCsrf) && !retryRestoreRef.current) {
           retryRestoreRef.current = true;
           await restoreSession?.();
         }
       } catch {
         if (!active) return;
-        setSessionHint({ checked: true, hasRefresh: false });
+        setSessionHintSafe({ checked: true, hasRefresh: false, hasCsrf: false });
       }
     };
 
@@ -73,7 +89,7 @@ export default function RequireAuth({
     return () => {
       active = false;
     };
-  }, [authInitialized, isAuthenticated, isLoading, restoreSession]);
+  }, [authInitialized, isAuthenticated, isLoading, restoreSession, setSessionHintSafe]);
 
   useEffect(() => {
     if (!redirectReady) return;
@@ -82,12 +98,15 @@ export default function RequireAuth({
     const fallbackTarget = String(redirectTo || "/auth/login");
 
     if (fallbackTarget === "/auth/login" && typeof window !== "undefined") {
-      router.replace(
-        getAuthLoginUrl({
-          returnTo: window.location.href,
-          source: "main-app",
-        })
-      );
+      const loginUrl = getAuthLoginUrl({
+        returnTo: window.location.href,
+        source: "main-app",
+      });
+      if (/^https?:\/\//i.test(loginUrl)) {
+        window.location.href = loginUrl;
+      } else {
+        router.replace(loginUrl);
+      }
       return;
     }
 
@@ -98,7 +117,7 @@ export default function RequireAuth({
     if (!authInitialized || isLoading || isAuthenticated) return;
 
     if (!sessionHint.checked) return;
-    if (sessionHint.hasRefresh) {
+    if (sessionHint.hasRefresh || sessionHint.hasCsrf) {
       const timer = setTimeout(() => {
         setRedirectReady(true);
       }, AUTH_RETRY_GRACE_MS);
@@ -109,7 +128,14 @@ export default function RequireAuth({
       setRedirectReady(true);
     }, AUTH_GRACE_MS);
     return () => clearTimeout(timer);
-  }, [authInitialized, isAuthenticated, isLoading, sessionHint.checked, sessionHint.hasRefresh]);
+  }, [
+    authInitialized,
+    isAuthenticated,
+    isLoading,
+    sessionHint.checked,
+    sessionHint.hasRefresh,
+    sessionHint.hasCsrf,
+  ]);
 
   if (!authInitialized || isLoading) return fallback;
   if (!isAuthenticated) return fallback;

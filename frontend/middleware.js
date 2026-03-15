@@ -1,12 +1,5 @@
 import { NextResponse } from "next/server";
-const REFRESH_COOKIE_KEYS = [
-  "refresh_token_property",
-  "refresh_token",
-  "refreshToken",
-  "refreshToken_property",
-  "property_refresh_token",
-];
-const CSRF_COOKIE_KEYS = ["csrf_token_property", "csrf_token"];
+import { CSRF_COOKIE_KEYS, REFRESH_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 const AUTH_ENTRY_PATHS = new Set([
   "/auth/login",
   "/auth/home",

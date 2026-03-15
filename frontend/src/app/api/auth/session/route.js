@@ -1,12 +1,5 @@
 import { NextResponse } from "next/server";
-
-const REFRESH_COOKIE_KEYS = [
-  "refresh_token_property",
-  "refresh_token",
-  "refreshToken",
-  "refreshToken_property",
-  "property_refresh_token",
-];
+import { CSRF_COOKIE_KEYS, REFRESH_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 
 const getCookieValueFromHeader = (cookieHeader, key) => {
   const source = String(cookieHeader || "");
@@ -34,8 +27,8 @@ const hasAnyRefreshCookie = (cookieHeader) => {
 export async function GET(request) {
   const cookieHeader = String(request.headers.get("cookie") || "").trim();
   const hasRefreshSession = hasAnyRefreshCookie(cookieHeader);
-  const hasCsrfCookie = Boolean(
-    String(getCookieValueFromHeader(cookieHeader, "csrf_token_property") || "").trim()
+  const hasCsrfCookie = CSRF_COOKIE_KEYS.some((key) =>
+    Boolean(String(getCookieValueFromHeader(cookieHeader, key) || "").trim())
   );
 
   return NextResponse.json(

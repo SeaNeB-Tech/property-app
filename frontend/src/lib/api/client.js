@@ -5,8 +5,16 @@ import { getCookie as getCookieShared } from "@/lib/auth/cookieManager";
 import { setAuthFlowContext } from "@/lib/auth/flowContext";
 import { authStore } from "@/app/auth/auth-service/store/authStore";
 import { clearAuthFailureArtifacts, notifyAuthChanged } from "@/services/auth.service";
+import { tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
+import {
+  ACCESS_COOKIE_KEYS,
+  CSRF_COOKIE_KEYS,
+  REFRESH_COOKIE_KEYS,
+  SESSION_COOKIE_KEYS,
+} from "@/lib/auth/cookieKeys";
 
 const REFRESH_ENDPOINT = "/auth/refresh";
+const LOCAL_REFRESH_ENDPOINT = "/api/auth/refresh";
 const DEFAULT_PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const AUTH_DEBUG =
   String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true";
@@ -83,26 +91,10 @@ const waitForSsoLockRelease = async () => {
 };
 
 const TRANSIENT_BACKEND_STATUSES = new Set([500, 502, 503, 504, 522, 524]);
-const CSRF_COOKIE_NAMES = [
-  "csrf_token_property",
-  "csrf_token",
-  "csrfToken",
-  "csrf-token",
-  "XSRF-TOKEN",
-  "xsrf-token",
-  "XSRF_TOKEN",
-  "_csrf",
-];
-const REFRESH_COOKIE_NAMES = [
-  "refresh_token_property",
-  "refresh_token",
-  "refreshToken",
-  "refreshToken_property",
-  "property_refresh_token",
-  "refreshtoken",
-];
-const ACCESS_COOKIE_NAMES = ["access_token", "accessToken", "access_token_property"];
-const SESSION_COOKIE_NAMES = ["auth_session", "auth_session_start", "auth_redirect_in_progress"];
+const CSRF_COOKIE_NAMES = CSRF_COOKIE_KEYS;
+const REFRESH_COOKIE_NAMES = REFRESH_COOKIE_KEYS;
+const ACCESS_COOKIE_NAMES = ACCESS_COOKIE_KEYS;
+const SESSION_COOKIE_NAMES = SESSION_COOKIE_KEYS;
 const AUTH_COOKIE_NAMES = Array.from(
   new Set([
     ...CSRF_COOKIE_NAMES,
@@ -437,6 +429,16 @@ const api = axios.create({
 ----------------------------- */
 
 export const refreshAccessToken = async () => {
+  const refreshBudget = tryUseRefreshBudget({ source: "api-client" });
+  if (!refreshBudget.allowed) {
+    const error = new Error("Refresh budget exceeded");
+    error.response = {
+      status: 400,
+      data: { code: "REFRESH_LIMIT_REACHED" },
+    };
+    throw error;
+  }
+
   const csrfToken = getCsrfToken();
   const csrfHeaderValue = String(csrfToken || "").trim();
 
@@ -475,7 +477,7 @@ export const refreshAccessToken = async () => {
     const timeoutId = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
 
     try {
-      const response = await fetch(buildAuthUrl(REFRESH_ENDPOINT), {
+      const response = await fetch(LOCAL_REFRESH_ENDPOINT, {
         method: "POST",
         credentials: "include",
         cache: "no-store",
