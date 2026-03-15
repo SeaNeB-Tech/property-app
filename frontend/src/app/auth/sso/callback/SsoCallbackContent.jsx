@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { hydrateAuthSession } from "@/lib/api/client";
 import { getDeviceInfo } from "@/lib/deviceInfo";
 import { clearAuthFailureArtifacts, shouldClearAuthOnError } from "@/services/auth.service";
+import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
 
 const AUTH_SSO_RESULT_KEY = "seaneb_sso_exchange_result";
 const AUTH_SSO_MESSAGE_TYPE = "seaneb:sso:exchange";
@@ -117,7 +118,8 @@ export default function SsoCallbackContent() {
       }
 
       try {
-        const res = await fetch("/api/auth/exchange-bridge-token", {
+        const apiBase = String(API_BASE_URL || "").trim().replace(/\/+$/, "") || "/api";
+        const res = await fetch(`${apiBase}/auth/exchange-bridge-token`, {
           method: "POST",
           credentials: "include",
           headers: {

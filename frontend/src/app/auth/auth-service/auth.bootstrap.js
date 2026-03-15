@@ -7,7 +7,7 @@ import {
 import { clearAccessToken, getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
 import { getSessionHint } from "@/lib/auth/sessionHint";
 import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
-import { tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
+import { clearRefreshBudget, tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
 
 const PRODUCT_KEY = process.env.NEXT_PUBLIC_PRODUCT_KEY?.trim() || "property";
@@ -276,6 +276,7 @@ const requestRefresh = async () => {
 const requestSessionHint = async ({ force = false } = {}) => {
   const hint = await getSessionHint({ force });
   return {
+    success: Boolean(hint?.success),
     hasRefreshSession: Boolean(hint?.hasRefreshSession),
     hasCsrfCookie: Boolean(hint?.hasCsrfCookie),
   };
@@ -341,11 +342,32 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
       const hasSessionCsrfCookie = Boolean(sessionHint?.hasCsrfCookie);
       logAuthDebug("[auth.bootstrap] session hint", { hasRefreshSession, hasSessionCsrfCookie });
 
+      if (
+        sessionHint?.success &&
+        !hasRefreshSession &&
+        !hasSessionCsrfCookie &&
+        !hasAccessToken &&
+        !hasCsrfCookie
+      ) {
+        lastFailureAt = Date.now();
+        return false;
+      }
+
       const hydrateTokenFromRefresh = async () => {
-        const budget = tryUseRefreshBudget({
+        let budget = tryUseRefreshBudget({
           source: "bootstrap",
           cooldownMs: REFRESH_ATTEMPT_COOLDOWN_MS,
         });
+        if (!budget.allowed) {
+          if (budget.limited) {
+            clearRefreshBudget();
+            budget = tryUseRefreshBudget({
+              source: "bootstrap",
+              cooldownMs: REFRESH_ATTEMPT_COOLDOWN_MS,
+            });
+          }
+        }
+
         if (!budget.allowed) {
           return {
             ok: false,
@@ -388,6 +410,7 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
               broadcast: true,
             });
           }
+          clearRefreshBudget();
 
           return {
             ok: true,

@@ -115,7 +115,11 @@ export function AuthProvider({ children }) {
         });
 
         lastAuthProbeFailureAt = 0;
-        return applyUserProfile(profile);
+        const didApply = applyUserProfile(profile);
+        if (didApply) {
+          clearRefreshBudget();
+        }
+        return didApply;
       } catch {
         lastAuthProbeFailureAt = Date.now();
         setUser(null);

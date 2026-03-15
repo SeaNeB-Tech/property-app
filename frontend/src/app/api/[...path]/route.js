@@ -1,3 +1,5 @@
+import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
+
 const normalizeUrl = (value) => String(value || "").trim().replace(/\/+$/, "");
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const OTP_RATE_LIMIT_WINDOW_MS = 60_000;
@@ -176,16 +178,29 @@ const stripCookieKeysFromHeader = (cookieHeader, keys = []) => {
     .join("; ");
 };
 
-const resolveCsrfHeaderValue = (incomingHeader, cookieHeader) => {
+const resolveCsrfHeaderValue = (incomingHeader, cookieHeader, cookieStore = null) => {
   const fromHeader = String(incomingHeader || "").trim();
   if (fromHeader) return fromHeader;
-  const fromCookieRaw = getCookieValueFromHeader(cookieHeader, "csrf_token_property");
-  if (!fromCookieRaw) return "";
-  try {
-    return decodeURIComponent(fromCookieRaw);
-  } catch {
-    return fromCookieRaw;
+  for (const key of CSRF_COOKIE_KEYS) {
+    const fromStore = String(cookieStore?.get?.(key)?.value || "").trim();
+    if (fromStore) {
+      try {
+        return decodeURIComponent(fromStore);
+      } catch {
+        return fromStore;
+      }
+    }
   }
+  for (const key of CSRF_COOKIE_KEYS) {
+    const fromCookieRaw = getCookieValueFromHeader(cookieHeader, key);
+    if (!fromCookieRaw) continue;
+    try {
+      return decodeURIComponent(fromCookieRaw);
+    } catch {
+      return fromCookieRaw;
+    }
+  }
+  return "";
 };
 
 const copyHeadersPreservingSetCookie = (upstreamHeaders) => {
@@ -242,7 +257,8 @@ const forwardRequest = async (request, targetUrl, bodyText) => {
   );
   const resolvedCsrf = resolveCsrfHeaderValue(
     String(incomingHeaders.get("x-csrf-token") || "").trim(),
-    incomingCookie
+    incomingCookie,
+    request.cookies
   );
   const existingAuthorization = String(
     incomingHeaders.get("authorization") || incomingHeaders.get("Authorization") || ""

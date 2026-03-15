@@ -15,6 +15,16 @@ const normalizeBasePath = (value) => {
   if (!raw || raw === "/") return "";
   return `/${raw.replace(/^\/+|\/+$/g, "")}`;
 };
+const resolveClientBasePath = () => {
+  const envBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || "");
+  if (envBasePath) return envBasePath;
+  if (typeof window !== "undefined") {
+    const nextData = window.__NEXT_DATA__ || {};
+    const dataBasePath = normalizeBasePath(nextData?.basePath || "");
+    if (dataBasePath) return dataBasePath;
+  }
+  return "";
+};
 const isUsableUrl = (value) => {
   try {
     const url = new URL(normalizeUrl(value));
@@ -38,6 +48,6 @@ export const API_REMOTE_FALLBACK_BASE_URL = API_REMOTE_CANDIDATES[1] || "";
 export const API_REMOTE_CANDIDATE_BASE_URLS = API_REMOTE_CANDIDATES;
 
 // In browser, use same-origin proxy (/api) so SameSite=None cookies work in local development.
-const CLIENT_BASE_PATH = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || "");
+const CLIENT_BASE_PATH = typeof window !== "undefined" ? resolveClientBasePath() : normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || "");
 export const API_BASE_URL =
   typeof window !== "undefined" ? `${CLIENT_BASE_PATH}/api` : API_REMOTE_BASE_URL;

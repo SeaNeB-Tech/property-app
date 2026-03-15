@@ -1,5 +1,22 @@
 import { NextResponse } from "next/server";
 import { CSRF_COOKIE_KEYS, REFRESH_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
+const normalizeBasePath = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "/") return "";
+  return `/${raw.replace(/^\/+|\/+$/g, "")}`;
+};
+const getRequestBasePath = (request) => {
+  const runtimeBase = normalizeBasePath(request?.nextUrl?.basePath || "");
+  if (runtimeBase) return runtimeBase;
+  return normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || "");
+};
+const withBasePath = (request, path = "") => {
+  const basePath = getRequestBasePath(request);
+  const safePath = String(path || "");
+  if (!safePath) return basePath || "";
+  if (safePath.startsWith("/")) return `${basePath}${safePath}`;
+  return `${basePath}/${safePath}`;
+};
 const AUTH_ENTRY_PATHS = new Set([
   "/auth/login",
   "/auth/home",
@@ -117,7 +134,7 @@ const redirectForAuthenticatedAuthPage = (request) => {
 
 const getValidatedSessionState = async (request) => {
   try {
-    const response = await fetch(new URL("/api/auth/me", request.url), {
+    const response = await fetch(new URL(withBasePath(request, "/api/auth/me"), request.url), {
       method: "GET",
       headers: {
         cookie: String(request.headers.get("cookie") || ""),
@@ -154,7 +171,7 @@ const getValidatedSessionState = async (request) => {
 
 const tryRefreshSession = async (request) => {
   try {
-    return await fetch(new URL("/api/auth/refresh", request.url), {
+    return await fetch(new URL(withBasePath(request, "/api/auth/refresh"), request.url), {
       method: "POST",
       headers: {
         cookie: String(request.headers.get("cookie") || ""),

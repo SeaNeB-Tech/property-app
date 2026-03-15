@@ -5,7 +5,7 @@ import { getCookie as getCookieShared } from "@/lib/auth/cookieManager";
 import { setAuthFlowContext } from "@/lib/auth/flowContext";
 import { authStore } from "@/app/auth/auth-service/store/authStore";
 import { clearAuthFailureArtifacts, notifyAuthChanged } from "@/services/auth.service";
-import { tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
+import { clearRefreshBudget, tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
 import {
   ACCESS_COOKIE_KEYS,
   CSRF_COOKIE_KEYS,
@@ -462,6 +462,7 @@ export const refreshAccessToken = async () => {
       broadcast: true,
     });
 
+    clearRefreshBudget();
     return true;
   };
 
@@ -619,6 +620,7 @@ export const apiRequest = async (config = {}) => {
   if (csrfToken) {
     nextConfig.headers["x-csrf-token"] = csrfToken;
     nextConfig.headers["x-xsrf-token"] = csrfToken;
+    nextConfig.headers["csrf-token"] = csrfToken;
   }
 
   if (accessToken) {

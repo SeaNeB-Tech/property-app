@@ -6,7 +6,11 @@ import { getCookie, setCookie } from "@/services/auth.service";
 import BrandLogo from "@/components/ui/BrandLogo";
 import { getAuthLoginUrl, getListingAppUrl } from "@/lib/core/appUrls";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { getSessionHint } from "@/lib/auth/sessionHint";
 import { logoutPanelSession } from "@/services/auth.service";
+import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
+import { refreshAccessToken } from "@/lib/api/client";
+import { clearRefreshBudget } from "@/lib/auth/refreshBudget";
 
 const hasBusinessRegistration = (user = null) => {
   const record = user && typeof user === "object" ? user : {};
@@ -35,11 +39,12 @@ const hasBusinessRegistration = (user = null) => {
 
 export default function BrokerDashboardShell() {
   const router = useRouter();
-  const { status, isRestoring, isReady, user, logout } = useAuth();
+  const { status, isRestoring, isReady, user, logout, restoreSession } = useAuth();
   const [sessionChecked, setSessionChecked] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const dropdownRef = useRef(null);
   const graceTimerRef = useRef(null);
+  const tokenHydrateAttemptedRef = useRef(false);
 
   const userName = useMemo(
     () =>
@@ -58,17 +63,19 @@ export default function BrokerDashboardShell() {
   useEffect(() => {
     let active = true;
 
-    const validate = () => {
+    const validate = async () => {
       if (!active || !isReady || isRestoring || status === "restoring") return;
 
       if (status !== "authenticated") {
-        const hasCookie =
-          typeof document !== "undefined" &&
-          (String(document.cookie || "").includes("csrf_token_property=") ||
-            String(document.cookie || "").includes("refresh_token_property="));
-
-        if (hasCookie) {
-          return;
+        try {
+          const hint = await getSessionHint({ force: true });
+          if (!active) return;
+          if (hint?.hasRefreshSession || hint?.hasCsrfCookie) {
+            await restoreSession?.({ force: true });
+            return;
+          }
+        } catch {
+          // ignore hint failures
         }
 
         const returnTo =
@@ -83,6 +90,31 @@ export default function BrokerDashboardShell() {
           router.replace(loginUrl);
         }
         return;
+      }
+
+      if (!tokenHydrateAttemptedRef.current) {
+        tokenHydrateAttemptedRef.current = true;
+        const hasAccessToken = Boolean(String(getAccessToken() || "").trim());
+        const hasCsrfToken = Boolean(String(getCsrfToken() || "").trim());
+        if (!hasAccessToken || !hasCsrfToken) {
+          try {
+            await refreshAccessToken();
+          } catch (err) {
+            const code = String(
+              err?.response?.data?.code || err?.data?.code || ""
+            )
+              .trim()
+              .toUpperCase();
+            if (code === "REFRESH_LIMIT_REACHED") {
+              clearRefreshBudget();
+              try {
+                await refreshAccessToken();
+              } catch {
+                // ignore refresh retry failure
+              }
+            }
+          }
+        }
       }
 
       const hasBusinessCookie = getCookie("business_registered") === "true";
@@ -102,11 +134,11 @@ export default function BrokerDashboardShell() {
       setSessionChecked(true);
     };
 
-    validate();
+    void validate();
     return () => {
       active = false;
     };
-  }, [isReady, isRestoring, router, status, user]);
+  }, [isReady, isRestoring, restoreSession, router, status, user]);
 
   useEffect(() => {
     const timer = graceTimerRef.current;

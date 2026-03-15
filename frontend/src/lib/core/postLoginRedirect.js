@@ -6,6 +6,7 @@ import {
   getInMemoryCsrfToken,
 } from "@/lib/api/client";
 import { postLoginSuccessToOpener } from "@/lib/auth/crossTabMessaging";
+import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const AUTH_RETURN_TO_COOKIE = "auth_return_to";
@@ -121,7 +122,8 @@ const buildListingCallbackForSource = (targetUrl) => {
 };
 
 const mintBridgeToken = async () => {
-  const endpoints = ["/api/sso", "/api/v1/sso", "/api/auth/sso"];
+  const apiBase = String(API_BASE_URL || "").trim().replace(/\/+$/, "") || "/api";
+  const endpoints = [`${apiBase}/sso`, `${apiBase}/v1/sso`, `${apiBase}/auth/sso`];
   for (const endpoint of endpoints) {
     try {
       const accessToken = String(getInMemoryAccessToken() || "").trim();

@@ -10,7 +10,7 @@ import {
   requestWithAuthSafeRetry,
 } from "@/lib/auth/apiClientSafe";
 import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
-import { tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
+import { clearRefreshBudget, tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
 
 const normalizeBaseUrl = (value) =>
   String(value || "").trim().replace(/\/+$/, "");
@@ -219,6 +219,7 @@ const executeRefresh = async () => {
     hydrateAuthSession({ accessToken, csrfToken, broadcast: true });
   }
 
+  clearRefreshBudget();
   return true;
 };
 
