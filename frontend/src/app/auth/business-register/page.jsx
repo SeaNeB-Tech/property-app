@@ -26,6 +26,7 @@ import { hydrateAuthSession, refreshAccessToken } from "@/lib/api/client"
 import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage"
 import { getSessionHint } from "@/lib/auth/sessionHint"
 import { clearRefreshBudget } from "@/lib/auth/refreshBudget"
+import { API_BASE_URL } from "@/lib/core/apiBaseUrl"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
@@ -1410,10 +1411,11 @@ export default function BusinessRegisterPage() {
             try {
               const productKey = String(getDefaultProductKey() || "property").trim()
               const csrfToken = String(getCsrfToken() || "").trim()
+              const refreshUrl = `${String(API_BASE_URL || "").trim().replace(/\/+$/, "") || "/api"}/auth/refresh`
               logAuthDebug("[business-register] manual refresh after register", {
                 hasCsrfHeader: Boolean(csrfToken),
               })
-              const refreshResp = await fetch("/api/auth/refresh", {
+              const refreshResp = await fetch(refreshUrl, {
                 method: "POST",
                 credentials: "include",
                 cache: "no-store",

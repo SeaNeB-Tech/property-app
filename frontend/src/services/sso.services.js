@@ -3,6 +3,7 @@ import { ssoDebugLog } from "@/lib/observability/ssoDebug";
 import { hydrateAuthSession } from "@/lib/api/client";
 import { getDeviceInfo } from "@/lib/deviceInfo";
 import { clearAuthFailureArtifacts, shouldClearAuthOnError } from "@/services/auth.service";
+import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
 
 const DEFAULT_PRODUCT_KEY = String(
   process.env.NEXT_PUBLIC_PRODUCT_KEY || "property"
@@ -67,9 +68,11 @@ export const exchangeSsoBridgeToken = async (bridgeToken) => {
 
     let response;
 
+    const apiBase = String(API_BASE_URL || "").trim().replace(/\/+$/, "") || "/api";
+
     try {
       response = await axios.post(
-        "/api/v1/sso/exchange",
+        `${apiBase}/v1/sso/exchange`,
         {
           bridge_token: token,
           target_product_key: DEFAULT_PRODUCT_KEY,
@@ -119,7 +122,7 @@ export const exchangeSsoBridgeToken = async (bridgeToken) => {
     }
 
     try {
-      const me = await axios.get("/api/auth/me", {
+      const me = await axios.get(`${apiBase}/auth/me`, {
         withCredentials: true,
         headers: accessToken
           ? { Authorization: `Bearer ${accessToken}` }

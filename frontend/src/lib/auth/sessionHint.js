@@ -1,3 +1,5 @@
+import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
+
 const SESSION_HINT_TTL_MS = 2000;
 const SESSION_HINT_NEGATIVE_TTL_MS = 300;
 
@@ -30,7 +32,9 @@ export const getSessionHint = async ({ force = false } = {}) => {
 
   inFlight = (async () => {
     try {
-      const response = await fetch("/api/auth/session", {
+      const base = String(API_BASE_URL || "").trim().replace(/\/+$/, "");
+      const path = base ? `${base}/auth/session` : "/api/auth/session";
+      const response = await fetch(path, {
         method: "GET",
         credentials: "include",
         cache: "no-store",

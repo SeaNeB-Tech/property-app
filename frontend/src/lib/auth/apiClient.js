@@ -27,7 +27,7 @@ const LOGIN_ENDPOINT = "/auth/login";
 const REFRESH_ENDPOINT = "/auth/refresh";
 const LOGOUT_ENDPOINT = "/auth/logout";
 const ME_ENDPOINT = "/auth/me";
-const LOCAL_REFRESH_ENDPOINT = "/api/auth/refresh";
+const LOCAL_REFRESH_ENDPOINT = `${String(API_BASE_URL || "").trim().replace(/\/+$/, "") || "/api"}/auth/refresh`;
 
 let _refreshLock = null;
 let authFailureHandler = null;

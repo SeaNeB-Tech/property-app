@@ -14,7 +14,7 @@ import {
 } from "@/lib/auth/cookieKeys";
 
 const REFRESH_ENDPOINT = "/auth/refresh";
-const LOCAL_REFRESH_ENDPOINT = "/api/auth/refresh";
+const LOCAL_REFRESH_ENDPOINT = `${String(API_BASE_URL || "").trim().replace(/\/+$/, "") || "/api"}/auth/refresh`;
 const DEFAULT_PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const AUTH_DEBUG =
   String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true";

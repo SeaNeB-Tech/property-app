@@ -8,6 +8,7 @@ import { clearAccessToken, getAccessToken, getCsrfToken } from "@/lib/auth/token
 import { getSessionHint } from "@/lib/auth/sessionHint";
 import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 import { tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
+import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
 
 const PRODUCT_KEY = process.env.NEXT_PUBLIC_PRODUCT_KEY?.trim() || "property";
 const AUTH_DEBUG =
@@ -203,6 +204,12 @@ const readCsrfFromCookie = () => {
   return "";
 };
 
+const buildApiPath = (path) => {
+  const base = String(API_BASE_URL || "").trim().replace(/\/+$/, "");
+  const safePath = path.startsWith("/") ? path : `/${path}`;
+  return base ? `${base}${safePath}` : safePath;
+};
+
 const buildAuthProbeHeaders = () => {
   const headers = new Headers();
 
@@ -235,7 +242,7 @@ const hasClientSession = () => {
 };
 
 const requestMe = async () => {
-  return fetch("/api/auth/me", {
+  return fetch(buildApiPath("/auth/me"), {
     method: "GET",
     credentials: "include",
     cache: "no-store",
@@ -254,7 +261,7 @@ const requestRefresh = async () => {
     throw lockError;
   }
 
-  return fetch("/api/auth/refresh", {
+  return fetch(buildApiPath("/auth/refresh"), {
     method: "POST",
     credentials: "include",
     cache: "no-store",
