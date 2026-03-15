@@ -26,10 +26,17 @@ const hasAnyRefreshCookie = (cookieHeader) => {
 
 export async function GET(request) {
   const cookieHeader = String(request.headers.get("cookie") || "").trim();
-  const hasRefreshSession = hasAnyRefreshCookie(cookieHeader);
-  const hasCsrfCookie = CSRF_COOKIE_KEYS.some((key) =>
-    Boolean(String(getCookieValueFromHeader(cookieHeader, key) || "").trim())
+  const hasRefreshCookieStore = REFRESH_COOKIE_KEYS.some((key) =>
+    Boolean(String(request.cookies?.get(key)?.value || "").trim())
   );
+  const hasCsrfCookieStore = CSRF_COOKIE_KEYS.some((key) =>
+    Boolean(String(request.cookies?.get(key)?.value || "").trim())
+  );
+  const hasRefreshSession = hasAnyRefreshCookie(cookieHeader) || hasRefreshCookieStore;
+  const hasCsrfCookie =
+    CSRF_COOKIE_KEYS.some((key) =>
+      Boolean(String(getCookieValueFromHeader(cookieHeader, key) || "").trim())
+    ) || hasCsrfCookieStore;
 
   return NextResponse.json(
     {

@@ -230,6 +230,16 @@ const readCookieValueFromSetCookie = (headers, keys = []) => {
   return "";
 };
 
+const readCookieValueDecodedFromSetCookie = (headers, keys = []) => {
+  const raw = readCookieValueFromSetCookie(headers, keys);
+  if (!raw) return "";
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+};
+
 const buildUpstreamCandidates = () =>
   Array.from(new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean)));
 
@@ -431,13 +441,17 @@ export async function POST(request) {
 
   if (upstreamResponse.ok) {
     const accessToken = readTokenFromPayload(payloadJson, upstreamResponse.headers);
+    const csrfFromPayload = readCsrfFromPayload(payloadJson, upstreamResponse.headers);
+    const csrfFromCookie = readCookieValueDecodedFromSetCookie(
+      upstreamResponse.headers,
+      CSRF_COOKIE_KEYS
+    );
+    const csrfToken = csrfFromPayload || csrfFromCookie;
     const response = NextResponse.json(
       {
         success: true,
         ...(accessToken ? { accessToken, access_token: accessToken } : {}),
-        ...(readCsrfFromPayload(payloadJson, upstreamResponse.headers)
-          ? { csrfToken: readCsrfFromPayload(payloadJson, upstreamResponse.headers) }
-          : {}),
+        ...(csrfToken ? { csrfToken } : {}),
         ...(readExpiresInFromPayload(payloadJson) != null
           ? { expiresIn: readExpiresInFromPayload(payloadJson) }
           : {}),
@@ -449,6 +463,11 @@ export async function POST(request) {
     );
     if (accessToken) {
       response.headers.set("authorization", `Bearer ${accessToken}`);
+    }
+    if (csrfToken) {
+      response.headers.set("x-csrf-token", csrfToken);
+      response.headers.set("x-xsrf-token", csrfToken);
+      response.headers.set("csrf-token", csrfToken);
     }
     return response;
   }
