@@ -363,7 +363,7 @@ export default function OtpPage() {
               router.replace(getAuthAppUrl("/auth/login"));
               return;
             }
-            notifyAuthChanged();
+            notifyAuthChanged({ force: true });
             setStatus("verified");
             stopTransition();
             void handleOtpSuccess({ sourcePayload: payload });

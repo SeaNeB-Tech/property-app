@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { getCookieOptions } from "@/lib/auth/cookieOptions";
 const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
   const getSetCookie = upstreamHeaders?.getSetCookie;
   if (typeof getSetCookie === "function") {
@@ -24,6 +25,66 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
     if (/^\s*access_token=/i.test(cookie)) continue;
     targetHeaders.append("set-cookie", cookie);
   }
+};
+
+const getSetCookieList = (headers) => {
+  const getSetCookie = headers?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    return (getSetCookie.call(headers) || []).filter(Boolean);
+  }
+  const combined = String(headers?.get("set-cookie") || "").trim();
+  if (!combined) return [];
+  return combined
+    .split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const readCookieValueFromSetCookieHeaders = (setCookieHeaders = [], candidateNames = []) => {
+  const loweredCandidates = candidateNames.map((name) => String(name || "").trim().toLowerCase());
+  for (const raw of setCookieHeaders) {
+    const firstPair = String(raw || "").split(";")[0] || "";
+    const idx = firstPair.indexOf("=");
+    if (idx < 0) continue;
+    const name = firstPair.slice(0, idx).trim();
+    const value = firstPair.slice(idx + 1).trim();
+    if (!name || !value) continue;
+    if (!loweredCandidates.includes(name.toLowerCase())) continue;
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+  return "";
+};
+
+const readTokenFromPayload = (payload = {}) => {
+  const data = payload?.data || {};
+  const tokenObj = data?.token || payload?.token || {};
+  return String(
+    payload?.refreshToken ||
+      payload?.refresh_token ||
+      data?.refreshToken ||
+      data?.refresh_token ||
+      tokenObj?.refreshToken ||
+      tokenObj?.refresh_token ||
+      ""
+  ).trim();
+};
+
+const readCsrfFromPayload = (payload = {}, headers = null) => {
+  const data = payload?.data || {};
+  return String(
+    payload?.csrfToken ||
+      payload?.csrf_token ||
+      data?.csrfToken ||
+      data?.csrf_token ||
+      headers?.get("x-csrf-token") ||
+      headers?.get("csrf-token") ||
+      headers?.get("x-xsrf-token") ||
+      ""
+  ).trim();
 };
 
 export async function POST(req) {
@@ -140,9 +201,46 @@ export async function POST(req) {
       lastHeaders = responseHeaders;
 
       if (upstream.ok || ![404, 405].includes(Number(upstream.status || 0))) {
+        const cookieOptions = getCookieOptions(req);
         const response = NextResponse.json(data, { status: upstream.status, headers: responseHeaders });
         if (upstream.ok) {
           console.log("[SSO Exchange] Success - relaying upstream cookies");
+          // Explicitly set refresh and CSRF cookies with correct SameSite/Secure/Domain
+          const setCookies = getSetCookieList(upstream.headers);
+          const refreshToken =
+            readTokenFromPayload(data) ||
+            readCookieValueFromSetCookieHeaders(setCookies, [
+              "refresh_token_property", "refresh_token",
+              "refreshToken_property", "refreshToken", "property_refresh_token",
+            ]);
+          const csrfToken =
+            readCsrfFromPayload(data, upstream.headers) ||
+            readCookieValueFromSetCookieHeaders(setCookies, [
+              "csrf_token_property", "csrf_token", "csrfToken",
+            ]);
+          if (refreshToken) {
+            response.cookies.set({
+              name: "refresh_token_property",
+              value: refreshToken,
+              httpOnly: true,
+              sameSite: cookieOptions.sameSite,
+              secure: cookieOptions.secure,
+              ...(cookieOptions?.domain ? { domain: cookieOptions.domain } : {}),
+              path: "/",
+            });
+          }
+          if (csrfToken) {
+            response.cookies.set({
+              name: "csrf_token_property",
+              value: csrfToken,
+              httpOnly: false,
+              sameSite: cookieOptions.sameSite,
+              secure: cookieOptions.secure,
+              ...(cookieOptions?.domain ? { domain: cookieOptions.domain } : {}),
+              path: "/",
+            });
+          }
+          response.cookies.delete("access_token");
         }
         return response;
       }

@@ -369,6 +369,7 @@ export async function GET(request) {
         }
 
         const status = Number(response.status || 0);
+        let skipInitialReturn = false;
         const shouldTryRefresh = status === 401 || status === 403;
         if (shouldTryRefresh) {
           const refreshResponse =
@@ -408,12 +409,16 @@ export async function GET(request) {
               forwardedHeaders,
             });
 
+            const retryStatus = Number(retryProfile.status || 0);
             const response = await copyResponse(retryProfile, responseHeaders, cookieContext);
-            return response;
+            if (retryProfile.ok || ![404, 405, 500, 502, 503, 504].includes(retryStatus)) {
+              return response;
+            }
+            skipInitialReturn = true;
           }
         }
 
-        if (![404, 405, 500, 502, 503, 504].includes(status)) {
+        if (!skipInitialReturn && ![404, 405, 500, 502, 503, 504].includes(status)) {
           return copyResponse(response, null, cookieContext);
         }
       } catch {

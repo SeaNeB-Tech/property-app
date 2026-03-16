@@ -85,7 +85,22 @@ export {
 } from "@/lib/core/cookies";
 
 export const isAuthenticatedByCookies = () => {
-  return false;
+  if (typeof document === "undefined") return false;
+  const cookies = String(document.cookie || "");
+  if (!cookies) return false;
+  const authCookieNames = [
+    "refresh_token_property",
+    "refresh_token",
+    "refreshToken",
+    "csrf_token_property",
+    "csrf_token",
+    "access_token",
+    "accessToken",
+  ];
+  return authCookieNames.some((name) => {
+    const match = cookies.match(new RegExp(`(^|;\\s*)${name}=([^;]*)`));
+    return match && match[2] && match[2].trim().length > 0;
+  });
 };
 
 const AUTH_COOKIE_SEEDS = [
@@ -144,11 +159,13 @@ const collectAuthCookieNames = () => {
 
 const forceExpireCookie = (name, domain = "") => {
   if (typeof document === "undefined") return;
-  const secure = window.location.protocol === "https:" ? "; Secure" : "";
-  const base = `${encodeURIComponent(name)}=; path=/; max-age=0; SameSite=None`;
-  document.cookie = `${base}${secure}`;
+  const isSecure = window.location.protocol === "https:";
+  const sameSite = isSecure ? "None" : "Lax";
+  const securePart = isSecure ? "; Secure" : "";
+  const base = `${encodeURIComponent(name)}=; path=/; max-age=0; SameSite=${sameSite}${securePart}`;
+  document.cookie = base;
   if (domain) {
-    document.cookie = `${base}; domain=${domain}${secure}`;
+    document.cookie = `${base}; domain=${domain}`;
   }
 };
 
@@ -246,10 +263,14 @@ export const logoutPanelSession = async () => {
   return canClearClientState;
 };
 
-export const notifyAuthChanged = () => {
+export const notifyAuthChanged = (detail = {}) => {
   if (typeof window === "undefined") return;
   try {
-    window.dispatchEvent(new Event(AUTH_CHANGE_EVENT));
+    if (typeof window.CustomEvent === "function") {
+      window.dispatchEvent(new CustomEvent(AUTH_CHANGE_EVENT, { detail }));
+    } else {
+      window.dispatchEvent(new Event(AUTH_CHANGE_EVENT));
+    }
   } catch {
     // Ignore event dispatch issues.
   }
@@ -258,7 +279,7 @@ export const notifyAuthChanged = () => {
 export const subscribeAuthState = (callback) => {
   if (typeof window === "undefined") return () => {};
 
-  const listener = () => callback();
+  const listener = (event) => callback(event);
   window.addEventListener("focus", listener);
   window.addEventListener("property:cookie-change", listener);
   window.addEventListener(AUTH_CHANGE_EVENT, listener);

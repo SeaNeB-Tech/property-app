@@ -7,6 +7,7 @@ import { authStore } from "@/app/auth/auth-service/store/authStore";
 import { clearAuthFailureArtifacts, notifyAuthChanged } from "@/services/auth.service";
 import { clearRefreshBudget, tryUseRefreshBudget } from "@/lib/auth/refreshBudget";
 import { acquireRefreshLock, releaseRefreshLock } from "@/lib/auth/refreshLock";
+import { ensureDeviceId } from "@/lib/core/deviceId";
 import {
   ACCESS_COOKIE_KEYS,
   CSRF_COOKIE_KEYS,
@@ -648,6 +649,10 @@ export const apiRequest = async (config = {}) => {
   }
 
   nextConfig.headers["x-product-key"] = DEFAULT_PRODUCT_KEY;
+  const deviceId = ensureDeviceId();
+  if (deviceId) {
+    nextConfig.headers["device_id"] = deviceId;
+  }
 
   return api.request(nextConfig);
 };

@@ -1,7 +1,6 @@
 import axios from "axios";
 import { ssoDebugLog } from "@/lib/observability/ssoDebug";
 import { hydrateAuthSession } from "@/lib/api/client";
-import { getDeviceInfo } from "@/lib/deviceInfo";
 import { clearAuthFailureArtifacts, shouldClearAuthOnError } from "@/services/auth.service";
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
 
@@ -49,7 +48,6 @@ const pickTokenValue = (payload, keys) => {
 
 export const exchangeSsoBridgeToken = async (bridgeToken) => {
   const token = String(bridgeToken || "").trim();
-  const deviceInfo = getDeviceInfo();
 
   if (!token) {
     throw new Error("Missing bridge token");
@@ -76,8 +74,6 @@ export const exchangeSsoBridgeToken = async (bridgeToken) => {
         {
           bridge_token: token,
           target_product_key: DEFAULT_PRODUCT_KEY,
-          device_id: deviceInfo.device_id,
-          device_type: deviceInfo.device_type,
         },
         {
           withCredentials: true,

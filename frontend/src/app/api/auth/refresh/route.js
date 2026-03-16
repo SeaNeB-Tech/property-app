@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
 import { CSRF_COOKIE_KEYS, REFRESH_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
+import { getCookieOptions } from "@/lib/auth/cookieOptions";
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
 const REFRESH_COOKIE_NAME = "refresh_token_property";
 
@@ -469,6 +470,37 @@ export async function POST(request) {
       response.headers.set("x-xsrf-token", csrfToken);
       response.headers.set("csrf-token", csrfToken);
     }
+
+    // Explicitly hydrate cookies with correct per-request SameSite/Secure/Domain
+    const cookieOpts = getCookieOptions(request);
+    const refreshTokenFromCookie = readCookieValueDecodedFromSetCookie(
+      upstreamResponse.headers,
+      REFRESH_COOKIE_KEYS
+    );
+    if (refreshTokenFromCookie) {
+      response.cookies.set({
+        name: "refresh_token_property",
+        value: refreshTokenFromCookie,
+        httpOnly: true,
+        sameSite: cookieOpts.sameSite,
+        secure: cookieOpts.secure,
+        ...(cookieOpts?.domain ? { domain: cookieOpts.domain } : {}),
+        path: "/",
+      });
+    }
+    if (csrfToken) {
+      response.cookies.set({
+        name: "csrf_token_property",
+        value: csrfToken,
+        httpOnly: false,
+        sameSite: cookieOpts.sameSite,
+        secure: cookieOpts.secure,
+        ...(cookieOpts?.domain ? { domain: cookieOpts.domain } : {}),
+        path: "/",
+      });
+    }
+    response.cookies.delete("access_token");
+
     return response;
   }
 

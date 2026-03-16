@@ -202,6 +202,9 @@ export const registerBusiness = async (data = {}) => {
   const businessName = limitText(pickFirst(data.business_name, data.businessName), 30)
   const businessType = pickFirst(data.business_type, data.businessType)
   const placeId = toText(pickFirst(data.place_id, data.placeId))
+  const businessPlaceId = toText(pickFirst(data.business_place_id, data.businessPlaceId))
+  const photoReference = toText(pickFirst(data.photo_reference, data.photoReference))
+  const deviceId = toText(pickFirst(data.device_id, data.deviceId))
   const productKey = toText(getDefaultProductKey())
 
   if (!businessName) return Promise.reject(new Error("Business name is required"))
@@ -222,6 +225,9 @@ export const registerBusiness = async (data = {}) => {
     address: toText(pickFirst(data.address, data.business_location, data.businessLocation)),
     landmark: toText(data.landmark),
     place_id: placeId,
+    business_place_id: businessPlaceId,
+    photo_reference: photoReference,
+    device_id: deviceId,
     latitude: toNumberOr(data.latitude, 0),
     longitude: toNumberOr(data.longitude, 0),
     product_key: productKey,

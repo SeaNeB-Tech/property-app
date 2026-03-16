@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { hydrateAuthSession } from "@/lib/api/client";
-import { getDeviceInfo } from "@/lib/deviceInfo";
 import { clearAuthFailureArtifacts, shouldClearAuthOnError } from "@/services/auth.service";
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
 
@@ -109,7 +108,6 @@ export default function SsoCallbackContent() {
     async function exchange() {
       const bridgeToken = params.get("bridge_token");
       const source = resolveSafeSource(params.get("source"));
-      const deviceInfo = getDeviceInfo();
 
       if (!bridgeToken) {
         publishSsoResult({ ok: false, source, error: "bridge_token missing in callback URL" });
@@ -130,8 +128,6 @@ export default function SsoCallbackContent() {
             target_product_key:
               String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() ||
               "property",
-            device_id: deviceInfo.device_id,
-            device_type: deviceInfo.device_type,
           }),
         });
 

@@ -44,7 +44,15 @@ const connectSrc = [
   toOrigin(appBaseUrl),
   toOrigin(authAppBaseUrl),
 ].filter(Boolean).join(" ");
-const imgSrc = ["'self'", "data:", "blob:", "https://flagcdn.com", "https://img.icons8.com"].join(" ");
+const imgSrc = [
+  "'self'",
+  "data:",
+  "blob:",
+  "https://flagcdn.com",
+  "https://img.icons8.com",
+  "https://maps.googleapis.com",
+  "https://*.googleusercontent.com",
+].join(" ");
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -98,6 +106,10 @@ const nextConfig = {
       {
         protocol: "https",
         hostname: "img.icons8.com",
+      },
+      {
+        protocol: "https",
+        hostname: "maps.googleapis.com",
       },
     ],
   },

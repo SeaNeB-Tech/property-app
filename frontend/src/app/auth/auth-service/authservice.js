@@ -10,7 +10,6 @@ import {
 import { authStore } from "./store/authStore";
 import { getAuthAppUrl } from "@/lib/core/appUrls";
 import { postLogoutToOpener } from "@/lib/auth/crossTabMessaging";
-import { getDeviceInfo } from "@/lib/deviceInfo";
 import { getSessionHint } from "@/lib/auth/sessionHint";
 import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 
@@ -176,7 +175,6 @@ const verifyOtpRequest = async (payload) => {
 export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
   const ctx = context || getJsonCookie("otp_context");
   if (!ctx) throw new Error("OTP context missing");
-  const deviceInfo = getDeviceInfo();
 
   const otpPurpose =
     Number.isFinite(Number(ctx.purpose)) &&
@@ -191,8 +189,6 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
     otp: String(otp).trim(),
     purpose: otpPurpose,
     product_key: PRODUCT_KEY,
-    device_id: deviceInfo.device_id,
-    device_type: deviceInfo.device_type,
   };
 
   let res;

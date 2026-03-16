@@ -159,7 +159,7 @@ export function AuthProvider({ children }) {
     const success = await restoreSession({ force: true });
 
     if (success) {
-      notifyAuthChanged();
+      notifyAuthChanged({ force: true });
     }
 
     return success;
@@ -175,9 +175,10 @@ export function AuthProvider({ children }) {
 
     runRestore();
 
-    const unsubscribe = subscribeAuthState(() => {
+    const unsubscribe = subscribeAuthState((event) => {
       if (!isMounted) return;
-      void restoreSession();
+      const shouldForce = event?.detail?.force === true;
+      void restoreSession({ force: shouldForce });
     });
 
     return () => {

@@ -27,6 +27,7 @@ import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage"
 import { getSessionHint } from "@/lib/auth/sessionHint"
 import { clearRefreshBudget } from "@/lib/auth/refreshBudget"
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl"
+import { ensureDeviceId } from "@/lib/core/deviceId"
 import { acquireRefreshLock, releaseRefreshLock } from "@/lib/auth/refreshLock"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
@@ -72,6 +73,9 @@ const RESEND_COOLDOWN_SECONDS = 60
 const VERIFIED_EDIT_COOLDOWN_SECONDS = 60
 const TERMS_TEXT_PATH = "/legal/terms-conditions-property.txt"
 const LANGUAGE_STORAGE_KEY = "auth_language"
+const DEFAULT_BUSINESS_IMAGE = "/default-business.png"
+const GOOGLE_PLACES_API_KEY = String(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "").trim()
+const GOOGLE_PLACES_PHOTO_URL = "https://maps.googleapis.com/maps/api/place/photo"
 const AUTH_DEBUG =
   String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true"
 
@@ -102,6 +106,8 @@ const EMPTY_FORM = {
   aboutBranch: "Head office branch",
   businessLocation: "",
   placeId: "",
+  businessPlaceId: "",
+  photoReference: "",
   landmark: "",
   pan: "",
   gstin: "",
@@ -141,7 +147,23 @@ const getBusinessSuggestionLabel = (item) =>
   ).trim()
 
 const getBusinessSuggestionPlaceId = (item) =>
-  String(item?.place_id || item?.id || "").trim()
+  String(item?.business_place_id || item?.place_id || item?.id || "").trim()
+
+const getBusinessSuggestionPhotoReference = (item) =>
+  String(item?.photo_reference || item?.photoReference || "").trim()
+
+const buildBusinessPhotoUrl = (photoReference, maxWidth = 80) => {
+  const reference = String(photoReference || "").trim()
+  if (!reference || !GOOGLE_PLACES_API_KEY) return DEFAULT_BUSINESS_IMAGE
+
+  const params = new URLSearchParams({
+    maxwidth: String(maxWidth),
+    photo_reference: reference,
+    key: GOOGLE_PLACES_API_KEY,
+  })
+
+  return `${GOOGLE_PLACES_PHOTO_URL}?${params.toString()}`
+}
 
 const getResolvedCountryCode = () => {
   const verifiedBusinessMobile = getJsonCookie("verified_business_mobile")
@@ -346,6 +368,7 @@ export default function BusinessRegisterPage() {
   const [businessSuggestions, setBusinessSuggestions] = useState([])
   const [businessSuggestOpen, setBusinessSuggestOpen] = useState(false)
   const [businessSuggestLoading, setBusinessSuggestLoading] = useState(false)
+  const [deviceId, setDeviceId] = useState("")
   const [categories, setCategories] = useState([])
   const [productCategoryId, setProductCategoryId] = useState("")
   const [currentStep, setCurrentStep] = useState(1)
@@ -368,6 +391,8 @@ export default function BusinessRegisterPage() {
     Boolean(normalizedWhatsappNumber) &&
     normalizedPrimaryNumber === normalizedWhatsappNumber
   const whatsappIsVerified = whatsappVerified || whatsappAutoVerified
+  const hasSelectedBusiness = Boolean(form.businessPlaceId || form.photoReference)
+  const selectedBusinessPhotoSrc = buildBusinessPhotoUrl(form.photoReference, 200)
 
   const validateStep = (step) => {
     if (step === 1) {
@@ -424,6 +449,13 @@ export default function BusinessRegisterPage() {
       window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
     }
   }, [language])
+
+  useEffect(() => {
+    const id = ensureDeviceId()
+    if (id) {
+      setDeviceId(id)
+    }
+  }, [])
 
   useEffect(() => {
     if (!otpModalOpen || otpResendCooldown <= 0) return
@@ -656,6 +688,15 @@ export default function BusinessRegisterPage() {
 
     if (key === "businessLocation") {
       setForm((prev) => ({ ...prev, placeId: "" }))
+    }
+    if (key === "businessName") {
+      setForm((prev) => ({
+        ...prev,
+        businessName: safeValue,
+        businessPlaceId: "",
+        photoReference: "",
+      }))
+      return
     }
     if (key === "pan") {
       setPanVerified(false)
@@ -1193,6 +1234,9 @@ export default function BusinessRegisterPage() {
     const businessEmail = form.businessEmail.trim()
     const pan = form.pan.trim().toUpperCase()
     const gstin = form.gstin.trim().toUpperCase()
+    const businessPlaceId = form.businessPlaceId.trim()
+    const photoReference = form.photoReference.trim()
+    const resolvedDeviceId = deviceId || ensureDeviceId()
 
     if (!businessName) {
       setSubmitError("Business name is required")
@@ -1288,6 +1332,9 @@ export default function BusinessRegisterPage() {
           address: form.businessLocation.trim(),
           landmark: form.landmark.trim(),
           place_id: placeId,
+          business_place_id: businessPlaceId,
+          photo_reference: photoReference,
+          device_id: resolvedDeviceId,
           pan,
           gstin,
           product_key: lockedProductKey,
@@ -1477,7 +1524,7 @@ export default function BusinessRegisterPage() {
             }
           }
 
-          notifyAuthChanged()
+          notifyAuthChanged({ force: true })
           if (!sessionHydrated) {
             logAuthDebug("[business-register] session not hydrated; continuing with cookie session")
             finalizeRegistration({ router, businessId, branchId: createdBranchId })
@@ -1540,7 +1587,7 @@ export default function BusinessRegisterPage() {
                   recoveredSession = false
                 }
 
-                notifyAuthChanged()
+                notifyAuthChanged({ force: true })
                 if (!recoveredSession) {
                   redirectToBusinessRegisterLogin(router, "/dashboard/broker")
                   return
@@ -1655,30 +1702,55 @@ export default function BusinessRegisterPage() {
                       {!businessSuggestLoading &&
                         businessSuggestions.map((item, index) => {
                           const label = getBusinessSuggestionLabel(item)
-                          const placeId = getBusinessSuggestionPlaceId(item)
+                          const businessPlaceId = getBusinessSuggestionPlaceId(item)
+                          const photoReference = getBusinessSuggestionPhotoReference(item)
+                          const thumbnailSrc = buildBusinessPhotoUrl(photoReference, 80)
                           if (!label) return null
 
                           return (
                             <div
-                              key={placeId || `${label}-${index}`}
-                              className="autocomplete-item"
+                              key={businessPlaceId || `${label}-${index}`}
+                              className="autocomplete-item autocomplete-item--media"
                               onMouseDown={() => {
                                 suppressNextBusinessAutocompleteRef.current = true
                                 setForm((prev) => ({
                                   ...prev,
                                   businessName: normalizeBusinessLabel(label),
-                                  placeId: placeId || prev.placeId,
+                                  businessPlaceId,
+                                  photoReference,
                                 }))
                                 setBusinessSuggestOpen(false)
                               }}
                             >
-                              {label}
+                              <span className="autocomplete-item__thumb" aria-hidden="true">
+                                <Image
+                                  src={thumbnailSrc}
+                                  alt=""
+                                  width={48}
+                                  height={48}
+                                  className="autocomplete-item__thumb-img"
+                                  unoptimized
+                                />
+                              </span>
+                              <span className="autocomplete-item__label">{label}</span>
                             </div>
                           )
                         })}
                     </div>
                   )}
                 </div>
+                {hasSelectedBusiness && (
+                  <div className="business-photo-preview">
+                    <Image
+                      src={selectedBusinessPhotoSrc}
+                      alt="Selected business preview"
+                      width={180}
+                      height={180}
+                      className="business-photo-preview__img"
+                      unoptimized
+                    />
+                  </div>
+                )}
               </Field>
 
               <Field label="Display Name *">

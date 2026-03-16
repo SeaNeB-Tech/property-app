@@ -445,7 +445,7 @@ export default function CompleteProfilePage() {
       // Refresh success is enough for session finalization; profile check is best effort.
     }
 
-    notifyAuthChanged()
+    notifyAuthChanged({ force: true })
   }
 
   const handleSubmit = async () => {
@@ -556,7 +556,7 @@ export default function CompleteProfilePage() {
               maxAge: 180,
               path: "/",
             })
-            notifyAuthChanged()
+            notifyAuthChanged({ force: true })
             removeCookie("reg_form_draft")
             removeCookie("otp_context")
             removeCookie("otp_cc")
