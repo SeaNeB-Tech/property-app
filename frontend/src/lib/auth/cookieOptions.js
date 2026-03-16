@@ -173,13 +173,9 @@ export const getCookieOptions = (request) => {
     
     // Determine if connection is HTTP
     const isHttp = proto.startsWith("http") && !proto.startsWith("https");
-    
-    // Force secure in production for non-local hosts
-    const forceSecure = process.env.NODE_ENV === "production" && 
-                       host && 
-                       !isHostInLocalAllowlist(host);
-    
-    const secure = forceSecure ? true : !isHttp;
+
+    // Respect the actual request scheme to avoid Secure cookies on HTTP.
+    const secure = !isHttp;
     
     // SameSite: None for secure, Lax for insecure
     const sameSite = secure ? "None" : "Lax";

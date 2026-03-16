@@ -183,11 +183,14 @@ const readTokenFromPayload = (payload = {}, headers = null) => {
 
 const readCsrfFromPayload = (payload = {}, headers = null) => {
   const data = payload?.data || {};
+  const tokenObj = data?.token || payload?.token || {};
   return String(
     payload?.csrfToken ||
       payload?.csrf_token ||
       data?.csrfToken ||
       data?.csrf_token ||
+      tokenObj?.csrfToken ||
+      tokenObj?.csrf_token ||
       headers?.get("x-csrf-token") ||
       headers?.get("csrf-token") ||
       headers?.get("x-xsrf-token") ||
@@ -363,10 +366,13 @@ export async function POST(request) {
   }
 
   const cookieHeader = toCookieHeader(request, refreshCookieValue);
-  const incomingCsrf = resolveCsrfHeaderValue(
-    String(request.headers.get("x-csrf-token") || "").trim(),
-    cookieHeader
-  );
+  const rawCsrfHeader = String(
+    request.headers.get("x-csrf-token") ||
+      request.headers.get("x-xsrf-token") ||
+      request.headers.get("csrf-token") ||
+      ""
+  ).trim();
+  const incomingCsrf = resolveCsrfHeaderValue(rawCsrfHeader, cookieHeader);
 
   let upstreamResponse = null;
   let payloadText = "";
