@@ -201,15 +201,16 @@ export const getBusinessAutocomplete = async (input) => {
 export const registerBusiness = async (data = {}) => {
   const businessName = limitText(pickFirst(data.business_name, data.businessName), 30)
   const businessType = pickFirst(data.business_type, data.businessType)
-  const placeId = toText(pickFirst(data.place_id, data.placeId))
+  const countryCode = toText(pickFirst(data.country_code, data.countryCode))
+  const cityId = toText(pickFirst(data.city_id, data.cityId, data.place_id, data.placeId))
+  const placeId = toText(pickFirst(data.place_id, data.placeId, cityId))
   const businessPlaceId = toText(pickFirst(data.business_place_id, data.businessPlaceId))
   const photoReference = toText(pickFirst(data.photo_reference, data.photoReference))
-  const deviceId = toText(pickFirst(data.device_id, data.deviceId))
   const productKey = toText(getDefaultProductKey())
 
   if (!businessName) return Promise.reject(new Error("Business name is required"))
   if (businessType === "") return Promise.reject(new Error("Business type is required"))
-  if (!placeId) return Promise.reject(new Error("Business location is required"))
+  if (!placeId && !cityId) return Promise.reject(new Error("Business location is required"))
 
   const payload = cleanPayload({
     business_name: businessName,
@@ -217,6 +218,7 @@ export const registerBusiness = async (data = {}) => {
     main_category_id: toText(pickFirst(data.main_category_id, data.mainCategoryId)),
     business_type: Number.isNaN(Number(businessType)) ? businessType : Number(businessType),
     seaneb_id: toText(pickFirst(data.seaneb_id, data.seanebId)),
+    country_code: countryCode,
     primary_number: toText(pickFirst(data.primary_number, data.primaryNumber)),
     whatsapp_number: toText(pickFirst(data.whatsapp_number, data.whatsappNumber)),
     business_website: toText(pickFirst(data.business_website, data.businessWebsite)),
@@ -224,10 +226,10 @@ export const registerBusiness = async (data = {}) => {
     about_branch: toText(pickFirst(data.about_branch, data.aboutBranch, "Head office branch")),
     address: toText(pickFirst(data.address, data.business_location, data.businessLocation)),
     landmark: toText(data.landmark),
-    place_id: placeId,
+    place_id: placeId || cityId,
+    city_id: cityId,
     business_place_id: businessPlaceId,
     photo_reference: photoReference,
-    device_id: deviceId,
     latitude: toNumberOr(data.latitude, 0),
     longitude: toNumberOr(data.longitude, 0),
     product_key: productKey,

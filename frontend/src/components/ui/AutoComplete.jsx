@@ -153,12 +153,18 @@ export default function AutoComplete({
                   className="autocomplete-item"
                   onMouseDown={() => {
                     if (!resolvedPlaceId) return;
+                    const latitude =
+                      city?.latitude ?? city?.lat ?? city?.location?.lat ?? "";
+                    const longitude =
+                      city?.longitude ?? city?.lng ?? city?.location?.lng ?? "";
 
                     onChange(label);
                     onSelect?.({
                       label,
                       place_id: resolvedPlaceId,
                       city_id: city.city_id,
+                      latitude,
+                      longitude,
                     });
                     lastSelectedLabelRef.current = label.trim();
                     selectedLockRef.current = true;

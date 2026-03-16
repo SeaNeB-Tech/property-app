@@ -5,6 +5,37 @@ import { getCookieOptions } from "@/lib/auth/cookieOptions";
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
 const REFRESH_COOKIE_NAME = "refresh_token_property";
 
+// --- Server-side refresh deduplication to prevent race conditions on rapid reloads ---
+const _refreshDedup = new Map();
+const REFRESH_DEDUP_TTL_MS = 5000;
+const REFRESH_IN_FLIGHT_TTL_MS = 30000;
+let _lastSuccessfulRefreshAt = 0;
+
+const getRefreshFingerprint = (cookieHeader) => {
+  for (const key of REFRESH_COOKIE_KEYS) {
+    const val = getCookieValueFromHeader(cookieHeader, key);
+    if (val && val.length > 8) return val.slice(-16);
+  }
+  return "";
+};
+
+if (typeof globalThis !== "undefined") {
+  const _dedupCleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of _refreshDedup) {
+      if (!entry) {
+        _refreshDedup.delete(key);
+        continue;
+      }
+      const lastAt = entry.completedAt || entry.startedAt || 0;
+      if (!lastAt || now - lastAt > REFRESH_DEDUP_TTL_MS * 6) {
+        _refreshDedup.delete(key);
+      }
+    }
+  }, 60000);
+  if (_dedupCleanup?.unref) _dedupCleanup.unref();
+}
+
 const getCookieValueFromHeader = (cookieHeader, key) => {
   const source = String(cookieHeader || "");
   if (!source) return "";
@@ -134,7 +165,6 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders, context = null) 
     const cookies = getSetCookie.call(upstreamHeaders) || [];
     for (const cookie of cookies) {
       if (!cookie) continue;
-      if (/^\s*access_token=/i.test(cookie)) continue;
       targetHeaders.append("set-cookie", rewriteSetCookieForRequest(cookie, context));
     }
     return;
@@ -149,7 +179,6 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders, context = null) 
     .filter(Boolean);
 
   for (const cookie of splitCookies) {
-    if (/^\s*access_token=/i.test(cookie)) continue;
     targetHeaders.append("set-cookie", rewriteSetCookieForRequest(cookie, context));
   }
 };
@@ -200,11 +229,106 @@ const readCsrfFromPayload = (payload = {}, headers = null) => {
   ).trim();
 };
 
+const buildDedupResponse = (entry = {}) => {
+  const headers = new Headers();
+  headers.set("cache-control", "no-store");
+
+  const accessToken = String(entry?.accessToken || "").trim();
+  const csrfToken = String(entry?.csrfToken || "").trim();
+  const expiresIn = entry?.expiresIn;
+
+  if (accessToken) {
+    headers.set("authorization", `Bearer ${accessToken}`);
+  }
+  if (csrfToken) {
+    headers.set("x-csrf-token", csrfToken);
+    headers.set("x-xsrf-token", csrfToken);
+    headers.set("csrf-token", csrfToken);
+  }
+
+  return NextResponse.json(
+    {
+      success: true,
+      deduplicated: true,
+      ...(accessToken ? { accessToken, access_token: accessToken } : {}),
+      ...(csrfToken ? { csrfToken } : {}),
+      ...(expiresIn != null ? { expiresIn } : {}),
+    },
+    { status: 200, headers }
+  );
+};
+
 const readExpiresInFromPayload = (payload = {}) => {
   const data = payload?.data || {};
   const value = payload?.expiresIn ?? payload?.expires_in ?? data?.expiresIn ?? data?.expires_in;
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+};
+
+const parseSetCookieAttributes = (cookieLine = "") => {
+  const parts = String(cookieLine || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const attrs = { maxAge: null, expires: null };
+  for (const attr of parts.slice(1)) {
+    const [rawKey, ...rest] = attr.split("=");
+    const key = String(rawKey || "").trim().toLowerCase();
+    const value = rest.join("=").trim();
+    if (key === "max-age") {
+      const num = Number(value);
+      if (Number.isFinite(num)) attrs.maxAge = num;
+    } else if (key === "expires") {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) attrs.expires = date;
+    }
+  }
+  return attrs;
+};
+
+const readCookieAttributesFromSetCookieHeaders = (setCookieHeaders = [], candidateNames = []) => {
+  const loweredCandidates = candidateNames.map((name) => String(name || "").trim().toLowerCase());
+  for (const raw of setCookieHeaders) {
+    const firstPair = String(raw || "").split(";")[0] || "";
+    const idx = firstPair.indexOf("=");
+    if (idx < 0) continue;
+    const name = firstPair.slice(0, idx).trim().toLowerCase();
+    if (!loweredCandidates.includes(name)) continue;
+    const attrs = parseSetCookieAttributes(raw);
+    if (attrs.maxAge != null || attrs.expires) return attrs;
+  }
+  return { maxAge: null, expires: null };
+};
+
+const readJwtExpirySeconds = (token) => {
+  try {
+    const raw = String(token || "").trim();
+    if (!raw) return null;
+    const parts = raw.split(".");
+    if (parts.length < 2) return null;
+    const payloadJson = Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    const payload = JSON.parse(payloadJson);
+    const exp = Number(payload?.exp);
+    if (!Number.isFinite(exp)) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const diff = exp - now;
+    return diff > 0 ? diff : null;
+  } catch {
+    return null;
+  }
+};
+
+const buildExpiryOptions = ({ maxAgeSeconds = null, expiresAt = null } = {}) => {
+  const options = {};
+  if (Number.isFinite(maxAgeSeconds)) {
+    const safe = Math.max(1, Math.floor(maxAgeSeconds));
+    options.maxAge = safe;
+    return options;
+  }
+  if (expiresAt instanceof Date && !Number.isNaN(expiresAt.getTime())) {
+    options.expires = expiresAt;
+  }
+  return options;
 };
 
 const getSetCookieLines = (headers) => {
@@ -387,14 +511,6 @@ export async function POST(request) {
     );
   }
 
-  let requestBody = {};
-  try {
-    const bodyText = await request.text();
-    requestBody = bodyText ? JSON.parse(bodyText) : {};
-  } catch {
-    requestBody = {};
-  }
-
   const cookieHeader = toCookieHeader(request, refreshCookieValue);
   const rawCsrfHeader = String(
     request.headers.get("x-csrf-token") ||
@@ -403,6 +519,67 @@ export async function POST(request) {
       ""
   ).trim();
   const incomingCsrf = resolveCsrfHeaderValue(rawCsrfHeader, cookieHeader);
+  const fingerprint =
+    getRefreshFingerprint(cookieHeader) ||
+    (refreshCookieValue.length > 8 ? refreshCookieValue.slice(-16) : "");
+
+  if (fingerprint) {
+    const existing = _refreshDedup.get(fingerprint);
+    if (existing) {
+      if (
+        existing.promise &&
+        existing.startedAt &&
+        Date.now() - existing.startedAt < REFRESH_IN_FLIGHT_TTL_MS
+      ) {
+        try {
+          await existing.promise;
+        } catch {
+          // ignore dedup wait failures
+        }
+      }
+      const entry = _refreshDedup.get(fingerprint);
+      if (
+        entry?.completedAt &&
+        entry.ok &&
+        Date.now() - entry.completedAt < REFRESH_DEDUP_TTL_MS
+      ) {
+        return buildDedupResponse(entry);
+      }
+    }
+  }
+
+  let _dedupResolve;
+  if (fingerprint) {
+    const _dedupPromise = new Promise((r) => {
+      _dedupResolve = r;
+    });
+    _refreshDedup.set(fingerprint, {
+      promise: _dedupPromise,
+      resolve: _dedupResolve,
+      startedAt: Date.now(),
+    });
+  }
+  const _completeDedup = (ok, details = {}) => {
+    if (!fingerprint) return;
+    const entry = _refreshDedup.get(fingerprint);
+    _refreshDedup.set(fingerprint, {
+      completedAt: Date.now(),
+      ok: Boolean(ok),
+      ...(details?.accessToken ? { accessToken: details.accessToken } : {}),
+      ...(details?.csrfToken ? { csrfToken: details.csrfToken } : {}),
+      ...(details?.expiresIn != null ? { expiresIn: details.expiresIn } : {}),
+    });
+    entry?.resolve?.();
+    if (ok) _lastSuccessfulRefreshAt = Date.now();
+  };
+
+  let requestBody = {};
+  try {
+    const bodyText = await request.text();
+    requestBody = bodyText ? JSON.parse(bodyText) : {};
+  } catch {
+    requestBody = {};
+  }
 
   let upstreamResponse = null;
   let payloadText = "";
@@ -451,6 +628,7 @@ export async function POST(request) {
   }
 
   if (!upstreamResponse) {
+    _completeDedup(false);
     return NextResponse.json(
       {
         error: {
@@ -477,6 +655,7 @@ export async function POST(request) {
   }
 
   if (upstreamResponse.ok) {
+    const expiresIn = readExpiresInFromPayload(payloadJson);
     const accessToken = readTokenFromPayload(payloadJson, upstreamResponse.headers);
     const csrfFromPayload = readCsrfFromPayload(payloadJson, upstreamResponse.headers);
     const csrfFromCookie = readCookieValueDecodedFromSetCookie(
@@ -489,9 +668,7 @@ export async function POST(request) {
         success: true,
         ...(accessToken ? { accessToken, access_token: accessToken } : {}),
         ...(csrfToken ? { csrfToken } : {}),
-        ...(readExpiresInFromPayload(payloadJson) != null
-          ? { expiresIn: readExpiresInFromPayload(payloadJson) }
-          : {}),
+        ...(expiresIn != null ? { expiresIn } : {}),
       },
       {
         status: 200,
@@ -513,6 +690,23 @@ export async function POST(request) {
       upstreamResponse.headers,
       REFRESH_COOKIE_KEYS
     );
+    const refreshCookieAttrs = readCookieAttributesFromSetCookieHeaders(
+      getSetCookieLines(upstreamResponse.headers),
+      REFRESH_COOKIE_KEYS
+    );
+    const csrfCookieAttrs = readCookieAttributesFromSetCookieHeaders(
+      getSetCookieLines(upstreamResponse.headers),
+      CSRF_COOKIE_KEYS
+    );
+    const refreshMaxAgeFromJwt = refreshTokenFromCookie ? readJwtExpirySeconds(refreshTokenFromCookie) : null;
+    const refreshExpiry = buildExpiryOptions({
+      maxAgeSeconds: refreshCookieAttrs.maxAge ?? refreshMaxAgeFromJwt ?? null,
+      expiresAt: refreshCookieAttrs.expires || null,
+    });
+    const csrfExpiry = buildExpiryOptions({
+      maxAgeSeconds: csrfCookieAttrs.maxAge ?? (expiresIn != null ? expiresIn : null),
+      expiresAt: csrfCookieAttrs.expires || null,
+    });
     if (refreshTokenFromCookie) {
       response.cookies.set({
         name: "refresh_token_property",
@@ -522,6 +716,7 @@ export async function POST(request) {
         secure: cookieOpts.secure,
         ...(cookieOpts?.domain ? { domain: cookieOpts.domain } : {}),
         path: "/",
+        ...refreshExpiry,
       });
     }
     if (csrfToken) {
@@ -533,16 +728,21 @@ export async function POST(request) {
         secure: cookieOpts.secure,
         ...(cookieOpts?.domain ? { domain: cookieOpts.domain } : {}),
         path: "/",
+        ...csrfExpiry,
       });
     }
-    response.cookies.delete("access_token");
-
+    _completeDedup(true, {
+      ...(accessToken ? { accessToken } : {}),
+      ...(csrfToken ? { csrfToken } : {}),
+      ...(expiresIn != null ? { expiresIn } : {}),
+    });
     return response;
   }
 
   const status = Number(upstreamResponse.status || 0);
   const invalidRefresh = status === 401 || status === 403;
   if (invalidRefresh) {
+    _completeDedup(false);
     return NextResponse.json(
       {
         error: {
@@ -560,6 +760,7 @@ export async function POST(request) {
     );
   }
 
+  _completeDedup(false);
   return NextResponse.json(
     {
       error: {

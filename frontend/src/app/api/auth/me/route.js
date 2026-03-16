@@ -146,7 +146,6 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders, context = null) 
     const cookies = getSetCookie.call(upstreamHeaders) || [];
     for (const cookie of cookies) {
       if (!cookie) continue;
-      if (/^\s*access_token=/i.test(cookie)) continue;
       targetHeaders.append("set-cookie", rewriteSetCookieForRequest(cookie, context));
     }
     return;
@@ -161,7 +160,6 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders, context = null) 
     .filter(Boolean);
 
   for (const cookie of splitCookies) {
-    if (/^\s*access_token=/i.test(cookie)) continue;
     targetHeaders.append("set-cookie", rewriteSetCookieForRequest(cookie, context));
   }
 };

@@ -27,7 +27,6 @@ import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage"
 import { getSessionHint } from "@/lib/auth/sessionHint"
 import { clearRefreshBudget } from "@/lib/auth/refreshBudget"
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl"
-import { ensureDeviceId } from "@/lib/core/deviceId"
 import { acquireRefreshLock, releaseRefreshLock } from "@/lib/auth/refreshLock"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
@@ -76,6 +75,7 @@ const LANGUAGE_STORAGE_KEY = "auth_language"
 const DEFAULT_BUSINESS_IMAGE = "/default-business.png"
 const GOOGLE_PLACES_API_KEY = String(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "").trim()
 const GOOGLE_PLACES_PHOTO_URL = "https://maps.googleapis.com/maps/api/place/photo"
+const GOOGLE_PLACES_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
 const AUTH_DEBUG =
   String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true"
 
@@ -106,6 +106,9 @@ const EMPTY_FORM = {
   aboutBranch: "Head office branch",
   businessLocation: "",
   placeId: "",
+  cityId: "",
+  latitude: "",
+  longitude: "",
   businessPlaceId: "",
   photoReference: "",
   landmark: "",
@@ -149,8 +152,17 @@ const getBusinessSuggestionLabel = (item) =>
 const getBusinessSuggestionPlaceId = (item) =>
   String(item?.business_place_id || item?.place_id || item?.id || "").trim()
 
-const getBusinessSuggestionPhotoReference = (item) =>
-  String(item?.photo_reference || item?.photoReference || "").trim()
+const getBusinessSuggestionPhotoReference = (item) => {
+  const direct = item?.photo_reference || item?.photoReference
+  const fromArray =
+    item?.photo_references?.[0] ||
+    item?.photoReferences?.[0] ||
+    item?.photo_reference_list?.[0]
+  const fromPhotos =
+    item?.photos?.[0]?.photo_reference || item?.photos?.[0]?.photoReference
+  const fromPhoto = item?.photo?.photo_reference || item?.photo?.photoReference
+  return String(direct || fromArray || fromPhotos || fromPhoto || "").trim()
+}
 
 const buildBusinessPhotoUrl = (photoReference, maxWidth = 80) => {
   const reference = String(photoReference || "").trim()
@@ -163,6 +175,80 @@ const buildBusinessPhotoUrl = (photoReference, maxWidth = 80) => {
   })
 
   return `${GOOGLE_PLACES_PHOTO_URL}?${params.toString()}`
+}
+
+const LOCAL_GEOMETRY_ENDPOINT = "/api/places/geometry"
+
+const fetchPlaceGeometryFromServer = async (placeId, query = "") => {
+  const id = String(placeId || "").trim()
+  if (!id) return { lat: "", lng: "" }
+
+  try {
+    const params = new URLSearchParams({ place_id: id })
+    const safeQuery = String(query || "").trim()
+    if (safeQuery) {
+      params.set("query", safeQuery)
+    }
+    const url = `${LOCAL_GEOMETRY_ENDPOINT}?${params.toString()}`
+    const response = await fetch(url, { method: "GET", cache: "no-store" })
+    const data = await response.json().catch(() => ({}))
+    const location = data?.location || data?.result?.geometry?.location || data?.geometry?.location
+    const lat = data?.lat ?? location?.lat
+    const lng = data?.lng ?? location?.lng
+    return {
+      lat: Number.isFinite(Number(lat)) ? Number(lat) : "",
+      lng: Number.isFinite(Number(lng)) ? Number(lng) : "",
+    }
+  } catch {
+    return { lat: "", lng: "" }
+  }
+}
+
+const fetchPlaceGeometry = async (placeId, query = "") => {
+  const id = String(placeId || "").trim()
+  if (!id) return { lat: "", lng: "" }
+
+  if (GOOGLE_PLACES_API_KEY) {
+    try {
+      const params = new URLSearchParams({
+        place_id: id,
+        fields: "geometry",
+        key: GOOGLE_PLACES_API_KEY,
+      })
+      const response = await fetch(`${GOOGLE_PLACES_DETAILS_URL}?${params.toString()}`, {
+        method: "GET",
+        cache: "no-store",
+      })
+      const data = await response.json().catch(() => ({}))
+      const location = data?.result?.geometry?.location
+      const lat = location?.lat
+      const lng = location?.lng
+      const direct = {
+        lat: Number.isFinite(Number(lat)) ? Number(lat) : "",
+        lng: Number.isFinite(Number(lng)) ? Number(lng) : "",
+      }
+      if (hasMeaningfulCoordinates(direct.lat, direct.lng)) {
+        return direct
+      }
+    } catch {
+      // fall back to server-side lookup
+    }
+  }
+
+  return fetchPlaceGeometryFromServer(id, query)
+}
+
+const normalizeCoordinate = (value) => {
+  if (value === "" || value === null || value === undefined) return ""
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : ""
+}
+
+const hasMeaningfulCoordinates = (lat, lng) => {
+  const normalizedLat = normalizeCoordinate(lat)
+  const normalizedLng = normalizeCoordinate(lng)
+  if (normalizedLat === "" || normalizedLng === "") return false
+  return !(normalizedLat === 0 && normalizedLng === 0)
 }
 
 const getResolvedCountryCode = () => {
@@ -368,7 +454,6 @@ export default function BusinessRegisterPage() {
   const [businessSuggestions, setBusinessSuggestions] = useState([])
   const [businessSuggestOpen, setBusinessSuggestOpen] = useState(false)
   const [businessSuggestLoading, setBusinessSuggestLoading] = useState(false)
-  const [deviceId, setDeviceId] = useState("")
   const [categories, setCategories] = useState([])
   const [productCategoryId, setProductCategoryId] = useState("")
   const [currentStep, setCurrentStep] = useState(1)
@@ -376,6 +461,7 @@ export default function BusinessRegisterPage() {
   const lockedProductKeyRef = useRef("")
   const suppressNextBusinessAutocompleteRef = useRef(false)
   const debouncedBusinessName = useDebounce(form.businessName, 300)
+  const locationLookupRef = useRef("")
 
   const t = LANG_MAP[language]
   const currentStepMeta = WIZARD_STEPS.find((step) => step.id === currentStep) || WIZARD_STEPS[0]
@@ -450,12 +536,6 @@ export default function BusinessRegisterPage() {
     }
   }, [language])
 
-  useEffect(() => {
-    const id = ensureDeviceId()
-    if (id) {
-      setDeviceId(id)
-    }
-  }, [])
 
   useEffect(() => {
     if (!otpModalOpen || otpResendCooldown <= 0) return
@@ -687,7 +767,7 @@ export default function BusinessRegisterPage() {
     }
 
     if (key === "businessLocation") {
-      setForm((prev) => ({ ...prev, placeId: "" }))
+      setForm((prev) => ({ ...prev, placeId: "", cityId: "", latitude: "", longitude: "" }))
     }
     if (key === "businessName") {
       setForm((prev) => ({
@@ -1225,18 +1305,21 @@ export default function BusinessRegisterPage() {
   const handleSubmit = async () => {
     const businessName = normalizeBusinessLabel(form.businessName)
     const displayName = normalizeBusinessLabel(form.displayName)
-    const businessType = form.businessType
-    const placeId = form.placeId.trim()
-    const primaryNumber = form.primaryNumber.trim()
-    const whatsappNumber = form.whatsappNumber.trim()
-    const effectiveWhatsappNumber = whatsappNumber || primaryNumber
-    const businessWebsite = form.businessWebsite.trim()
-    const businessEmail = form.businessEmail.trim()
+      const businessType = form.businessType
+      const placeId = form.placeId.trim()
+      const cityId = form.cityId.trim()
+      const primaryNumber = form.primaryNumber.trim()
+      const whatsappNumber = form.whatsappNumber.trim()
+      const effectiveWhatsappNumber = whatsappNumber || primaryNumber
+      const countryCode = normalizeCountryCode(selectedCountry?.dialCode)
+      const businessWebsite = form.businessWebsite.trim()
+      const businessEmail = form.businessEmail.trim()
     const pan = form.pan.trim().toUpperCase()
     const gstin = form.gstin.trim().toUpperCase()
     const businessPlaceId = form.businessPlaceId.trim()
     const photoReference = form.photoReference.trim()
-    const resolvedDeviceId = deviceId || ensureDeviceId()
+    let latitude = normalizeCoordinate(form.latitude)
+    let longitude = normalizeCoordinate(form.longitude)
 
     if (!businessName) {
       setSubmitError("Business name is required")
@@ -1292,8 +1375,25 @@ export default function BusinessRegisterPage() {
       setSubmitError("Please verify SeaNeB ID before registration")
       return
     }
-    if (!placeId) {
+    const resolvedPlaceId = placeId || cityId
+    if (!resolvedPlaceId) {
       setSubmitError("Business location is required")
+      return
+    }
+      if (resolvedPlaceId && !hasMeaningfulCoordinates(latitude, longitude)) {
+        const geometry = await fetchPlaceGeometry(resolvedPlaceId, form.businessLocation)
+        if (hasMeaningfulCoordinates(geometry.lat, geometry.lng)) {
+          latitude = geometry.lat
+          longitude = geometry.lng
+          setForm((prev) => ({
+          ...prev,
+          latitude: geometry.lat,
+          longitude: geometry.lng,
+        }))
+      }
+    }
+    if (!hasMeaningfulCoordinates(latitude, longitude)) {
+      setSubmitError("Please select a valid location from autocomplete to capture coordinates")
       return
     }
     if (pan && !PAN_REGEX.test(pan)) {
@@ -1318,23 +1418,26 @@ export default function BusinessRegisterPage() {
 
     await runWithTransition(
       async () => {
-        const response = await registerBusiness({
-          business_name: businessName,
-          display_name: displayName,
-          main_category_id: resolvedMainCategoryId,
-          business_type: Number(form.businessType),
-          seaneb_id: form.seanebId.trim(),
-          primary_number: primaryNumber,
-          whatsapp_number: effectiveWhatsappNumber,
+          const response = await registerBusiness({
+            business_name: businessName,
+            display_name: displayName,
+            main_category_id: resolvedMainCategoryId,
+            business_type: Number(form.businessType),
+            seaneb_id: form.seanebId.trim(),
+            country_code: countryCode || undefined,
+            primary_number: primaryNumber,
+            whatsapp_number: effectiveWhatsappNumber,
           business_website: businessWebsite || undefined,
           business_email: businessEmail || undefined,
           about_branch: form.aboutBranch.trim() || "Head office branch",
           address: form.businessLocation.trim(),
           landmark: form.landmark.trim(),
-          place_id: placeId,
+          place_id: resolvedPlaceId,
+          city_id: cityId || undefined,
           business_place_id: businessPlaceId,
           photo_reference: photoReference,
-          device_id: resolvedDeviceId,
+          latitude,
+          longitude,
           pan,
           gstin,
           product_key: lockedProductKey,
@@ -1761,11 +1864,16 @@ export default function BusinessRegisterPage() {
                 <select className="business-form-select" value={form.mainCategoryId} onChange={(e) => setField("mainCategoryId", e.target.value)}>
                   <option value="">Select a category</option>
                   {categories.length > 0 ? (
-                    categories.map((category) => (
-                      <option key={category.main_category_id || category.id} value={category.main_category_id || category.id}>
-                        {category.main_category_name || category.name || "Unnamed"}
-                      </option>
-                    ))
+                    categories.map((category, index) => {
+                      const categoryId = getCategoryId(category)
+                      const categoryName = getCategoryName(category) || "Unnamed"
+                      if (!categoryId) return null
+                      return (
+                        <option key={categoryId || index} value={categoryId}>
+                          {categoryName}
+                        </option>
+                      )
+                    })
                   ) : (
                     <option value="">No categories available</option>
                   )}
@@ -1947,7 +2055,35 @@ export default function BusinessRegisterPage() {
                 <AutoComplete
                   value={form.businessLocation}
                   onChange={(v) => setField("businessLocation", v)}
-                  onSelect={(city) => setField("placeId", city?.place_id || city?.city_id || "")}
+                  onSelect={async (city) => {
+                    const nextPlaceId = String(city?.place_id || "").trim();
+                    const nextCityId = String(city?.city_id || "").trim();
+                    const nextLatitude = city?.latitude ?? city?.lat ?? city?.location?.lat ?? "";
+                    const nextLongitude = city?.longitude ?? city?.lng ?? city?.location?.lng ?? "";
+                    const resolvedPlaceId = nextPlaceId || nextCityId || "";
+                    const normalizedLatitude = normalizeCoordinate(nextLatitude);
+                    const normalizedLongitude = normalizeCoordinate(nextLongitude);
+                    locationLookupRef.current = resolvedPlaceId;
+                    setForm((prev) => ({
+                      ...prev,
+                      placeId: resolvedPlaceId,
+                      cityId: nextCityId || nextPlaceId || "",
+                      latitude: normalizedLatitude,
+                      longitude: normalizedLongitude,
+                    }));
+
+                    if (resolvedPlaceId && !hasMeaningfulCoordinates(normalizedLatitude, normalizedLongitude)) {
+                      const geometry = await fetchPlaceGeometry(resolvedPlaceId, city?.label || form.businessLocation)
+                      if (locationLookupRef.current !== resolvedPlaceId) return
+                      if (geometry.lat !== "" || geometry.lng !== "") {
+                        setForm((prev) => ({
+                          ...prev,
+                          latitude: geometry.lat,
+                          longitude: geometry.lng,
+                        }))
+                      }
+                    }
+                  }}
                 />
               </Field>
             </div>
