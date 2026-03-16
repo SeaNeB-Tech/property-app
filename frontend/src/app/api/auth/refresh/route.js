@@ -185,6 +185,8 @@ const readCsrfFromPayload = (payload = {}, headers = null) => {
   const data = payload?.data || {};
   const tokenObj = data?.token || payload?.token || {};
   return String(
+    payload?.csrf_token_property ||
+      data?.csrf_token_property ||
     payload?.csrfToken ||
       payload?.csrf_token ||
       data?.csrfToken ||
@@ -261,21 +263,49 @@ const getRefreshCookieFromRequest = (request) => {
   return "";
 };
 
+const getFirstCookieFromRequestCookies = (request, keys = []) => {
+  for (const key of keys) {
+    const value = String(request.cookies?.get(key)?.value || "").trim();
+    if (value) return { name: key, value };
+  }
+  return null;
+};
+
+const appendCookieToHeader = (headerValue, name, value) => {
+  if (!name || !value) return headerValue;
+  if (!headerValue) return `${name}=${value}`;
+  return `${headerValue}; ${name}=${value}`;
+};
+
 const toCookieHeader = (request, refreshCookieValue) => {
-  const incomingCookie = String(request.headers.get("cookie") || "").trim();
-  if (incomingCookie) {
-    const hasKnownRefreshCookie = REFRESH_COOKIE_KEYS.some((key) =>
-      Boolean(getCookieValueFromHeader(incomingCookie, key))
+  let incomingCookie = String(request.headers.get("cookie") || "").trim();
+  const hasKnownRefreshCookie = REFRESH_COOKIE_KEYS.some((key) =>
+    Boolean(getCookieValueFromHeader(incomingCookie, key))
+  );
+  const hasKnownCsrfCookie = CSRF_COOKIE_KEYS.some((key) =>
+    Boolean(getCookieValueFromHeader(incomingCookie, key))
+  );
+
+  if (!hasKnownRefreshCookie && refreshCookieValue) {
+    incomingCookie = appendCookieToHeader(
+      incomingCookie,
+      REFRESH_COOKIE_NAME,
+      refreshCookieValue
     );
-    if (hasKnownRefreshCookie) return incomingCookie;
   }
 
-  if (!refreshCookieValue) return incomingCookie;
-
-  if (!incomingCookie) {
-    return `${REFRESH_COOKIE_NAME}=${refreshCookieValue}`;
+  if (!hasKnownCsrfCookie) {
+    const csrfFromStore = getFirstCookieFromRequestCookies(request, CSRF_COOKIE_KEYS);
+    if (csrfFromStore?.name && csrfFromStore?.value) {
+      incomingCookie = appendCookieToHeader(
+        incomingCookie,
+        csrfFromStore.name,
+        csrfFromStore.value
+      );
+    }
   }
-  return `${incomingCookie}; ${REFRESH_COOKIE_NAME}=${refreshCookieValue}`;
+
+  return incomingCookie;
 };
 
 const doRefreshRequest = async ({

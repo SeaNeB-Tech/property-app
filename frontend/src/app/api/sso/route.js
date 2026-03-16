@@ -3,6 +3,99 @@ import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/ap
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 
+const getRequestHost = (request) =>
+  String(request?.headers?.get("x-forwarded-host") || request?.headers?.get("host") || "").trim();
+
+const getRequestProtocol = (request) => {
+  const forwarded = String(request?.headers?.get("x-forwarded-proto") || "").trim().toLowerCase();
+  if (forwarded) return forwarded;
+  return String(request?.nextUrl?.protocol || "").replace(":", "").trim().toLowerCase();
+};
+
+const getCookieContext = (request) => ({
+  host: getRequestHost(request),
+  isSecure: getRequestProtocol(request) === "https",
+});
+
+const normalizeHost = (host) => String(host || "").trim().replace(/:\d+$/, "").toLowerCase();
+
+const isIpHost = (host) => {
+  const value = normalizeHost(host);
+  if (!value) return false;
+  if (value.includes(":")) return true; // IPv6
+  return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(value);
+};
+
+const isLoopbackHost = (host) => {
+  const value = normalizeHost(host);
+  return value === "localhost" || value === "::1" || /^127(?:\.\d{1,3}){3}$/.test(value);
+};
+
+const domainMatchesHost = (domain, host) => {
+  const safeHost = normalizeHost(host);
+  const safeDomain = String(domain || "").trim().replace(/^\./, "").toLowerCase();
+  if (!safeHost || !safeDomain) return false;
+  return safeHost === safeDomain || safeHost.endsWith(`.${safeDomain}`);
+};
+
+const rewriteSetCookieForRequest = (cookie, context) => {
+  if (!context) return cookie;
+  const parts = String(cookie || "")
+    .split(";")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!parts.length) return cookie;
+
+  const nameValue = parts[0];
+  const attrs = [];
+  let domain = "";
+  let sameSite = "";
+  let hasSecure = false;
+
+  for (const attr of parts.slice(1)) {
+    const [rawKey, ...rest] = attr.split("=");
+    const key = String(rawKey || "").trim().toLowerCase();
+    const value = rest.join("=").trim();
+
+    if (key === "domain") {
+      domain = value;
+      continue;
+    }
+    if (key === "samesite") {
+      sameSite = value;
+      continue;
+    }
+    if (key === "secure") {
+      hasSecure = true;
+      continue;
+    }
+    attrs.push(attr);
+  }
+
+  const host = normalizeHost(context.host);
+  const dropDomain =
+    domain &&
+    (isIpHost(host) || isLoopbackHost(host) || !domainMatchesHost(domain, host));
+
+  if (domain && !dropDomain) {
+    attrs.push(`Domain=${domain}`);
+  }
+
+  let finalSameSite = sameSite;
+  if (!context.isSecure && String(sameSite || "").toLowerCase() === "none") {
+    finalSameSite = "Lax";
+  }
+  if (finalSameSite) {
+    attrs.push(`SameSite=${finalSameSite}`);
+  }
+
+  if (context.isSecure && hasSecure) {
+    attrs.push("Secure");
+  }
+
+  return [nameValue, ...attrs].join("; ");
+};
+
 const buildUpstreamCandidates = () => {
   const bases = Array.from(
     new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean))
@@ -31,13 +124,13 @@ const buildUpstreamCandidates = () => {
   return urls;
 };
 
-const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
+const appendSetCookieHeaders = (targetHeaders, upstreamHeaders, context = null) => {
   const getSetCookie = upstreamHeaders?.getSetCookie;
   if (typeof getSetCookie === "function") {
     const cookies = getSetCookie.call(upstreamHeaders) || [];
     for (const cookie of cookies) {
       if (!cookie) continue;
-      targetHeaders.append("set-cookie", cookie);
+      targetHeaders.append("set-cookie", rewriteSetCookieForRequest(cookie, context));
     }
     return;
   }
@@ -51,11 +144,12 @@ const appendSetCookieHeaders = (targetHeaders, upstreamHeaders) => {
     .filter(Boolean);
 
   for (const cookie of splitCookies) {
-    targetHeaders.append("set-cookie", cookie);
+    targetHeaders.append("set-cookie", rewriteSetCookieForRequest(cookie, context));
   }
 };
 
 export async function POST(request) {
+  const cookieContext = getCookieContext(request);
   let bodyPayload = {};
   try {
     bodyPayload = await request.json();
@@ -124,7 +218,7 @@ export async function POST(request) {
       const responseHeaders = new Headers();
       const contentType = String(upstreamResponse.headers.get("content-type") || "").trim();
       if (contentType) responseHeaders.set("content-type", contentType);
-      appendSetCookieHeaders(responseHeaders, upstreamResponse.headers);
+      appendSetCookieHeaders(responseHeaders, upstreamResponse.headers, cookieContext);
 
       const payloadText = await upstreamResponse.text();
       console.log(`[SSO Mint] Response payload:`, payloadText);

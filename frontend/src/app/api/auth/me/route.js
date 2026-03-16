@@ -343,7 +343,14 @@ export async function GET(request) {
     String(request.headers.get("cookie") || "").trim(),
     ["access_token", "accessToken", "token"]
   );
-  const incomingCsrf = String(request.headers.get("x-csrf-token") || "").trim();
+  const incomingCsrfHeader = String(
+    request.headers.get("x-csrf-token") ||
+      request.headers.get("x-xsrf-token") ||
+      request.headers.get("csrf-token") ||
+      ""
+  ).trim();
+  const incomingCsrfCookie = getFirstCookieValueFromHeader(incomingCookie, CSRF_COOKIE_KEYS);
+  const incomingCsrf = incomingCsrfHeader || incomingCsrfCookie;
   const incomingAuthorization = String(
     request.headers.get("authorization") || request.headers.get("Authorization") || ""
   ).trim();

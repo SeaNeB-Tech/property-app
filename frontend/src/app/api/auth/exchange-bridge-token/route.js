@@ -171,6 +171,8 @@ const readCsrfFromPayload = (payload = {}, headers = null) => {
   const data = payload?.data || {};
   const tokenObj = data?.token || payload?.token || {};
   return String(
+    payload?.csrf_token_property ||
+      data?.csrf_token_property ||
     payload?.csrfToken ||
       payload?.csrf_token ||
       data?.csrfToken ||
