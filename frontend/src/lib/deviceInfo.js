@@ -12,6 +12,15 @@ const readStoredDeviceId = () => {
   }
 };
 
+const clearStoredDeviceId = () => {
+  if (!isBrowser()) return;
+  try {
+    window.localStorage.removeItem(DEVICE_ID_STORAGE_KEY);
+  } catch {
+    // ignore storage errors
+  }
+};
+
 const writeStoredDeviceId = (value) => {
   if (!isBrowser()) return;
   try {
@@ -60,6 +69,20 @@ export const getDeviceId = () => {
     cachedDeviceId = stored;
     return stored;
   }
+
+  if (!isBrowser()) return "";
+
+  const generated = generateDeviceId();
+  if (!generated) return "";
+
+  cachedDeviceId = generated;
+  writeStoredDeviceId(generated);
+  return generated;
+};
+
+export const resetDeviceId = () => {
+  cachedDeviceId = "";
+  clearStoredDeviceId();
 
   if (!isBrowser()) return "";
 

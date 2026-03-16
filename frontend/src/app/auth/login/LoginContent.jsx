@@ -22,6 +22,7 @@ import { getListingAppUrl } from "@/lib/core/appUrls";
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition";
 import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { resetDeviceId } from "@/lib/deviceInfo";
 import {
   getAuthFlowContext,
   ingestAuthFlowContextFromWindowName,
@@ -247,6 +248,9 @@ export default function LoginContent({ initialHold = false } = {}) {
 
     await runWithTransition(
       async () => {
+        // Rotate device id at login submission time.
+        resetDeviceId();
+
         const dialCode = country?.dialCode?.replace("+", "");
 
         if (!dialCode) {
