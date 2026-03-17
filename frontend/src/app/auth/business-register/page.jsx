@@ -1108,7 +1108,7 @@ export default function BusinessRegisterPage() {
       if (status === 429 && code === "OTP_ALREADY_SENT" && !backendMessage) {
         setSubmitError("")
       } else {
-        setSubmitError(backendMessage || getErrorMessage(err, "Failed to send mobile OTP. Please try again."))
+        setSubmitError(backendMessage)
       }
     } finally {
       setMobileLoading(false)
@@ -1130,7 +1130,7 @@ export default function BusinessRegisterPage() {
       if (status === 429 && code === "OTP_ALREADY_SENT" && !backendMessage) {
         setSubmitError("")
       } else {
-        setSubmitError(backendMessage || getErrorMessage(err, "Failed to send WhatsApp OTP. Please try again."))
+        setSubmitError(backendMessage)
       }
     } finally {
       setWhatsappLoading(false)
@@ -1258,7 +1258,7 @@ export default function BusinessRegisterPage() {
       if (status === 429 && code === "OTP_ALREADY_SENT" && !backendMessage) {
         setOtpError("")
       } else {
-        setOtpError(backendMessage || getErrorMessage(err, "Failed to resend OTP. Please try again."))
+        setOtpError(backendMessage)
       }
       const backendWait = Number(
         err?.response?.data?.error?.wait_seconds ||

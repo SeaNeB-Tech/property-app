@@ -23,6 +23,9 @@ const AUTH_ENTRY_PATHS = new Set([
   "/auth/business-option",
 ]);
 
+let _lastMiddlewareRefreshAt = 0;
+const MIDDLEWARE_REFRESH_THROTTLE_MS = 3000;
+
 const toBool = (value) => {
   if (value === true) return true;
   if (value === false || value == null) return false;
@@ -198,18 +201,35 @@ export async function middleware(request) {
     pathname === "/auth/complete-profile";
 
   if (shouldProbeSession) {
-    const sessionState = await getValidatedSessionState(request);
-    hasSession = sessionState.authenticated;
-    hasBusiness = sessionState.hasBusiness;
-    probeAuthenticated = sessionState.authenticated;
-    sessionSetCookies = sessionState.setCookies || [];
+    // Throttle: skip full validation if a recent probe already validated the session (rapid F5 protection)
+    const now = Date.now();
+    const isThrottled = now - _lastMiddlewareRefreshAt < MIDDLEWARE_REFRESH_THROTTLE_MS;
+
+    if (isThrottled && (hasRefreshCookie || hasCsrfSessionHint)) {
+      // Trust that the recent validation is still valid; let client-side auth handle restoration
+      hasSession = true;
+      hasBusiness = true;
+      probeAuthenticated = true;
+    } else {
+      const sessionState = await getValidatedSessionState(request);
+      hasSession = sessionState.authenticated;
+      hasBusiness = sessionState.hasBusiness;
+      probeAuthenticated = sessionState.authenticated;
+      sessionSetCookies = sessionState.setCookies || [];
+      if (sessionState.authenticated) {
+        _lastMiddlewareRefreshAt = Date.now();
+      }
+    }
   }
 
   const hasRecoverableSession = !hasSession && (hasRefreshCookie || hasCsrfSessionHint);
-  const refreshResponse = hasRecoverableSession ? await tryRefreshSession(request) : null;
+  // Skip the separate refresh attempt if middleware recently validated (avoids double token consumption)
+  const shouldSkipRefresh = Date.now() - _lastMiddlewareRefreshAt < MIDDLEWARE_REFRESH_THROTTLE_MS;
+  const refreshResponse = hasRecoverableSession && !shouldSkipRefresh ? await tryRefreshSession(request) : null;
   if (refreshResponse?.ok) {
     hasSession = true;
     probeAuthenticated = true;
+    _lastMiddlewareRefreshAt = Date.now();
   }
 
   let response = null;

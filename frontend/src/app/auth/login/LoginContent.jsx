@@ -126,27 +126,21 @@ const getFriendlyOtpError = (err) => {
     .trim()
     .toUpperCase();
 
-  if (Number.isFinite(waitSeconds) && waitSeconds > 0) {
-    return backendMessage;
-  }
-
-  if (code === "OTP_ALREADY_SENT") {
-    return backendMessage;
-  }
-
-  if (status === 429) {
-    return backendMessage || "Too many attempts. Please wait a moment and try again.";
-  }
+  // Prefer *only* backend-provided messages for OTP throttling / resend attempts.
+  if (String(backendMessage || "").trim()) return String(backendMessage).trim();
+  if (String(code || "").trim()) return String(code).trim();
+  if (Number.isFinite(waitSeconds) && waitSeconds > 0) return "";
+  if (status === 429) return "";
 
   if (status === 400 || status === 401 || status === 403 || status === 422) {
     return "Unable to send OTP. Please check your number and try again.";
   }
 
   if (status >= 500) {
-    return "Something went wrong on our side. Please try again shortly.";
+    return backendMessage || "Something went wrong";
   }
 
-  return "Unable to send OTP right now. Please try again.";
+  return backendMessage || String(err?.message || "").trim() || "Something went wrong";
 };
 
 export default function LoginContent({ initialHold = false } = {}) {

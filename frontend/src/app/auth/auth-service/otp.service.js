@@ -439,26 +439,9 @@ export const sendOtp = async ({ via, disableFallback = false } = {}) => {
     return OtpSendThrottle.promise;
   }
 
-  const remainingSeconds = getRemainingSeconds(otpKey);
-  if (remainingSeconds > 0) {
-    throw buildBackendLikeThrottleError(otpKey);
-  }
-
-  const lockOwner = tryAcquireLock(otpKey);
-  if (!lockOwner) {
-    throw buildBackendLikeThrottleError(otpKey, "OTP sending in another tab. Please wait a moment.");
-  }
-
   const executeSend = async () => {
     try {
       const response = await postFirstAvailablePath(OTP_SEND_PATHS, payload);
-      const waitSeconds = readBackendWaitSeconds(response) || OTP_DEFAULT_COOLDOWN_SECONDS;
-      writeCooldown(otpKey, {
-        waitSeconds,
-        message: "",
-        code: "OTP_SENT",
-        kind: "sent",
-      });
       return response;
     } catch (err) {
       const status = getErrorStatus(err);
@@ -491,16 +474,7 @@ export const sendOtp = async ({ via, disableFallback = false } = {}) => {
       );
 
       const response = await postFirstAvailablePath(OTP_SEND_PATHS, smsPayload);
-      const waitSeconds = readBackendWaitSeconds(response) || OTP_DEFAULT_COOLDOWN_SECONDS;
-      writeCooldown(otpKey, {
-        waitSeconds,
-        message: "",
-        code: "OTP_SENT",
-        kind: "sent",
-      });
       return response;
-    } finally {
-      releaseLock(otpKey, lockOwner);
     }
   };
 

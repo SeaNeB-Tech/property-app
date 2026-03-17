@@ -16,22 +16,20 @@ const isUsableUrl = (value) => {
 };
 
 const getApiBaseCandidates = () => {
-  const nextEnv = String(process.env.NEXT_ENV || "").trim().toLowerCase();
-  const directApiUrl = normalizeUrl(
-    process.env.BACKEND_API_URL ||
-      process.env.NEXT_PUBLIC_BACKEND_API_URL ||
-      process.env.NEXT_PUBLIC_API_BASE_URL ||
-      ""
+  // Choose exactly one API base depending on environment (no fallback to the other server).
+  const nextEnv = String(process.env.NEXT_ENV || process.env.EXT_ENV || "")
+    .trim()
+    .toLowerCase();
+  const devApiUrl = normalizeUrl(
+    process.env.NEXT_PUBLIC_DEV_URL || process.env.NEXT_PUBLIC_API_BASE_URL || ""
   );
-  const devApiUrl = normalizeUrl(process.env.NEXT_PUBLIC_DEV_URL || "");
   const centralApiUrl = normalizeUrl(
     process.env.NEXT_PUBLIC_CENTRAL_URL || process.env.NEXT_PUBLIC_CENTRAL_API_URL || ""
   );
 
-  const primary = nextEnv === "development" ? devApiUrl : centralApiUrl;
-  const fallback = nextEnv === "development" ? centralApiUrl : devApiUrl;
+  const baseUrl = nextEnv === "development" ? devApiUrl : centralApiUrl;
 
-  return Array.from(new Set([directApiUrl, primary, fallback].filter(isUsableUrl)));
+  return Array.from(new Set([baseUrl].filter(isUsableUrl)));
 };
 
 const buildTargetUrl = (baseUrl, pathSegments = [], search = "") => {

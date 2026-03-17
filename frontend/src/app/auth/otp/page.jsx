@@ -39,6 +39,12 @@ const MAIN_APP_LOGIN_SOURCE = "main-app";
 const MAIN_APP_REGISTER_SOURCE = "main-app-register";
 const RESEND_COOLDOWN_SECONDS = 60;
 
+const getBackendErrorMessage = (err) => {
+  return String(
+    err?.response?.data?.error?.message || err?.response?.data?.message || ""
+  ).trim();
+};
+
 const getFriendlyVerifyError = (err) => {
   const status = Number(err?.response?.status || 0);
   const code = String(
@@ -413,11 +419,14 @@ export default function OtpPage() {
         { maxAge: 300, path: "/" }
       );
 
-      await sendOtp({ via: channel });
-      setInfoMessage(`OTP resent via ${channel === "sms" ? "SMS" : "WhatsApp"}.`);
+      const resp = await sendOtp({ via: channel });
+      const backendMessage = String(
+        resp?.data?.error?.message || resp?.data?.message || ""
+      ).trim();
+      setInfoMessage(backendMessage);
       setResendCooldown(RESEND_COOLDOWN_SECONDS);
     } catch (err) {
-      setInfoMessage("Unable to resend OTP right now. Please try again.");
+      setInfoMessage(getBackendErrorMessage(err));
     } finally {
       setResending(false);
     }
