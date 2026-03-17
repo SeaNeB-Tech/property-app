@@ -45,24 +45,14 @@ export const API_REMOTE_FALLBACK_BASE_URL = API_REMOTE_CANDIDATES[1] || "";
 export const API_REMOTE_CANDIDATE_BASE_URLS = API_REMOTE_CANDIDATES;
 
 // In browser:
-// - For localhost/dev-machine, use same-origin proxy (/api) so cookies work without CORS surprises.
-// - For deployed environments (dev/staging/prod), call the selected remote API base directly.
+// Always use same-origin proxy (/api) so auth cookies (SameSite/Secure/Domain)
+// behave consistently on localhost, dev ports, and production domains.
 const CLIENT_BASE_PATH =
   typeof window !== "undefined"
     ? resolveClientBasePath()
     : normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || "");
 
-const isLocalHost = () => {
-  if (typeof window === "undefined") return false;
-  const host = String(window.location.hostname || "").trim().toLowerCase();
-  if (!host) return false;
-  if (host === "localhost" || host === "::1" || host.endsWith(".local")) return true;
-  return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(host) || host.startsWith("127.");
-};
-
 export const API_BASE_URL =
   typeof window !== "undefined"
-    ? isLocalHost()
-      ? `${CLIENT_BASE_PATH}/api`
-      : API_REMOTE_BASE_URL
+    ? `${CLIENT_BASE_PATH}/api`
     : API_REMOTE_BASE_URL;

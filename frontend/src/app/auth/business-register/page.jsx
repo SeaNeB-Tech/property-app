@@ -562,12 +562,28 @@ export default function BusinessRegisterPage() {
   }, [])
 
   useEffect(() => {
+    let active = true
+    let timer = null
+
+    const isSsoCallback = () => {
+      try {
+        return (
+          typeof window !== "undefined" &&
+          new URL(window.location.href).searchParams.has("bridge_token")
+        )
+      } catch {
+        return false
+      }
+    }
+
     const init = async () => {
       const profileCompleted = getCookie("profile_completed")
       const hasSession = await ensureAuthSessionReady()
       const forceRegister =
         typeof window !== "undefined" &&
         new URLSearchParams(window.location.search).get("force") === "1"
+
+      if (!active) return
 
       if (!hasSession) {
         // Allow business registration page to be accessed by guests.
@@ -743,7 +759,20 @@ export default function BusinessRegisterPage() {
       setMounted(true)
     }
 
-    init()
+    // Debounce initial session bootstrap on mount to avoid refresh-token rotation conflicts
+    // when users spam page refresh.
+    if (isSsoCallback()) {
+      void init()
+    } else {
+      timer = window.setTimeout(() => {
+        if (active) void init()
+      }, 300)
+    }
+
+    return () => {
+      active = false
+      if (timer) window.clearTimeout(timer)
+    }
   }, [router])
 
   useEffect(() => {
