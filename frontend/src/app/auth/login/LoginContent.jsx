@@ -112,9 +112,30 @@ const isCrossOriginAbsoluteTarget = (value) => {
 
 const getFriendlyOtpError = (err) => {
   const status = Number(err?.response?.status || 0);
+  const backendMessage =
+    err?.response?.data?.error?.message ||
+    err?.response?.data?.message ||
+    "";
+  const waitSeconds = Number(
+    err?.response?.data?.error?.wait_seconds ||
+      err?.response?.data?.wait_seconds ||
+      err?.response?.data?.waitSeconds ||
+      0
+  );
+  const code = String(err?.response?.data?.code || err?.response?.data?.error?.code || "")
+    .trim()
+    .toUpperCase();
+
+  if (Number.isFinite(waitSeconds) && waitSeconds > 0) {
+    return backendMessage;
+  }
+
+  if (code === "OTP_ALREADY_SENT") {
+    return backendMessage;
+  }
 
   if (status === 429) {
-    return "Too many attempts. Please wait a moment and try again.";
+    return backendMessage || "Too many attempts. Please wait a moment and try again.";
   }
 
   if (status === 400 || status === 401 || status === 403 || status === 422) {

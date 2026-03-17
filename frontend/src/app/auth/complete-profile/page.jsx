@@ -27,7 +27,7 @@ import { authApi } from "@/lib/api/client"
 import { API } from "@/lib/config/apiPaths"
 import { getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { authStore } from "@/app/auth/auth-service/store/authStore"
-import { getAuthAppUrl } from "@/lib/core/appUrls"
+import { getAuthAppUrl, getListingAppUrl } from "@/lib/core/appUrls"
 import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect"
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
 import { notifyAuthChanged } from "@/services/auth.service"
@@ -146,10 +146,10 @@ const getPostLoginTarget = () => {
 
 const resolveRedirectTarget = (target) => {
   const safeTarget = String(target || "").trim()
-  if (!safeTarget) return "/dashboard"
+  if (!safeTarget) return getListingAppUrl("/home")
   if (/^https?:\/\//i.test(safeTarget)) return safeTarget
   if (safeTarget.startsWith("/")) return safeTarget
-  return "/dashboard"
+  return getListingAppUrl("/home")
 }
 
 export default function CompleteProfilePage() {

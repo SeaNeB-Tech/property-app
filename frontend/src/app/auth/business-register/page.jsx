@@ -1098,7 +1098,18 @@ export default function BusinessRegisterPage() {
       setSubmitError("")
       await sendBusinessMobileOtp(OTP_VIA_SMS)
     } catch (err) {
-      setSubmitError("Failed to send mobile OTP. Please try again.")
+      const status = Number(err?.response?.status || 0)
+      const code = String(err?.response?.data?.code || err?.response?.data?.error?.code || "").trim().toUpperCase()
+      const backendMessage = String(
+        err?.response?.data?.error?.message || err?.response?.data?.message || ""
+      ).trim()
+
+      // Show only backend messages for throttling/cooldown scenarios.
+      if (status === 429 && code === "OTP_ALREADY_SENT" && !backendMessage) {
+        setSubmitError("")
+      } else {
+        setSubmitError(backendMessage || getErrorMessage(err, "Failed to send mobile OTP. Please try again."))
+      }
     } finally {
       setMobileLoading(false)
     }
@@ -1110,7 +1121,17 @@ export default function BusinessRegisterPage() {
       setSubmitError("")
       await sendBusinessWhatsappOtp()
     } catch (err) {
-      setSubmitError("Failed to send WhatsApp OTP. Please try again.")
+      const status = Number(err?.response?.status || 0)
+      const code = String(err?.response?.data?.code || err?.response?.data?.error?.code || "").trim().toUpperCase()
+      const backendMessage = String(
+        err?.response?.data?.error?.message || err?.response?.data?.message || ""
+      ).trim()
+
+      if (status === 429 && code === "OTP_ALREADY_SENT" && !backendMessage) {
+        setSubmitError("")
+      } else {
+        setSubmitError(backendMessage || getErrorMessage(err, "Failed to send WhatsApp OTP. Please try again."))
+      }
     } finally {
       setWhatsappLoading(false)
     }
@@ -1228,7 +1249,26 @@ export default function BusinessRegisterPage() {
       }
       setOtpResendCooldown(RESEND_COOLDOWN_SECONDS)
     } catch (err) {
-      setOtpError("Failed to resend OTP. Please try again.")
+      const status = Number(err?.response?.status || 0)
+      const code = String(err?.response?.data?.code || err?.response?.data?.error?.code || "").trim().toUpperCase()
+      const backendMessage = String(
+        err?.response?.data?.error?.message || err?.response?.data?.message || ""
+      ).trim()
+
+      if (status === 429 && code === "OTP_ALREADY_SENT" && !backendMessage) {
+        setOtpError("")
+      } else {
+        setOtpError(backendMessage || getErrorMessage(err, "Failed to resend OTP. Please try again."))
+      }
+      const backendWait = Number(
+        err?.response?.data?.error?.wait_seconds ||
+          err?.response?.data?.wait_seconds ||
+          err?.response?.data?.waitSeconds ||
+          0
+      )
+      if (backendWait > 0) {
+        setOtpResendCooldown(backendWait)
+      }
     } finally {
       setOtpResending(false)
     }

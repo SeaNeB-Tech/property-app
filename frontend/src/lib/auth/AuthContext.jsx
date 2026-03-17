@@ -3,7 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { authApi, setAuthFailureHandler } from "@/lib/auth/apiClient";
 import { API } from "@/lib/config/apiPaths";
-import { notifyAuthChanged, subscribeAuthState } from "@/services/auth.service";
+import { notifyAuthChanged, removeCookie, subscribeAuthState } from "@/services/auth.service";
+import { clearAuthFlowContext } from "@/lib/auth/flowContext";
 import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage";
 import { hydrateAuthSession } from "@/lib/api/client";
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap";
@@ -144,6 +145,8 @@ export function AuthProvider({ children }) {
 
     clearRefreshBudget();
     clearSessionHintCache();
+    clearAuthFlowContext();
+    removeCookie("auth_return_to");
     setUser(null);
     setStatus("logged_out");
 
@@ -167,13 +170,32 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let isMounted = true;
+    let timer = null;
 
     const runRestore = () => {
       if (!isMounted) return;
       void restoreSession();
     };
 
-    runRestore();
+    const isSsoCallback = () => {
+      try {
+        return (
+          typeof window !== "undefined" &&
+          new URL(window.location.href).searchParams.has("bridge_token")
+        );
+      } catch {
+        return false;
+      }
+    };
+
+    // Debounce initial restore on mount to avoid refresh-token rotation conflicts
+    // when users spam page refresh (F5). If the page unloads before the timeout,
+    // the timer is cleared and no refresh call is fired.
+    if (isSsoCallback()) {
+      runRestore();
+    } else {
+      timer = setTimeout(runRestore, 300);
+    }
 
     const unsubscribe = subscribeAuthState((event) => {
       if (!isMounted) return;
@@ -183,6 +205,7 @@ export function AuthProvider({ children }) {
 
     return () => {
       isMounted = false;
+      if (timer) clearTimeout(timer);
       unsubscribe();
     };
   }, [restoreSession]);

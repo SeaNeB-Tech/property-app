@@ -29,6 +29,7 @@ export default function useAuthSubmitTransition(options = {}) {
         const result = await request();
         await ensureMinDuration();
         await handlers.onSuccess?.(result);
+        setIsTransitioning(false);
         return { ok: true, result };
       } catch (error) {
         await ensureMinDuration();

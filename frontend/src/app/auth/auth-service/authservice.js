@@ -176,10 +176,10 @@ export const verifyOtpAndLogin = async ({ otp, context } = {}) => {
   const ctx = context || getJsonCookie("otp_context");
   if (!ctx) throw new Error("OTP context missing");
 
+  const otpPurposeRaw = Number(ctx.purpose);
   const otpPurpose =
-    Number.isFinite(Number(ctx.purpose)) &&
-    String(ctx.purpose).trim() !== ""
-      ? Number(ctx.purpose)
+    otpPurposeRaw === PURPOSE_BUSINESS_MOBILE_VERIFY
+      ? PURPOSE_BUSINESS_MOBILE_VERIFY
       : PURPOSE_SIGNUP_OR_LOGIN;
 
   const verifyPayload = {

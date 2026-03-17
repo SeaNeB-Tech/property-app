@@ -82,7 +82,7 @@ function EmailOtpContent() {
     }
 
     if (ctx?.purpose) {
-      setOtpPurpose(Number(ctx.purpose) || 1)
+      setOtpPurpose(Number(ctx.purpose) || 0)
     }
 
     const nextRedirect = ctx?.redirect_to || "/auth/complete-profile"
