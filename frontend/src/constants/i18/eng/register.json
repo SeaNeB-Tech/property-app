@@ -1,0 +1,17 @@
+{
+  "completeProfileTitle": "Complete Your Profile",
+  "completeProfileSubtitle": "Please fill in the details below",
+  "firstName": "First Name",
+  "lastName": "Last Name",
+  "email": "Email",
+  "gender": "Gender",
+  "selectGender": "Select gender",
+  "dob": "Date of Birth",
+  "hometown": "Hometown",
+  "seanebId": "SeaNeB ID",
+  "agreeText": "I agree to the Terms & Conditions and Privacy Policy",
+  "submit": "Submit",
+  "successTitle": "Registration Successful",
+  "successSubtitle": "Your profile has been completed successfully.",
+  "goToDashboard": "Go to Dashboard"
+}

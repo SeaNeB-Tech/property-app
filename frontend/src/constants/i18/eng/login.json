@@ -1,0 +1,9 @@
+{
+  "login": "Login",
+  "subtitle": "Enter your mobile number to continue",
+  "mobileLabel": "Mobile number",
+  "placeholder": "Enter mobile number",
+  "viaWhatsapp": "Via WhatsApp",
+  "viaSms": "Via SMS",
+  "continue": "Continue"
+}

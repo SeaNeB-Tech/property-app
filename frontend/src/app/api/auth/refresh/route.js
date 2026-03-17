@@ -1,0 +1,773 @@
+import { NextResponse } from "next/server";
+import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { CSRF_COOKIE_KEYS, REFRESH_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
+import { getCookieOptions } from "@/lib/auth/cookieOptions";
+const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
+const REFRESH_COOKIE_NAME = "refresh_token_property";
+
+// --- Server-side refresh deduplication to prevent race conditions on rapid reloads ---
+const _refreshDedup = new Map();
+const REFRESH_DEDUP_TTL_MS = 5000;
+const REFRESH_IN_FLIGHT_TTL_MS = 30000;
+let _lastSuccessfulRefreshAt = 0;
+
+const getRefreshFingerprint = (cookieHeader) => {
+  for (const key of REFRESH_COOKIE_KEYS) {
+    const val = getCookieValueFromHeader(cookieHeader, key);
+    if (val && val.length > 8) return val.slice(-16);
+  }
+  return "";
+};
+
+if (typeof globalThis !== "undefined") {
+  const _dedupCleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of _refreshDedup) {
+      if (!entry) {
+        _refreshDedup.delete(key);
+        continue;
+      }
+      const lastAt = entry.completedAt || entry.startedAt || 0;
+      if (!lastAt || now - lastAt > REFRESH_DEDUP_TTL_MS * 6) {
+        _refreshDedup.delete(key);
+      }
+    }
+  }, 60000);
+  if (_dedupCleanup?.unref) _dedupCleanup.unref();
+}
+
+const getCookieValueFromHeader = (cookieHeader, key) => {
+  const source = String(cookieHeader || "");
+  if (!source) return "";
+  const parts = source.split("; ");
+  for (const part of parts) {
+    const idx = part.indexOf("=");
+    if (idx < 0) continue;
+    const name = part.slice(0, idx).trim();
+    if (name !== key) continue;
+    return part.slice(idx + 1).trim();
+  }
+  return "";
+};
+
+const getRequestHost = (request) =>
+  String(request?.headers?.get("x-forwarded-host") || request?.headers?.get("host") || "").trim();
+
+const getRequestProtocol = (request) => {
+  const forwarded = String(request?.headers?.get("x-forwarded-proto") || "").trim().toLowerCase();
+  if (forwarded) return forwarded;
+  return String(request?.nextUrl?.protocol || "").replace(":", "").trim().toLowerCase();
+};
+
+const getCookieContext = (request) => ({
+  host: getRequestHost(request),
+  isSecure: getRequestProtocol(request) === "https",
+});
+
+const normalizeHost = (host) => String(host || "").trim().replace(/:\d+$/, "").toLowerCase();
+
+const isIpHost = (host) => {
+  const value = normalizeHost(host);
+  if (!value) return false;
+  if (value.includes(":")) return true; // IPv6
+  return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(value);
+};
+
+const isLoopbackHost = (host) => {
+  const value = normalizeHost(host);
+  return value === "localhost" || value === "::1" || /^127(?:\.\d{1,3}){3}$/.test(value);
+};
+
+const domainMatchesHost = (domain, host) => {
+  const safeHost = normalizeHost(host);
+  const safeDomain = String(domain || "").trim().replace(/^\./, "").toLowerCase();
+  if (!safeHost || !safeDomain) return false;
+  return safeHost === safeDomain || safeHost.endsWith(`.${safeDomain}`);
+};
+
+const rewriteSetCookieForRequest = (cookie, context) => {
+  if (!context) return cookie;
+  const parts = String(cookie || "")
+    .split(";")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!parts.length) return cookie;
+
+  const nameValue = parts[0];
+  const attrs = [];
+  let domain = "";
+  let sameSite = "";
+  let hasSecure = false;
+
+  for (const attr of parts.slice(1)) {
+    const [rawKey, ...rest] = attr.split("=");
+    const key = String(rawKey || "").trim().toLowerCase();
+    const value = rest.join("=").trim();
+
+    if (key === "domain") {
+      domain = value;
+      continue;
+    }
+    if (key === "samesite") {
+      sameSite = value;
+      continue;
+    }
+    if (key === "secure") {
+      hasSecure = true;
+      continue;
+    }
+    attrs.push(attr);
+  }
+
+  const host = normalizeHost(context.host);
+  const dropDomain =
+    domain &&
+    (isIpHost(host) || isLoopbackHost(host) || !domainMatchesHost(domain, host));
+
+  if (domain && !dropDomain) {
+    attrs.push(`Domain=${domain}`);
+  }
+
+  let finalSameSite = sameSite;
+  if (!context.isSecure && String(sameSite || "").toLowerCase() === "none") {
+    finalSameSite = "Lax";
+  }
+  if (finalSameSite) {
+    attrs.push(`SameSite=${finalSameSite}`);
+  }
+
+  if (context.isSecure && hasSecure) {
+    attrs.push("Secure");
+  }
+
+  return [nameValue, ...attrs].join("; ");
+};
+
+const resolveCsrfHeaderValue = (incomingHeader, cookieHeader) => {
+  const fromHeader = String(incomingHeader || "").trim();
+  if (fromHeader) return fromHeader;
+
+  for (const key of CSRF_COOKIE_KEYS) {
+    const fromCookieRaw = getCookieValueFromHeader(cookieHeader, key);
+    if (!fromCookieRaw) continue;
+    try {
+      return decodeURIComponent(fromCookieRaw);
+    } catch {
+      return fromCookieRaw;
+    }
+  }
+  return "";
+};
+
+const appendSetCookieHeaders = (targetHeaders, upstreamHeaders, context = null) => {
+  const getSetCookie = upstreamHeaders?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    const cookies = getSetCookie.call(upstreamHeaders) || [];
+    for (const cookie of cookies) {
+      if (!cookie) continue;
+      targetHeaders.append("set-cookie", rewriteSetCookieForRequest(cookie, context));
+    }
+    return;
+  }
+
+  const combinedCookieHeader = String(upstreamHeaders.get("set-cookie") || "").trim();
+  if (!combinedCookieHeader) return;
+
+  const splitCookies = combinedCookieHeader
+    .split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  for (const cookie of splitCookies) {
+    targetHeaders.append("set-cookie", rewriteSetCookieForRequest(cookie, context));
+  }
+};
+
+const readTokenFromPayload = (payload = {}, headers = null) => {
+  const data = payload?.data || {};
+  const tokenObj = data?.token || payload?.token || {};
+  const headerAuth = String(
+    headers?.get("authorization") ||
+      headers?.get("Authorization") ||
+      ""
+  ).trim();
+  const responseHeaderToken = /^bearer\s+/i.test(headerAuth)
+    ? headerAuth.replace(/^bearer\s+/i, "").trim()
+    : headerAuth;
+  return String(
+    payload?.accessToken ||
+      payload?.access_token ||
+      data?.accessToken ||
+      data?.access_token ||
+      tokenObj?.accessToken ||
+      tokenObj?.access_token ||
+      tokenObj?.token ||
+      tokenObj?.jwt ||
+      payload?.jwt ||
+      data?.jwt ||
+      responseHeaderToken ||
+      ""
+  ).trim();
+};
+
+const readCsrfFromPayload = (payload = {}, headers = null) => {
+  const data = payload?.data || {};
+  const tokenObj = data?.token || payload?.token || {};
+  return String(
+    payload?.csrf_token_property ||
+      data?.csrf_token_property ||
+    payload?.csrfToken ||
+      payload?.csrf_token ||
+      data?.csrfToken ||
+      data?.csrf_token ||
+      tokenObj?.csrfToken ||
+      tokenObj?.csrf_token ||
+      headers?.get("x-csrf-token") ||
+      headers?.get("csrf-token") ||
+      headers?.get("x-xsrf-token") ||
+      ""
+  ).trim();
+};
+
+const buildDedupResponse = (entry = {}) => {
+  const headers = new Headers();
+  headers.set("cache-control", "no-store");
+
+  const accessToken = String(entry?.accessToken || "").trim();
+  const csrfToken = String(entry?.csrfToken || "").trim();
+  const expiresIn = entry?.expiresIn;
+
+  if (accessToken) {
+    headers.set("authorization", `Bearer ${accessToken}`);
+  }
+  if (csrfToken) {
+    headers.set("x-csrf-token", csrfToken);
+    headers.set("x-xsrf-token", csrfToken);
+    headers.set("csrf-token", csrfToken);
+  }
+
+  return NextResponse.json(
+    {
+      success: true,
+      deduplicated: true,
+      ...(accessToken ? { accessToken, access_token: accessToken } : {}),
+      ...(csrfToken ? { csrfToken } : {}),
+      ...(expiresIn != null ? { expiresIn } : {}),
+    },
+    { status: 200, headers }
+  );
+};
+
+const readExpiresInFromPayload = (payload = {}) => {
+  const data = payload?.data || {};
+  const value = payload?.expiresIn ?? payload?.expires_in ?? data?.expiresIn ?? data?.expires_in;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const parseSetCookieAttributes = (cookieLine = "") => {
+  const parts = String(cookieLine || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const attrs = { maxAge: null, expires: null };
+  for (const attr of parts.slice(1)) {
+    const [rawKey, ...rest] = attr.split("=");
+    const key = String(rawKey || "").trim().toLowerCase();
+    const value = rest.join("=").trim();
+    if (key === "max-age") {
+      const num = Number(value);
+      if (Number.isFinite(num)) attrs.maxAge = num;
+    } else if (key === "expires") {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) attrs.expires = date;
+    }
+  }
+  return attrs;
+};
+
+const readCookieAttributesFromSetCookieHeaders = (setCookieHeaders = [], candidateNames = []) => {
+  const loweredCandidates = candidateNames.map((name) => String(name || "").trim().toLowerCase());
+  for (const raw of setCookieHeaders) {
+    const firstPair = String(raw || "").split(";")[0] || "";
+    const idx = firstPair.indexOf("=");
+    if (idx < 0) continue;
+    const name = firstPair.slice(0, idx).trim().toLowerCase();
+    if (!loweredCandidates.includes(name)) continue;
+    const attrs = parseSetCookieAttributes(raw);
+    if (attrs.maxAge != null || attrs.expires) return attrs;
+  }
+  return { maxAge: null, expires: null };
+};
+
+const readJwtExpirySeconds = (token) => {
+  try {
+    const raw = String(token || "").trim();
+    if (!raw) return null;
+    const parts = raw.split(".");
+    if (parts.length < 2) return null;
+    const payloadJson = Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    const payload = JSON.parse(payloadJson);
+    const exp = Number(payload?.exp);
+    if (!Number.isFinite(exp)) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const diff = exp - now;
+    return diff > 0 ? diff : null;
+  } catch {
+    return null;
+  }
+};
+
+const buildExpiryOptions = ({ maxAgeSeconds = null, expiresAt = null } = {}) => {
+  const options = {};
+  if (Number.isFinite(maxAgeSeconds)) {
+    const safe = Math.max(1, Math.floor(maxAgeSeconds));
+    options.maxAge = safe;
+    return options;
+  }
+  if (expiresAt instanceof Date && !Number.isNaN(expiresAt.getTime())) {
+    options.expires = expiresAt;
+  }
+  return options;
+};
+
+const getSetCookieLines = (headers) => {
+  const getSetCookie = headers?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    return (getSetCookie.call(headers) || []).filter(Boolean);
+  }
+  const combined = String(headers?.get("set-cookie") || "").trim();
+  if (!combined) return [];
+  return combined
+    .split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const readCookieValueFromSetCookie = (headers, keys = []) => {
+  const allowed = new Set((keys || []).map((key) => String(key || "").trim()).filter(Boolean));
+  if (!allowed.size) return "";
+  for (const line of getSetCookieLines(headers)) {
+    const firstSemi = line.indexOf(";");
+    const firstPart = (firstSemi >= 0 ? line.slice(0, firstSemi) : line).trim();
+    const eq = firstPart.indexOf("=");
+    if (eq < 0) continue;
+    const name = firstPart.slice(0, eq).trim();
+    const value = firstPart.slice(eq + 1).trim();
+    if (!name || !value) continue;
+    if (allowed.has(name)) return value;
+  }
+  return "";
+};
+
+const readCookieValueDecodedFromSetCookie = (headers, keys = []) => {
+  const raw = readCookieValueFromSetCookie(headers, keys);
+  if (!raw) return "";
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+};
+
+const buildUpstreamCandidates = () =>
+  Array.from(new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean)));
+
+const getRefreshCookieFromRequest = (request) => {
+  for (const key of REFRESH_COOKIE_KEYS) {
+    const fromCookieStore = String(request.cookies?.get(key)?.value || "").trim();
+    if (fromCookieStore) return fromCookieStore;
+  }
+
+  const cookieHeader = String(request.headers.get("cookie") || "");
+  for (const key of REFRESH_COOKIE_KEYS) {
+    const fromHeader = getCookieValueFromHeader(cookieHeader, key);
+    if (String(fromHeader || "").trim()) return String(fromHeader || "").trim();
+  }
+  return "";
+};
+
+const getFirstCookieFromRequestCookies = (request, keys = []) => {
+  for (const key of keys) {
+    const value = String(request.cookies?.get(key)?.value || "").trim();
+    if (value) return { name: key, value };
+  }
+  return null;
+};
+
+const appendCookieToHeader = (headerValue, name, value) => {
+  if (!name || !value) return headerValue;
+  if (!headerValue) return `${name}=${value}`;
+  return `${headerValue}; ${name}=${value}`;
+};
+
+const toCookieHeader = (request, refreshCookieValue) => {
+  let incomingCookie = String(request.headers.get("cookie") || "").trim();
+  const hasKnownRefreshCookie = REFRESH_COOKIE_KEYS.some((key) =>
+    Boolean(getCookieValueFromHeader(incomingCookie, key))
+  );
+  const hasKnownCsrfCookie = CSRF_COOKIE_KEYS.some((key) =>
+    Boolean(getCookieValueFromHeader(incomingCookie, key))
+  );
+
+  if (!hasKnownRefreshCookie && refreshCookieValue) {
+    incomingCookie = appendCookieToHeader(
+      incomingCookie,
+      REFRESH_COOKIE_NAME,
+      refreshCookieValue
+    );
+  }
+
+  if (!hasKnownCsrfCookie) {
+    const csrfFromStore = getFirstCookieFromRequestCookies(request, CSRF_COOKIE_KEYS);
+    if (csrfFromStore?.name && csrfFromStore?.value) {
+      incomingCookie = appendCookieToHeader(
+        incomingCookie,
+        csrfFromStore.name,
+        csrfFromStore.value
+      );
+    }
+  }
+
+  return incomingCookie;
+};
+
+const doRefreshRequest = async ({
+  upstreamUrl,
+  cookieHeader,
+  requestBody,
+  incomingCsrf,
+  includeCsrf = true,
+  forwardedHeaders = {},
+}) => {
+  const headers = new Headers();
+  headers.set("content-type", "application/json");
+  headers.set("x-product-key", PRODUCT_KEY);
+  headers.delete("authorization");
+  headers.delete("Authorization");
+  
+  if (forwardedHeaders["user-agent"]) headers.set("user-agent", forwardedHeaders["user-agent"]);
+  if (forwardedHeaders["x-forwarded-for"]) headers.set("x-forwarded-for", forwardedHeaders["x-forwarded-for"]);
+  if (forwardedHeaders["x-real-ip"]) headers.set("x-real-ip", forwardedHeaders["x-real-ip"]);
+  if (forwardedHeaders["origin"]) headers.set("origin", forwardedHeaders["origin"]);
+  if (forwardedHeaders["referer"]) headers.set("referer", forwardedHeaders["referer"]);
+  
+  if (cookieHeader) headers.set("cookie", cookieHeader);
+  if (includeCsrf && incomingCsrf) {
+    headers.set("x-csrf-token", incomingCsrf);
+    headers.set("x-xsrf-token", incomingCsrf);
+    headers.set("csrf-token", incomingCsrf);
+  }
+
+  const parsed = requestBody && typeof requestBody === "object" ? requestBody : {};
+  const body = JSON.stringify({
+    ...parsed,
+    product_key: PRODUCT_KEY,
+  });
+
+  return fetch(upstreamUrl, {
+    method: "POST",
+    headers,
+    body,
+    cache: "no-store",
+    redirect: "manual",
+  });
+};
+
+export async function POST(request) {
+  const cookieContext = getCookieContext(request);
+  const upstreamCandidates = buildUpstreamCandidates();
+  
+  const forwardedHeaders = {
+    "user-agent": request.headers.get("user-agent") || "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "x-forwarded-for": request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "",
+    "x-real-ip": request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || "",
+    "origin": request.headers.get("origin") || request.headers.get("Host") || "",
+    "referer": request.headers.get("referer") || "",
+  };
+
+  if (upstreamCandidates.length === 0) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "UPSTREAM_REFRESH_UNAVAILABLE",
+          message: "Refresh upstream is not configured",
+        },
+      },
+      { status: 502 }
+    );
+  }
+
+  const refreshCookieValue = getRefreshCookieFromRequest(request);
+  if (!refreshCookieValue) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "INVALID_REFRESH_TOKEN",
+          message: "Invalid refresh session",
+        },
+      },
+      { status: 401 }
+    );
+  }
+
+  const cookieHeader = toCookieHeader(request, refreshCookieValue);
+  const rawCsrfHeader = String(
+    request.headers.get("x-csrf-token") ||
+      request.headers.get("x-xsrf-token") ||
+      request.headers.get("csrf-token") ||
+      ""
+  ).trim();
+  const incomingCsrf = resolveCsrfHeaderValue(rawCsrfHeader, cookieHeader);
+  const fingerprint =
+    getRefreshFingerprint(cookieHeader) ||
+    (refreshCookieValue.length > 8 ? refreshCookieValue.slice(-16) : "");
+
+  if (fingerprint) {
+    const existing = _refreshDedup.get(fingerprint);
+    if (existing) {
+      if (
+        existing.promise &&
+        existing.startedAt &&
+        Date.now() - existing.startedAt < REFRESH_IN_FLIGHT_TTL_MS
+      ) {
+        try {
+          await existing.promise;
+        } catch {
+          // ignore dedup wait failures
+        }
+      }
+      const entry = _refreshDedup.get(fingerprint);
+      if (
+        entry?.completedAt &&
+        entry.ok &&
+        Date.now() - entry.completedAt < REFRESH_DEDUP_TTL_MS
+      ) {
+        return buildDedupResponse(entry);
+      }
+    }
+  }
+
+  let _dedupResolve;
+  if (fingerprint) {
+    const _dedupPromise = new Promise((r) => {
+      _dedupResolve = r;
+    });
+    _refreshDedup.set(fingerprint, {
+      promise: _dedupPromise,
+      resolve: _dedupResolve,
+      startedAt: Date.now(),
+    });
+  }
+  const _completeDedup = (ok, details = {}) => {
+    if (!fingerprint) return;
+    const entry = _refreshDedup.get(fingerprint);
+    _refreshDedup.set(fingerprint, {
+      completedAt: Date.now(),
+      ok: Boolean(ok),
+      ...(details?.accessToken ? { accessToken: details.accessToken } : {}),
+      ...(details?.csrfToken ? { csrfToken: details.csrfToken } : {}),
+      ...(details?.expiresIn != null ? { expiresIn: details.expiresIn } : {}),
+    });
+    entry?.resolve?.();
+    if (ok) _lastSuccessfulRefreshAt = Date.now();
+  };
+
+  let requestBody = {};
+  try {
+    const bodyText = await request.text();
+    requestBody = bodyText ? JSON.parse(bodyText) : {};
+  } catch {
+    requestBody = {};
+  }
+
+  let upstreamResponse = null;
+  let payloadText = "";
+  let payloadJson = {};
+  let lastNetworkError = null;
+
+  for (const baseUrl of upstreamCandidates) {
+    const upstreamUrl = `${String(baseUrl).replace(/\/+$/, "")}/auth/refresh`;
+
+    try {
+      upstreamResponse = await doRefreshRequest({
+        upstreamUrl,
+        cookieHeader,
+        requestBody,
+        incomingCsrf,
+        includeCsrf: true,
+        forwardedHeaders,
+      });
+    } catch (err) {
+      lastNetworkError = err instanceof Error ? err : new Error("Refresh request failed");
+      upstreamResponse = null;
+      continue;
+    }
+
+    if ([401, 403].includes(Number(upstreamResponse.status || 0)) && incomingCsrf) {
+      try {
+        const noCsrfRetry = await doRefreshRequest({
+          upstreamUrl,
+          cookieHeader,
+          requestBody,
+          incomingCsrf,
+          includeCsrf: false,
+          forwardedHeaders,
+        });
+        if (noCsrfRetry.ok || ![401, 403].includes(Number(noCsrfRetry.status || 0))) {
+          upstreamResponse = noCsrfRetry;
+        }
+      } catch {
+        // Keep original response from the CSRF attempt.
+      }
+    }
+
+    if (upstreamResponse && Number(upstreamResponse.status || 0) < 500) {
+      break;
+    }
+  }
+
+  if (!upstreamResponse) {
+    _completeDedup(false);
+    return NextResponse.json(
+      {
+        error: {
+          code: "UPSTREAM_REFRESH_UNAVAILABLE",
+          message: "Unable to reach auth refresh upstream",
+          ...(lastNetworkError ? { details: "network_error" } : {}),
+        },
+      },
+      { status: 502 }
+    );
+  }
+
+  const responseHeaders = new Headers();
+  const contentType = String(upstreamResponse.headers.get("content-type") || "").trim();
+  if (contentType) responseHeaders.set("content-type", contentType);
+  appendSetCookieHeaders(responseHeaders, upstreamResponse.headers, cookieContext);
+
+  try {
+    payloadText = await upstreamResponse.text();
+    payloadJson = payloadText ? JSON.parse(payloadText) : {};
+  } catch {
+    payloadText = "";
+    payloadJson = {};
+  }
+
+  if (upstreamResponse.ok) {
+    const expiresIn = readExpiresInFromPayload(payloadJson);
+    const accessToken = readTokenFromPayload(payloadJson, upstreamResponse.headers);
+    const csrfFromPayload = readCsrfFromPayload(payloadJson, upstreamResponse.headers);
+    const csrfFromCookie = readCookieValueDecodedFromSetCookie(
+      upstreamResponse.headers,
+      CSRF_COOKIE_KEYS
+    );
+    const csrfToken = csrfFromPayload || csrfFromCookie;
+    const response = NextResponse.json(
+      {
+        success: true,
+        ...(accessToken ? { accessToken, access_token: accessToken } : {}),
+        ...(csrfToken ? { csrfToken } : {}),
+        ...(expiresIn != null ? { expiresIn } : {}),
+      },
+      {
+        status: 200,
+        headers: responseHeaders,
+      }
+    );
+    if (accessToken) {
+      response.headers.set("authorization", `Bearer ${accessToken}`);
+    }
+    if (csrfToken) {
+      response.headers.set("x-csrf-token", csrfToken);
+      response.headers.set("x-xsrf-token", csrfToken);
+      response.headers.set("csrf-token", csrfToken);
+    }
+
+    // Explicitly hydrate cookies with correct per-request SameSite/Secure/Domain
+    const cookieOpts = getCookieOptions(request);
+    const refreshTokenFromCookie = readCookieValueDecodedFromSetCookie(
+      upstreamResponse.headers,
+      REFRESH_COOKIE_KEYS
+    );
+    const refreshCookieAttrs = readCookieAttributesFromSetCookieHeaders(
+      getSetCookieLines(upstreamResponse.headers),
+      REFRESH_COOKIE_KEYS
+    );
+    const csrfCookieAttrs = readCookieAttributesFromSetCookieHeaders(
+      getSetCookieLines(upstreamResponse.headers),
+      CSRF_COOKIE_KEYS
+    );
+    const refreshMaxAgeFromJwt = refreshTokenFromCookie ? readJwtExpirySeconds(refreshTokenFromCookie) : null;
+    const refreshExpiry = buildExpiryOptions({
+      maxAgeSeconds: refreshCookieAttrs.maxAge ?? refreshMaxAgeFromJwt ?? null,
+      expiresAt: refreshCookieAttrs.expires || null,
+    });
+    const csrfExpiry = buildExpiryOptions({
+      maxAgeSeconds: csrfCookieAttrs.maxAge ?? (expiresIn != null ? expiresIn : null),
+      expiresAt: csrfCookieAttrs.expires || null,
+    });
+    if (refreshTokenFromCookie) {
+      response.cookies.set({
+        name: "refresh_token_property",
+        value: refreshTokenFromCookie,
+        httpOnly: true,
+        sameSite: cookieOpts.sameSite,
+        secure: cookieOpts.secure,
+        ...(cookieOpts?.domain ? { domain: cookieOpts.domain } : {}),
+        path: "/",
+        ...refreshExpiry,
+      });
+    }
+    if (csrfToken) {
+      response.cookies.set({
+        name: "csrf_token_property",
+        value: csrfToken,
+        httpOnly: false,
+        sameSite: cookieOpts.sameSite,
+        secure: cookieOpts.secure,
+        ...(cookieOpts?.domain ? { domain: cookieOpts.domain } : {}),
+        path: "/",
+        ...csrfExpiry,
+      });
+    }
+    _completeDedup(true, {
+      ...(accessToken ? { accessToken } : {}),
+      ...(csrfToken ? { csrfToken } : {}),
+      ...(expiresIn != null ? { expiresIn } : {}),
+    });
+    return response;
+  }
+
+  const status = Number(upstreamResponse.status || 0);
+  const invalidRefresh = status === 401 || status === 403;
+  if (invalidRefresh) {
+    _completeDedup(false);
+    return NextResponse.json(
+      {
+        error: {
+          code: "INVALID_REFRESH_TOKEN",
+          message: "Invalid refresh session",
+          _debug: {
+            url: upstreamResponse.url,
+            status: upstreamResponse.status,
+            host: cookieContext.host,
+            origin: forwardedHeaders["origin"]
+          }
+        },
+      },
+      { status: 401, headers: responseHeaders }
+    );
+  }
+
+  _completeDedup(false);
+  return NextResponse.json(
+    {
+      error: {
+        code: "REFRESH_FAILED",
+        message: "Refresh failed",
+      },
+    },
+    { status: 502, headers: responseHeaders }
+  );
+}

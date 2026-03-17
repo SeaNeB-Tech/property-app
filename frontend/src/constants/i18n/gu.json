@@ -1,0 +1,116 @@
+{
+  "common": {
+    "languageLabel": "ભાષા પસંદ કરો",
+    "languageEnglish": "અંગ્રેજી",
+    "languageGujarati": "ગુજરાતી",
+    "languageHindi": "હિન્દી"
+  },
+  "navbar": {
+    "home": "[GU] Home",
+    "about": "[GU] About",
+    "blogs": "[GU] Blogs",
+    "partner": "[GU] Partner",
+    "contact": "[GU] Contact",
+    "solution": "[GU] Solution",
+    "login": "[GU] Login",
+    "logout": "[GU] Logout",
+    "dashboard": "[GU] Dashboard",
+    "registerBusiness": "[GU] Register Business"
+  },
+  "auth": {
+    "login": {
+      "title": "લૉગિન",
+      "subtitle": "આગળ વધવા માટે તમારો મોબાઇલ નંબર દાખલ કરો",
+      "mobileLabel": "મોબાઇલ નંબર",
+      "mobilePlaceholder": "મોબાઇલ નંબર દાખલ કરો",
+      "viaWhatsapp": "વોટ્સએપ દ્વારા",
+      "viaSms": "એસએમએસ દ્વારા",
+      "continue": "ચાલુ રાખો"
+    },
+    "otp": {
+      "title": "ઓટીપી ચકાસો",
+      "subtitle": "મોકલાયેલ 4 અંકનો કોડ દાખલ કરો",
+      "verify": "ઓટીપી ચકાસો",
+      "resend": "ફરીથી ઓટીપી મોકલો",
+      "resendIn": "ફરી મોકલવામાં",
+      "verifying": "ચકાસણી ચાલી રહી છે..."
+    },
+    "register": {
+      "title": "તમારું પ્રોફાઇલ પૂર્ણ કરો",
+      "subtitle": "કૃપા કરીને નીચેની વિગત ભરો",
+      "firstName": "પ્રથમ નામ",
+      "lastName": "અટક",
+      "email": "ઈમેલ",
+      "gender": "લિંગ",
+      "selectGender": "લિંગ પસંદ કરો",
+      "dob": "જન્મ તારીખ",
+      "hometown": "વતન",
+      "seanebId": "SeaNeB આઈડી",
+      "agreeText": "હું નિયમો અને ગોપનીયતા નીતિ સાથે સંમત છું",
+      "submit": "સબમિટ કરો"
+    },
+    "businessRegistration": {
+      "title": "[GU] Register Your Business",
+      "subtitle": "[GU] Set up your branch profile to start listing and managing leads.",
+      "step1": "[GU] Basic Info",
+      "step2": "[GU] Contact",
+      "step3": "[GU] Location & Compliance",
+      "sectionBasics": "[GU] Business Basics",
+      "sectionContact": "[GU] Contact Details",
+      "sectionAddress": "[GU] Branch Address",
+      "sectionCompliance": "[GU] Compliance (Optional)",
+      "businessName": "[GU] Business Name *",
+      "displayName": "[GU] Display Name",
+      "category": "[GU] Category *",
+      "businessType": "[GU] Business Type *",
+      "countryCode": "[GU] Country Code *",
+      "primaryNumber": "[GU] Primary Number *",
+      "sendOtpVia": "[GU] Send Mobile OTP Via",
+      "whatsappNumber": "[GU] WhatsApp Number",
+      "businessEmail": "[GU] Business Email (Optional)",
+      "aboutBranch": "[GU] About Branch *",
+      "landmark": "[GU] Landmark",
+      "businessLocation": "[GU] Business Location *",
+      "panOptional": "[GU] PAN (optional)",
+      "gstinOptional": "[GU] GSTIN (optional)",
+      "agreeTerms": "[GU] I agree to the business terms and conditions",
+      "previous": "[GU] Previous",
+      "next": "[GU] Next",
+      "registerBusiness": "[GU] Register Business",
+      "loading": "મહેરબાની કરીને રાહ જુઓ...",
+      "transitionTitle": "[GU] Registering business...",
+      "transitionDescription": "[GU] Creating your business profile and preparing your dashboard."
+    }
+  },
+  "dashboard": {
+    "menu": {
+      "dashboard": "[GU] Dashboard",
+      "broker": "[GU] Broker Dashboard",
+      "listings": "[GU] Listings",
+      "analytics": "[GU] Analytics",
+      "products": "[GU] Products",
+      "settings": "[GU] Settings",
+      "help": "[GU] Help"
+    }
+  },
+  "validation": {
+    "businessNameRequired": "[GU] Business name is required",
+    "businessTypeRequired": "[GU] Business type is required",
+    "businessLocationRequired": "[GU] Business location is required",
+    "mobileRequired": "[GU] Valid primary number is required",
+    "mobileVerifyRequired": "[GU] Please verify business mobile number before registration",
+    "seanebVerifyRequired": "[GU] Please verify SeaNeB ID before registration",
+    "agreeRequired": "[GU] You must agree to the terms and conditions",
+    "invalidPan": "[GU] Invalid PAN format",
+    "invalidGstin": "[GU] Invalid GSTIN format"
+  },
+  "errors": {
+    "registrationFailed": "[GU] Registration failed",
+    "sendMobileOtpFailed": "[GU] Failed to send mobile OTP. Please try again.",
+    "sendEmailOtpFailed": "[GU] Failed to send business email OTP",
+    "invalidOtp": "[GU] Invalid OTP",
+    "panVerificationFailed": "[GU] PAN verification failed",
+    "gstVerificationFailed": "[GU] GSTIN verification failed",
+    "sessionExpired": "[GU] Session expired. Please login again."
+  }
+}
