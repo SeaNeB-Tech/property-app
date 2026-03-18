@@ -103,14 +103,29 @@ const buildUpstreamCandidates = () => {
 
   const urls = [];
   for (const base of bases) {
-    const normalized = String(base).replace(/\/+$/, "");
+    const normalized = String(base || "").trim().replace(/\/+$/, "");
     if (!normalized) continue;
-    urls.push(`${normalized}/v1/sso`);
+
+    let hasApiV1 = false;
+    let hasV1 = false;
+    let origin = "";
+
+    try {
+      const parsed = new URL(normalized);
+      origin = String(parsed.origin || "").trim().replace(/\/+$/, "");
+      const path = String(parsed.pathname || "").replace(/\/+$/, "");
+      hasApiV1 = /\/api\/v1$/i.test(path);
+      hasV1 = /\/v1$/i.test(path);
+    } catch {
+      // Non-URL base; fall back to simple candidates.
+    }
+
+    if (!hasApiV1 && !hasV1) {
+      urls.push(`${normalized}/v1/sso`);
+    }
     urls.push(`${normalized}/sso`);
     urls.push(`${normalized}/auth/sso`);
     try {
-      const parsed = new URL(normalized);
-      const origin = String(parsed.origin || "").trim().replace(/\/+$/, "");
       if (origin) {
         urls.push(`${origin}/api/v1/sso`);
         urls.push(`${origin}/v1/sso`);

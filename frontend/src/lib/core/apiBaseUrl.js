@@ -16,13 +16,14 @@ const normalizeApiUrl = (value) => {
   if (!raw) return "";
   try {
     const url = new URL(raw);
-    const pathname = String(url.pathname || "").trim();
-    if (!pathname || pathname === "/") {
-      url.pathname = "/api/v1";
+    const path = String(url.pathname || "").replace(/\/+$/, "");
+    if (!/\/api\/v1$/i.test(path)) {
+      const nextPath = `${path}/api/v1`.replace(/\/+/g, "/");
+      url.pathname = nextPath;
     }
     return normalizeUrl(url.toString());
   } catch {
-    return raw;
+    return raw.endsWith("/api/v1") ? raw : `${raw}/api/v1`;
   }
 };
 const normalizeBasePath = (value) => {

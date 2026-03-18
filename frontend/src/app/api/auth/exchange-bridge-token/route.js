@@ -304,30 +304,45 @@ export async function POST(req) {
     ...(productKey ? { product_key: productKey } : {}),
   });
 
+  const buildUpstreamCandidates = (base) => {
+    const normalized = String(base || "").trim().replace(/\/+$/, "");
+    if (!normalized) return [];
+
+    let hasApiV1 = false;
+    let hasV1 = false;
+    let origin = "";
+
+    try {
+      const parsed = new URL(normalized);
+      origin = String(parsed.origin || "").trim().replace(/\/+$/, "");
+      const path = String(parsed.pathname || "").replace(/\/+$/, "");
+      hasApiV1 = /\/api\/v1$/i.test(path);
+      hasV1 = /\/v1$/i.test(path);
+    } catch {
+      // Non-URL base; fall back to simple candidates.
+    }
+
+    const candidates = [
+      `${normalized}/sso/exchange`,
+      `${normalized}/auth/sso/exchange`,
+    ];
+
+    if (!hasApiV1 && !hasV1) {
+      candidates.push(`${normalized}/v1/sso/exchange`);
+    }
+
+    if (origin) {
+      candidates.push(`${origin}/api/v1/sso/exchange`);
+      candidates.push(`${origin}/v1/sso/exchange`);
+      candidates.push(`${origin}/sso/exchange`);
+      candidates.push(`${origin}/auth/sso/exchange`);
+    }
+
+    return candidates;
+  };
+
   const upstreamCandidates = Array.from(
-    new Set(
-      baseCandidates.flatMap((base) => {
-        const normalized = String(base || "").trim().replace(/\/+$/, "");
-        const candidates = [
-          `${normalized}/sso/exchange`,
-          `${normalized}/auth/sso/exchange`,
-          `${normalized}/v1/sso/exchange`,
-        ];
-        try {
-          const parsed = new URL(normalized);
-          const origin = String(parsed.origin || "").trim().replace(/\/+$/, "");
-          if (origin) {
-            candidates.push(`${origin}/api/v1/sso/exchange`);
-            candidates.push(`${origin}/v1/sso/exchange`);
-            candidates.push(`${origin}/sso/exchange`);
-            candidates.push(`${origin}/auth/sso/exchange`);
-          }
-        } catch {
-          // keep normalized candidates only
-        }
-        return candidates;
-      })
-    )
+    new Set(baseCandidates.flatMap((base) => buildUpstreamCandidates(base)))
   );
 
   console.log("[SSO Exchange] Upstream candidates:", upstreamCandidates);
@@ -365,7 +380,12 @@ export async function POST(req) {
       lastPayload = data;
       lastHeaders = responseHeaders;
 
-      if (upstream.ok || ![404, 405].includes(Number(upstream.status || 0))) {
+      const status = Number(upstream.status || 0);
+      if (status >= 500) {
+        // Treat 5xx as transient for this candidate; try next upstream.
+        continue;
+      }
+      if (upstream.ok || ![404, 405].includes(status)) {
         const cookieOptions = getCookieOptions(req);
         const response = NextResponse.json(data, { status: upstream.status, headers: responseHeaders });
         if (upstream.ok) {

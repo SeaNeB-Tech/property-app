@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { hydrateAuthSession } from "@/lib/api/client";
 import { clearAuthFailureArtifacts, shouldClearAuthOnError } from "@/services/auth.service";
@@ -8,6 +8,7 @@ import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
 
 const AUTH_SSO_RESULT_KEY = "seaneb_sso_exchange_result";
 const AUTH_SSO_MESSAGE_TYPE = "seaneb:sso:exchange";
+const SSO_TOKEN_ONCE_KEY = "seaneb_sso_bridge_token_used";
 
 const LISTING_APP_ORIGIN = (() => {
   try {
@@ -75,6 +76,26 @@ const redirectToSource = (source) => {
   window.location.replace(target);
 };
 
+const shouldBlockCallbackLoop = (target) => {
+  const value = String(target || "").trim();
+  if (!value) return false;
+  if (value.startsWith("/") && !value.startsWith("//")) {
+    return value === "/auth/sso/callback";
+  }
+  try {
+    const parsed = new URL(value);
+    return parsed.pathname === "/auth/sso/callback";
+  } catch {
+    return false;
+  }
+};
+
+const normalizeSafeSource = (value) => {
+  const safe = resolveSafeSource(value);
+  if (shouldBlockCallbackLoop(safe)) return "/dashboard";
+  return safe;
+};
+
 const publishSsoResult = ({ ok, source, error = "" }) => {
   const payload = {
     type: AUTH_SSO_MESSAGE_TYPE,
@@ -101,18 +122,40 @@ const publishSsoResult = ({ ok, source, error = "" }) => {
 
 export default function SsoCallbackContent() {
   const params = useSearchParams();
+  const hasHandledRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function exchange() {
+      if (hasHandledRef.current) return;
+      hasHandledRef.current = true;
+
       const bridgeToken = params.get("bridge_token");
-      const source = resolveSafeSource(params.get("source"));
+      const source = normalizeSafeSource(params.get("source"));
 
       if (!bridgeToken) {
         publishSsoResult({ ok: false, source, error: "bridge_token missing in callback URL" });
         redirectToSource(source);
         return;
+      }
+
+      try {
+        if (typeof window !== "undefined") {
+          const prev = window.sessionStorage.getItem(SSO_TOKEN_ONCE_KEY);
+          if (prev && prev === bridgeToken) {
+            publishSsoResult({ ok: true, source });
+            redirectToSource(source);
+            return;
+          }
+          window.sessionStorage.setItem(SSO_TOKEN_ONCE_KEY, bridgeToken);
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.delete("bridge_token");
+          nextUrl.searchParams.delete("bridgeToken");
+          window.history.replaceState({}, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+        }
+      } catch {
+        // ignore storage/history failures
       }
 
       try {
@@ -139,6 +182,29 @@ export default function SsoCallbackContent() {
         }
 
         if (!res.ok) {
+          const status = Number(res.status || 0);
+          const code = String(payload?.error?.code || payload?.code || "").trim();
+          const isReplay =
+            status === 409 ||
+            code === "BRIDGE_TOKEN_REPLAYED" ||
+            /replay/i.test(String(payload?.error?.message || payload?.message || ""));
+
+          if (isReplay) {
+            try {
+              const me = await fetch(`${apiBase}/auth/me`, {
+                method: "GET",
+                credentials: "include",
+                cache: "no-store",
+              });
+              if (me.ok) {
+                publishSsoResult({ ok: true, source });
+                redirectToSource(source);
+                return;
+              }
+            } catch {
+              // fall through to error handling
+            }
+          }
           if (shouldClearAuthOnError({ status: res.status, data: payload })) {
             clearAuthFailureArtifacts();
           }

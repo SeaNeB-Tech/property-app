@@ -48,6 +48,51 @@ const withCategoryRecovery = async (requestFn) => {
   }
 };
 
+const tryFirstAvailableGet = async (paths = [], config = {}) => {
+  let lastError = null;
+  for (const path of paths) {
+    try {
+      return await api.get(path, config);
+    } catch (err) {
+      lastError = err;
+      const status = Number(err?.response?.status || 0);
+      if (status !== 404 && status !== 405) {
+        throw err;
+      }
+    }
+  }
+  throw lastError || new Error("Category endpoint unavailable");
+};
+
+const tryFirstAvailablePost = async (paths = [], data = {}, config = {}) => {
+  let lastError = null;
+  for (const path of paths) {
+    try {
+      return await api.post(path, data, config);
+    } catch (err) {
+      lastError = err;
+      const status = Number(err?.response?.status || 0);
+      if (status !== 404 && status !== 405) {
+        throw err;
+      }
+    }
+  }
+  throw lastError || new Error("Category endpoint unavailable");
+};
+
+const CATEGORY_LIST_PATHS = [
+  "/category/categorieslist",
+  "/categorieslist",
+  "/categories/list",
+  "/category/list",
+];
+
+const CATEGORY_CREATE_PATHS = [
+  "/category/create",
+  "/categories/create",
+  "/category/add",
+];
+
 export const createMainCategory = async (categoryName) => {
   const name = String(categoryName || "").trim();
   if (!name) {
@@ -66,13 +111,10 @@ export const createMainCategory = async (categoryName) => {
     console.log(`[category.service] Creating main category: ${name}`);
     const productKey = getDefaultProductKey();
     const makeRequest = () =>
-      api.post(
-        "/category/create",
-        {
-          main_category_name: name,
-          product_key: productKey,
-        }
-      );
+      tryFirstAvailablePost(CATEGORY_CREATE_PATHS, {
+        main_category_name: name,
+        product_key: productKey,
+      });
     const res = await withCategoryRecovery(makeRequest);
 
     const categoryId = res?.data?.main_category_id || res?.data?.id;
@@ -99,7 +141,7 @@ export const getAllActiveCategories = async () => {
     console.log("[category.service] Fetching all active categories...");
     const productKey = getDefaultProductKey();
     const makeRequest = () =>
-      api.get("/category/categorieslist", {
+      tryFirstAvailableGet(CATEGORY_LIST_PATHS, {
         params: { product_key: productKey },
       });
     const res = await withCategoryRecovery(makeRequest);
@@ -127,7 +169,7 @@ export const getMainCategoryId = async () => {
   try {
     const productKey = getDefaultProductKey();
     const makeRequest = () =>
-      api.get("/category/categorieslist", {
+      tryFirstAvailableGet(CATEGORY_LIST_PATHS, {
         params: { product_key: productKey },
       });
     const res = await withCategoryRecovery(makeRequest);
@@ -145,8 +187,8 @@ export const getCategoriesList = async (productId) => {
   try {
     const productKey = getDefaultProductKey();
     const makeRequest = () =>
-      api.post(
-        "/category/list",
+      tryFirstAvailablePost(
+        ["/category/list", "/categories/list", "/category/categorieslist", "/categorieslist"],
         { product_id: id, product_key: productKey }
       );
     const res = await withCategoryRecovery(makeRequest);
