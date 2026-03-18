@@ -87,7 +87,8 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_AUTH_APP_URL: process.env.NEXT_PUBLIC_AUTH_APP_URL || authAppBaseUrl,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || appBaseUrl,
-    NEXT_PUBLIC_COOKIE_DOMAIN: process.env.NEXT_PUBLIC_COOKIE_DOMAIN || (isProduction ? ".seaneb.com" : ""),
+    // Do not hardcode a production cookie domain; rely on env for cloud deployments.
+    NEXT_PUBLIC_COOKIE_DOMAIN: process.env.NEXT_PUBLIC_COOKIE_DOMAIN || "",
     NEXT_PUBLIC_COOKIE_SAMESITE: process.env.NEXT_PUBLIC_COOKIE_SAMESITE || "None",
   },
   images: {
