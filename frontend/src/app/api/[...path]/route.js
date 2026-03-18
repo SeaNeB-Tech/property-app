@@ -1,6 +1,20 @@
 import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 
 const normalizeUrl = (value) => String(value || "").trim().replace(/\/+$/, "");
+const normalizeApiBase = (value) => {
+  const raw = normalizeUrl(value);
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    const path = String(url.pathname || "").replace(/\/+$/, "");
+    if (!/\/api\/v1$/i.test(path)) {
+      url.pathname = `${path}/api/v1`.replace(/\/+/g, "/");
+    }
+    return normalizeUrl(url.toString());
+  } catch {
+    return raw.endsWith("/api/v1") ? raw : `${raw}/api/v1`;
+  }
+};
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const OTP_RATE_LIMIT_WINDOW_MS = 60_000;
 const OTP_RATE_LIMIT_MAX = 6;
@@ -20,10 +34,10 @@ const getApiBaseCandidates = () => {
   const nextEnv = String(process.env.NEXT_ENV || process.env.EXT_ENV || "")
     .trim()
     .toLowerCase();
-  const devApiUrl = normalizeUrl(
+  const devApiUrl = normalizeApiBase(
     process.env.NEXT_PUBLIC_DEV_URL || process.env.NEXT_PUBLIC_API_BASE_URL || ""
   );
-  const centralApiUrl = normalizeUrl(
+  const centralApiUrl = normalizeApiBase(
     process.env.NEXT_PUBLIC_CENTRAL_URL || process.env.NEXT_PUBLIC_CENTRAL_API_URL || ""
   );
 
