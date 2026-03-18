@@ -28,6 +28,7 @@ const directApiBaseUrl =
   "";
 const devApiUrl = process.env.NEXT_PUBLIC_DEV_URL || "";
 const centralApiUrl = process.env.NEXT_PUBLIC_CENTRAL_URL || process.env.NEXT_PUBLIC_CENTRAL_API_URL || "";
+const DEFAULT_FALLBACK_API_URL = "https://central-api.seaneb.com/api/v1";
 const nextEnv = String(process.env.NEXT_ENV || "").trim().toLowerCase();
 const apiBaseUrl = normalizeUrl(nextEnv === "development" ? devApiUrl : centralApiUrl);
 const fallbackApiBaseUrl = normalizeUrl(nextEnv === "development" ? centralApiUrl : devApiUrl);
@@ -35,7 +36,9 @@ const safeApiBaseUrl = isUsableUrl(directApiBaseUrl)
   ? normalizeUrl(directApiBaseUrl)
   : isUsableUrl(apiBaseUrl)
     ? apiBaseUrl
-    : fallbackApiBaseUrl;
+    : isUsableUrl(fallbackApiBaseUrl)
+      ? fallbackApiBaseUrl
+      : DEFAULT_FALLBACK_API_URL;
 const apiHostname = isUsableUrl(safeApiBaseUrl) ? new URL(safeApiBaseUrl).hostname : "";
 const isProduction = process.env.NODE_ENV === "production";
 const connectSrc = [

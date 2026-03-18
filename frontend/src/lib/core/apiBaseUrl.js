@@ -4,6 +4,7 @@ const CENTRAL_API_URL =
   process.env.NEXT_PUBLIC_CENTRAL_URL ||
   process.env.NEXT_PUBLIC_CENTRAL_API_URL ||
   "";
+const DEFAULT_FALLBACK_URL = "https://central-api.seaneb.com/api/v1";
 
 const normalizeUrl = (value) => String(value || "").trim().replace(/\/+$/, "");
 const normalizeBasePath = (value) => {
