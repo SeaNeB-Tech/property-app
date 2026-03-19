@@ -579,10 +579,6 @@ export default function BusinessRegisterPage() {
     const init = async () => {
       const profileCompleted = getCookie("profile_completed")
       const hasSession = await ensureAuthSessionReady()
-      const forceRegister =
-        typeof window !== "undefined" &&
-        new URLSearchParams(window.location.search).get("force") === "1"
-
       if (!active) return
 
       if (!hasSession) {
@@ -601,7 +597,7 @@ export default function BusinessRegisterPage() {
       // If business was already registered earlier, do not show registration again.
       const hasBusinessCookie = getCookie("business_registered") === "true"
       const existingBranchId = String(getCookie("branch_id") || "").trim()
-      if ((hasBusinessCookie || existingBranchId) && !forceRegister) {
+      if (hasBusinessCookie || existingBranchId) {
         router.replace("/dashboard/broker")
         return
       }

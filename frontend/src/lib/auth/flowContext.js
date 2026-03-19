@@ -94,12 +94,18 @@ export const stripAuthFlowParamsFromAddressBar = () => {
   const hadSource = url.searchParams.has(FLOW_SOURCE_KEY);
   const hadReturnTo = url.searchParams.has(FLOW_RETURN_TO_KEY);
   const hadFallback = url.searchParams.has(FLOW_FALLBACK_KEY);
+  const hadForce = url.searchParams.has("force");
+  const hadProductKey =
+    url.searchParams.has("product_key") || url.searchParams.has("productKey");
 
-  if (!hadSource && !hadReturnTo && !hadFallback) return;
+  if (!hadSource && !hadReturnTo && !hadFallback && !hadForce && !hadProductKey) return;
 
   url.searchParams.delete(FLOW_SOURCE_KEY);
   url.searchParams.delete(FLOW_RETURN_TO_KEY);
   url.searchParams.delete(FLOW_FALLBACK_KEY);
+  url.searchParams.delete("force");
+  url.searchParams.delete("product_key");
+  url.searchParams.delete("productKey");
 
   const nextPath = `${url.pathname}${url.search}${url.hash}`;
   window.history.replaceState(window.history.state, "", nextPath || url.pathname);
