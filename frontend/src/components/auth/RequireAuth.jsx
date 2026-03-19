@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { getSessionHint } from "@/lib/auth/sessionHint";
@@ -35,26 +35,9 @@ export default function RequireAuth({
 } = {}) {
   const router = useRouter();
   const { authInitialized, isAuthenticated, isLoading, restoreSession } = useAuth();
-  const [redirectReady, setRedirectReady] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
-  const [sessionHint, setSessionHint] = useState({
-    checked: false,
-    hasRefresh: false,
-    hasCsrf: false,
-  });
   const retryRef = useRef({ attempts: 0, hintFailures: 0, startedAt: 0, timer: null });
-  const setSessionHintSafe = useCallback((nextHint) => {
-    setSessionHint((prev) => {
-      if (
-        prev.checked === nextHint.checked &&
-        prev.hasRefresh === nextHint.hasRefresh &&
-        prev.hasCsrf === nextHint.hasCsrf
-      ) {
-        return prev;
-      }
-      return nextHint;
-    });
-  }, []);
+  const redirectingRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -68,8 +51,7 @@ export default function RequireAuth({
 
     if (!authInitialized || isLoading || isAuthenticated) {
       clearTimer();
-      setRedirectReady(false);
-      setSessionHintSafe({ checked: false, hasRefresh: false, hasCsrf: false });
+      redirectingRef.current = false;
       retryRef.current = { attempts: 0, hintFailures: 0, startedAt: 0, timer: null };
       return () => {
         active = false;
@@ -93,6 +75,28 @@ export default function RequireAuth({
       }
     };
 
+    const redirectNow = () => {
+      if (redirectingRef.current) return;
+      redirectingRef.current = true;
+
+      const fallbackTarget = String(redirectTo || "/auth/login");
+
+      if (fallbackTarget === "/auth/login" && typeof window !== "undefined") {
+        const loginUrl = getAuthLoginUrl({
+          returnTo: window.location.href,
+          source: "main-app",
+        });
+        if (/^https?:\/\//i.test(loginUrl)) {
+          window.location.href = loginUrl;
+        } else {
+          router.replace(loginUrl);
+        }
+        return;
+      }
+
+      router.replace(fallbackTarget);
+    };
+
     const checkSessionHint = async () => {
       if (!retryRef.current.startedAt) {
         retryRef.current.startedAt = Date.now();
@@ -109,8 +113,6 @@ export default function RequireAuth({
 
       const hasRefresh = Boolean(payload?.hasRefreshSession);
       const hasCsrf = Boolean(payload?.hasCsrfCookie);
-      setSessionHintSafe({ checked: true, hasRefresh, hasCsrf });
-
       if (payload) {
         retryRef.current.hintFailures = 0;
       } else {
@@ -128,7 +130,7 @@ export default function RequireAuth({
           scheduleRetry();
           return;
         }
-        setRedirectReady(true);
+        redirectNow();
         return;
       }
 
@@ -142,7 +144,7 @@ export default function RequireAuth({
         }
       }
 
-      setRedirectReady(true);
+      redirectNow();
     };
 
     void checkSessionHint();
@@ -151,37 +153,7 @@ export default function RequireAuth({
       active = false;
       clearTimer();
     };
-  }, [
-    authInitialized,
-    isAuthenticated,
-    isLoading,
-    restoreSession,
-    setSessionHintSafe,
-    retryTick,
-  ]);
-
-  useEffect(() => {
-    if (!redirectReady) return;
-    if (!authInitialized || isLoading) return;
-    if (isAuthenticated) return;
-
-    const fallbackTarget = String(redirectTo || "/auth/login");
-
-    if (fallbackTarget === "/auth/login" && typeof window !== "undefined") {
-      const loginUrl = getAuthLoginUrl({
-        returnTo: window.location.href,
-        source: "main-app",
-      });
-      if (/^https?:\/\//i.test(loginUrl)) {
-        window.location.href = loginUrl;
-      } else {
-        router.replace(loginUrl);
-      }
-      return;
-    }
-
-    router.replace(fallbackTarget);
-  }, [authInitialized, isAuthenticated, isLoading, redirectReady, redirectTo, router]);
+  }, [authInitialized, isAuthenticated, isLoading, redirectTo, restoreSession, retryTick, router]);
 
   if (!authInitialized || isLoading) return fallback;
   if (!isAuthenticated) return fallback;

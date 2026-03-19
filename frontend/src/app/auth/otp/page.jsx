@@ -18,7 +18,7 @@ import AuthTransitionOverlay from "@/components/ui/AuthTransitionOverlay";
 // Services
 import { sendOtp, verifyOtp } from "@/app/auth/auth-service/otp.service";
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap";
-import { getJsonCookie, setCookie, setJsonCookie, removeCookie } from "@/services/auth.service";
+import { getCookie, getJsonCookie, setCookie, setJsonCookie, removeCookie } from "@/services/auth.service";
 import { getAuthAppUrl } from "@/lib/core/appUrls";
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition";
 import { notifyAuthChanged } from "@/services/auth.service";
@@ -132,6 +132,66 @@ const readBoolFromPayload = (payload = {}, keys = []) => {
   return null;
 };
 
+const readTextFromPayload = (payload = {}, keys = []) => {
+  const candidates = [
+    payload,
+    payload?.data,
+    payload?.result,
+    payload?.payload,
+    payload?.response,
+    payload?.session,
+    payload?.tokens,
+    payload?.data?.session,
+    payload?.data?.tokens,
+    payload?.user,
+    payload?.profile,
+    payload?.data?.user,
+    payload?.data?.profile,
+    payload?.business,
+    payload?.data?.business,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    for (const key of keys) {
+      const value = candidate?.[key];
+      const text = String(value ?? "").trim();
+      if (text) return text;
+    }
+  }
+
+  return "";
+};
+
+const hasBusinessRegistration = (payload = null) => {
+  const cookieFlag = String(getCookie("business_registered") || "").trim().toLowerCase() === "true";
+  const cookieBranchId = String(getCookie("branch_id") || "").trim();
+  const cookieBusinessId = String(getCookie("business_id") || "").trim();
+
+  if (cookieFlag || cookieBranchId || cookieBusinessId) return true;
+
+  const flag = readBoolFromPayload(payload, [
+    "business_registered",
+    "businessRegistered",
+    "is_business_registered",
+    "isBusinessRegistered",
+    "has_business",
+    "hasBusiness",
+  ]);
+  if (flag === true) return true;
+
+  const id = readTextFromPayload(payload, [
+    "branch_id",
+    "branchId",
+    "business_id",
+    "businessId",
+    "current_business_id",
+    "currentBusinessId",
+  ]);
+
+  return Boolean(id);
+};
+
 export default function OtpPage() {
   const router = useRouter();
   const [status, setStatus] = useState("verifying");
@@ -163,8 +223,13 @@ export default function OtpPage() {
   const handleOtpSuccess = async ({ sourcePayload = null } = {}) => {
     const { source, returnTo } = getAuthFlowContext();
     const localTarget = String(returnTo || "").trim();
+    const hasBusiness = hasBusinessRegistration(sourcePayload);
     if (localTarget === "/dashboard" || localTarget.startsWith("/dashboard/")) {
       clearAuthFlowContext();
+      if (!hasBusiness) {
+        router.replace("/auth/business-register");
+        return;
+      }
       router.replace(localTarget);
       return;
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import phoneCodes from "@/constants/phoneCodes.json";
 
@@ -160,10 +160,15 @@ export default function LoginContent({ initialHold = false } = {}) {
   const [country, setCountry] = useState(phoneCodes[0]);
   const [method, setMethod] = useState("whatsapp");
   const [error, setError] = useState("");
-  const [flowContext, setFlowContext] = useState(() => getAuthFlowContext());
+  const flowContextRef = useRef({ source: "", returnTo: "" });
   const { isTransitioning, runWithTransition } = useAuthSubmitTransition();
-  const source = String(flowContext?.source || "").trim().toLowerCase();
-  const returnToParam = String(flowContext?.returnTo || "").trim();
+  const readFlowContext = useCallback(() => {
+    const current = flowContextRef.current || { source: "", returnTo: "" };
+    return {
+      source: String(current.source || "").trim().toLowerCase(),
+      returnTo: String(current.returnTo || "").trim(),
+    };
+  }, []);
 
   const t = LANG_MAP[language] || eng;
 
@@ -180,18 +185,14 @@ export default function LoginContent({ initialHold = false } = {}) {
     if (typeof window === "undefined") return;
     ingestAuthFlowContextFromWindowName();
     const nextContext = ingestAuthFlowContextFromUrl();
-    setFlowContext(nextContext);
-  }, []);
-
-  useEffect(() => {
+    flowContextRef.current = nextContext || { source: "", returnTo: "" };
     stripAuthFlowParamsFromAddressBar();
-  }, []);
 
-  useEffect(() => {
-    const returnTo = returnToParam;
-    if (!returnTo || !isSafeReturnTo(returnTo)) return;
-    setCookie(RETURN_TO_COOKIE, returnTo, { maxAge: 10 * 60, path: "/" });
-  }, [returnToParam]);
+    const returnTo = String(nextContext?.returnTo || "").trim();
+    if (returnTo && isSafeReturnTo(returnTo)) {
+      setCookie(RETURN_TO_COOKIE, returnTo, { maxAge: 10 * 60, path: "/" });
+    }
+  }, []);
 
   useEffect(() => {
     void restoreSession();
@@ -202,8 +203,9 @@ export default function LoginContent({ initialHold = false } = {}) {
 
     const maybeRedirect = async () => {
       if (!authInitialized || !isAuthenticated) return;
+      const { source, returnTo } = readFlowContext();
       const target = (() => {
-        if (returnToParam && isSafeReturnTo(returnToParam)) return returnToParam;
+        if (returnTo && isSafeReturnTo(returnTo)) return returnTo;
         return resolveRedirectTarget(getPostLoginTarget());
       })();
 
@@ -223,7 +225,7 @@ export default function LoginContent({ initialHold = false } = {}) {
     return () => {
       active = false;
     };
-  }, [authInitialized, isAuthenticated, returnToParam, router, source]);
+  }, [authInitialized, isAuthenticated, readFlowContext, router]);
 
   useEffect(() => {
     let active = true;
@@ -262,6 +264,7 @@ export default function LoginContent({ initialHold = false } = {}) {
 
     await runWithTransition(
       async () => {
+        const { source, returnTo } = readFlowContext();
         const dialCode = country?.dialCode?.replace("+", "");
 
         if (!dialCode) {
@@ -281,8 +284,8 @@ export default function LoginContent({ initialHold = false } = {}) {
         await sendOtp({ via: method });
 
         const resolvedReturnTo = (() => {
-          if (source === MAIN_APP_REGISTER_SOURCE && returnToParam && isSafeReturnTo(returnToParam)) {
-            return returnToParam;
+          if (source === MAIN_APP_REGISTER_SOURCE && returnTo && isSafeReturnTo(returnTo)) {
+            return returnTo;
           }
           return resolveRedirectTarget(getPostLoginTarget());
         })();
@@ -291,6 +294,7 @@ export default function LoginContent({ initialHold = false } = {}) {
       },
       {
         onSuccess: (returnTo) => {
+          const { source } = readFlowContext();
           setAuthFlowContext({ source, returnTo: String(returnTo || "").trim() });
           router.replace("/auth/otp");
         },
@@ -300,15 +304,9 @@ export default function LoginContent({ initialHold = false } = {}) {
         },
       }
     );
-  }, [country, isTransitioning, isValidMobile, method, mobile, returnToParam, router, runWithTransition, source]);
+  }, [country, isTransitioning, isValidMobile, method, mobile, readFlowContext, router, runWithTransition]);
 
-  const [shouldHoldUi, setShouldHoldUi] = useState(() => Boolean(initialHold));
-
-  useEffect(() => {
-    const nextHold =
-      Boolean(returnToParam) && (!authInitialized || isLoading || isAuthenticated);
-    setShouldHoldUi(nextHold);
-  }, [authInitialized, isAuthenticated, isLoading, returnToParam]);
+  const shouldHoldUi = Boolean(initialHold) && (!authInitialized || isLoading || isAuthenticated);
 
   if (shouldHoldUi) {
     return (

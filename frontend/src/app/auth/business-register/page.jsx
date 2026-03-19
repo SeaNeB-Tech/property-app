@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import phoneCodes from "@/constants/phoneCodes.json"
@@ -559,7 +559,7 @@ export default function BusinessRegisterPage() {
     ingestAuthFlowContextFromWindowName()
     ingestAuthFlowContextFromUrl()
     stripAuthFlowParamsFromAddressBar()
-  }, [])
+  }, [ensureAuthSessionReady, router])
 
   useEffect(() => {
     let active = true
@@ -769,7 +769,7 @@ export default function BusinessRegisterPage() {
       active = false
       if (timer) window.clearTimeout(timer)
     }
-  }, [router])
+  }, [ensureAuthSessionReady, router])
 
   useEffect(() => {
     const fromSession = getResolvedCountryCode()
@@ -936,28 +936,28 @@ export default function BusinessRegisterPage() {
     }
   }, [debouncedBusinessName])
 
-  const hasAccessToken = () => Boolean(String(getAccessToken() || "").trim())
+  const ensureAuthSessionReady = useCallback(async () => {
+    const hasAccessToken = () => Boolean(String(getAccessToken() || "").trim())
 
-  const tryRefreshAccessToken = async () => {
-    try {
-      await refreshAccessToken()
-      return true
-    } catch (err) {
-      const code = String(err?.response?.data?.code || err?.data?.code || "").trim().toUpperCase()
-      if (code === "REFRESH_LIMIT_REACHED") {
-        clearRefreshBudget()
-        try {
-          await refreshAccessToken()
-          return true
-        } catch {
-          return false
+    const tryRefreshAccessToken = async () => {
+      try {
+        await refreshAccessToken()
+        return true
+      } catch (err) {
+        const code = String(err?.response?.data?.code || err?.data?.code || "").trim().toUpperCase()
+        if (code === "REFRESH_LIMIT_REACHED") {
+          clearRefreshBudget()
+          try {
+            await refreshAccessToken()
+            return true
+          } catch {
+            return false
+          }
         }
+        return false
       }
-      return false
     }
-  }
 
-  const ensureAuthSessionReady = async () => {
     const ready = await ensureSessionReady({ force: true })
     if (ready && !hasAccessToken()) {
       await tryRefreshAccessToken()
@@ -993,7 +993,7 @@ export default function BusinessRegisterPage() {
     }
 
     return false
-  }
+  }, [])
 
   const handleEmailVerify = async () => {
     const email = form.businessEmail.trim()
