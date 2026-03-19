@@ -12,7 +12,7 @@ const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").tr
 const AUTH_RETURN_TO_COOKIE = "auth_return_to";
 const LISTING_APP_ORIGIN = (() => {
   try {
-    return new URL(String(process.env.NEXT_PUBLIC_APP_URL || "").trim()).origin;
+    return new URL(String(process.env.NEXT_PUBLIC_LISTING_URL || "").trim()).origin;
   } catch {
     return "";
   }

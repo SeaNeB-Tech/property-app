@@ -12,7 +12,7 @@ const SSO_TOKEN_ONCE_KEY = "seaneb_sso_bridge_token_used";
 
 const LISTING_APP_ORIGIN = (() => {
   try {
-    return new URL(String(process.env.NEXT_PUBLIC_APP_URL || "").trim()).origin;
+    return new URL(String(process.env.NEXT_PUBLIC_LISTING_URL || "").trim()).origin;
   } catch {
     return "";
   }

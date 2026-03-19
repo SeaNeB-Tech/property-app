@@ -3,9 +3,9 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
-        "dev": "node scripts/run-next-with-env-port.mjs dev NEXT_PUBLIC_AUTH_APP_URL",
+        "dev": "node scripts/run-next-with-env-port.mjs dev NEXT_PUBLIC_APP_URL",
         "build": "next build",
-        "start": "node scripts/run-next-with-env-port.mjs start NEXT_PUBLIC_AUTH_APP_URL",
+        "start": "node scripts/run-next-with-env-port.mjs start NEXT_PUBLIC_APP_URL",
         "lint": "eslint",
         "test": "vitest run"
     },

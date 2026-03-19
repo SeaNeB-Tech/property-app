@@ -52,7 +52,7 @@ const OTP_PURPOSE_SIGNUP_OR_LOGIN = 0
 const TERMS_TEXT_PATH = "/legal/terms-conditions-property.txt"
 const LISTING_APP_ORIGIN = (() => {
   try {
-    return new URL(String(process.env.NEXT_PUBLIC_APP_URL || "").trim()).origin
+    return new URL(String(process.env.NEXT_PUBLIC_LISTING_URL || "").trim()).origin
   } catch {
     return ""
   }

@@ -2,6 +2,7 @@ import "./globals.css";
 import { getAuthAppUrl, getListingAppUrl } from "@/lib/core/appUrls";
 import { Noto_Sans } from "next/font/google";
 import AuthProviderClient from "@/components/providers/AuthProviderClient";
+import { GTMScript, GTMNoScript, GTMAnalytics } from "@/components/GoogleTagManager";
 
 const notoSans = Noto_Sans({
   subsets: ["latin"],
@@ -56,7 +57,12 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
+      <head>
+        <GTMScript />
+      </head>
       <body className={`${notoSans.variable} antialiased`}>
+        <GTMNoScript />
+        <GTMAnalytics />
         <AuthProviderClient>{children}</AuthProviderClient>
       </body>
     </html>

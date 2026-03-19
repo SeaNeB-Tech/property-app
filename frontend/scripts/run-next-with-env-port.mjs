@@ -4,7 +4,7 @@ import net from "node:net";
 import { spawn } from "node:child_process";
 
 const command = process.argv[2] || "dev";
-const envKey = process.argv[3] || "NEXT_PUBLIC_AUTH_APP_URL";
+const envKey = process.argv[3] || "NEXT_PUBLIC_APP_URL";
 const explicitPort = String(process.argv[4] || process.env.PORT || "").trim();
 const defaultPort = String(process.env.DEFAULT_PORT || "3000").trim();
 

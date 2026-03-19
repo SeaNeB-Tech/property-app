@@ -40,7 +40,7 @@ const PURPOSE_LOGIN = 0;
 const MAIN_APP_REGISTER_SOURCE = "main-app-register";
 const LISTING_APP_ORIGIN = (() => {
   try {
-    return new URL(String(process.env.NEXT_PUBLIC_APP_URL || "").trim()).origin;
+    return new URL(String(process.env.NEXT_PUBLIC_LISTING_URL || "").trim()).origin;
   } catch {
     return "";
   }

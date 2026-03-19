@@ -5,7 +5,7 @@ export default function DashboardHeader({
   subtitle = "Manage your business profile and registration details.",
 }) {
   const returnToMainApp = () => {
-    const mainUrl = String(process.env.NEXT_PUBLIC_APP_URL || "").trim();
+    const mainUrl = String(process.env.NEXT_PUBLIC_LISTING_URL || "").trim();
 
     if (mainUrl) {
       window.location.assign(mainUrl);
