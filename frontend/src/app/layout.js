@@ -1,6 +1,7 @@
 import "./globals.css";
 import { getAuthAppUrl, getListingAppUrl } from "@/lib/core/appUrls";
 import { Noto_Sans } from "next/font/google";
+import { Suspense } from "react";
 import AuthProviderClient from "@/components/providers/AuthProviderClient";
 import { GTMScript, GTMNoScript, GTMAnalytics } from "@/components/GoogleTagManager";
 
@@ -62,7 +63,9 @@ export default function RootLayout({ children }) {
       </head>
       <body className={`${notoSans.variable} antialiased`}>
         <GTMNoScript />
-        <GTMAnalytics />
+        <Suspense fallback={null}>
+          <GTMAnalytics />
+        </Suspense>
         <AuthProviderClient>{children}</AuthProviderClient>
       </body>
     </html>
