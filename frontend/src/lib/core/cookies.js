@@ -2,9 +2,9 @@
 const isBrowser = typeof window !== "undefined";
 const isProduction = String(process.env.NODE_ENV || "").trim() === "production";
 
-const envCookiePath = process.env.NEXT_PUBLIC_COOKIE_PATH || "/";
-const envCookieDomain = process.env.NEXT_PUBLIC_COOKIE_DOMAIN || (isProduction ? ".seaneb.com" : "");
-const envSameSite = process.env.NEXT_PUBLIC_COOKIE_SAMESITE || "None";
+const envCookiePath = "/";
+const envCookieDomain = isProduction ? ".seaneb.com" : "";
+const envSameSite = "None";
 const COOKIE_CHANGE_EVENT = "property:cookie-change";
 const STORAGE_PREFIX = "property:volatile:";
 const volatileMemoryStore = new Map();
@@ -32,6 +32,13 @@ const REAL_COOKIE_KEYS = new Set([
   ...CSRF_COOKIE_NAME_SET,
   // Server-visible marker to allow profile completion right after OTP verification.
   "post_otp_verified",
+  // Server-visible proof used by complete-profile/signup handoff.
+  "signup_otp_verified",
+  // Server-visible mobile verification markers used across login -> signup handoff.
+  "mobile_verified",
+  "verified_mobile",
+  "otp_cc",
+  "otp_mobile",
 ]);
 if (isBrowser) {
   try {
@@ -308,6 +315,18 @@ export const getCookie = (name) => {
         clearRealCookieOnly(name);
       }
       return decoded;
+    }
+  }
+
+  if (usesRealCookie(name)) {
+    const legacyValue = getVolatileValue(name);
+    if (legacyValue != null) {
+      try {
+        setCookie(name, legacyValue);
+      } catch {
+        // ignore migration write failures
+      }
+      return String(legacyValue);
     }
   }
   return null;

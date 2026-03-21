@@ -79,10 +79,10 @@ const parseHostList = (value) => {
   }
 };
 
+const isProduction = String(process.env.NODE_ENV || "").trim() === "production";
+
 // Local hosts allowlist
-const LOCAL_HOSTS = parseHostList(
-  process.env.COOKIE_LOCAL_HOSTS || process.env.NEXT_PUBLIC_COOKIE_LOCAL_HOSTS
-);
+const LOCAL_HOSTS = parseHostList("localhost,127.0.0.1,::1");
 
 /**
  * Check if host is in local allowlist
@@ -140,7 +140,7 @@ const isValidCookieDomain = (domain) => {
 const resolveCookieDomain = (request) => {
   try {
     // Get configured domain from env
-    const envDomain = sanitizeCookieDomain(process.env.NEXT_PUBLIC_COOKIE_DOMAIN || "");
+    const envDomain = sanitizeCookieDomain(isProduction ? ".seaneb.com" : "");
     
     // Validate env domain
     if (!isValidCookieDomain(envDomain)) return "";

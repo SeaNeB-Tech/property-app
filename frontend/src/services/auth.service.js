@@ -49,6 +49,8 @@ const AUTH_FAILURE_SKIP_MESSAGE_PATTERNS = [
   /bridge\s+token.*replay/i,
 ];
 const AUTH_STORAGE_PREFIX = "property:volatile:";
+const DEFAULT_COOKIE_DOMAIN =
+  String(process.env.NODE_ENV || "").trim() === "production" ? ".seaneb.com" : "";
 const AUTH_STORAGE_KEYS = [
   "auth_session",
   "auth_session_start",
@@ -58,6 +60,9 @@ const AUTH_STORAGE_KEYS = [
   "otp_cc",
   "otp_mobile",
   "post_otp_verified",
+  "signup_otp_verified",
+  "verified_mobile",
+  "mobile_verified",
   "mobile_otp_until",
   "email_otp_until",
   "profile_completed",
@@ -171,7 +176,7 @@ const forceExpireCookie = (name, domain = "") => {
 
 const forceDeleteAuthCookies = () => {
   if (typeof window === "undefined") return;
-  const configuredDomain = String(process.env.NEXT_PUBLIC_COOKIE_DOMAIN || "").trim();
+  const configuredDomain = DEFAULT_COOKIE_DOMAIN;
   const host = String(window.location.hostname || "").toLowerCase();
   const maybeParentDomain = host.includes(".") ? `.${host.split(".").slice(-2).join(".")}` : "";
   const domains = Array.from(new Set(["", configuredDomain, maybeParentDomain].filter(Boolean)));

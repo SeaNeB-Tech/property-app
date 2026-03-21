@@ -1,19 +1,8 @@
 const isBrowser = typeof window !== "undefined";
 const STORAGE_KEY = "seaneb:auth:refresh:budget";
 
-const toPositiveNumber = (value, fallback) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
-
-const MAX_ATTEMPTS = toPositiveNumber(
-  process.env.NEXT_PUBLIC_AUTH_REFRESH_MAX_ATTEMPTS,
-  3
-);
-const WINDOW_MS = toPositiveNumber(
-  process.env.NEXT_PUBLIC_AUTH_REFRESH_WINDOW_MS,
-  30000
-);
+const MAX_ATTEMPTS = 3;
+const WINDOW_MS = 30000;
 
 let inMemoryAttempts = [];
 

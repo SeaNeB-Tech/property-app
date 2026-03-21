@@ -23,6 +23,8 @@ export const signupUser = async (data = {}) => {
   const firstName = toText(pickFirst(data.first_name, data.firstName));
   const lastName = toText(pickFirst(data.last_name, data.lastName));
   const seanebId = toText(pickFirst(data.seaneb_id, data.seanebId));
+  const rawPurpose = pickFirst(data.purpose);
+  const purpose = Number(rawPurpose);
   const gender = toText(data.gender).toLowerCase();
   const dob = formatDob(data.dob);
 
@@ -47,6 +49,9 @@ export const signupUser = async (data = {}) => {
 
   const email = toText(data.email).toLowerCase();
   if (email) payload.email = email;
+  if (Number.isFinite(purpose) && toText(rawPurpose) !== "") {
+    payload.purpose = purpose;
+  }
 
   return api.post("/v1/user/signup", payload);
 };

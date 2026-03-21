@@ -1,32 +1,12 @@
 const isBrowser = typeof window !== "undefined";
 
-const toPositiveNumber = (value, fallback) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
-
 const REFRESH_LOCK_KEY = "seaneb:auth:refresh:lock";
 const REFRESH_LAST_AT_KEY = "seaneb:auth:refresh:last_at";
-const REFRESH_LOCK_TTL_MS = toPositiveNumber(
-  process.env.NEXT_PUBLIC_AUTH_REFRESH_LOCK_TTL_MS,
-  8000
-);
-const REFRESH_LOCK_WAIT_MS = toPositiveNumber(
-  process.env.NEXT_PUBLIC_AUTH_REFRESH_LOCK_WAIT_MS,
-  2000
-);
-const REFRESH_LOCK_POLL_MS = toPositiveNumber(
-  process.env.NEXT_PUBLIC_AUTH_REFRESH_LOCK_POLL_MS,
-  50
-);
-const REFRESH_COOLDOWN_MS = toPositiveNumber(
-  process.env.NEXT_PUBLIC_AUTH_REFRESH_COOLDOWN_MS,
-  500
-);
-const REFRESH_DEBOUNCE_MS = toPositiveNumber(
-  process.env.NEXT_PUBLIC_AUTH_REFRESH_DEBOUNCE_MS,
-  150
-);
+const REFRESH_LOCK_TTL_MS = 8000;
+const REFRESH_LOCK_WAIT_MS = 2000;
+const REFRESH_LOCK_POLL_MS = 50;
+const REFRESH_COOLDOWN_MS = 500;
+const REFRESH_DEBOUNCE_MS = 150;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

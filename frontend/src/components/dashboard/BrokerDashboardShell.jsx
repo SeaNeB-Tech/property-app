@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getCookie, setCookie } from "@/services/auth.service";
+import { getCookie, removeCookie, setCookie } from "@/services/auth.service";
 import BrandLogo from "@/components/ui/BrandLogo";
 import { getAuthLoginUrl, getListingAppUrl } from "@/lib/core/appUrls";
 import { useAuth } from "@/lib/auth/AuthContext";
@@ -36,13 +36,26 @@ const hasBusinessRegistration = (user = null) => {
   return idHints.some((value) => String(value || "").trim().length > 0);
 };
 
+const clearBusinessRegistrationHints = () => {
+  [
+    "business_registered",
+    "business_id",
+    "branch_id",
+    "business_name",
+    "business_type",
+    "business_location",
+    "dashboard_mode",
+  ].forEach((key) => removeCookie(key));
+};
+
 export default function BrokerDashboardShell() {
   const router = useRouter();
-  const { status, isRestoring, isReady, user, logout } = useAuth();
+  const { status, isRestoring, isReady, user, logout, restoreSession } = useAuth();
   const [sessionChecked, setSessionChecked] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const dropdownRef = useRef(null);
   const tokenHydrateAttemptedRef = useRef(false);
+  const profileHydrateAttemptedRef = useRef(false);
 
   const userName = useMemo(
     () =>
@@ -91,14 +104,32 @@ export default function BrokerDashboardShell() {
         }
       }
 
-      const hasBusinessCookie = getCookie("business_registered") === "true";
-      const hasBusinessInProfile = hasBusinessRegistration(user);
-      if (!hasBusinessCookie && !hasBusinessInProfile) {
+      if (!user && !profileHydrateAttemptedRef.current) {
+        profileHydrateAttemptedRef.current = true;
+        try {
+          await restoreSession({ force: true });
+        } catch {
+          // Ignore restore failures here. RequireAuth/AuthContext handle invalid sessions.
+        }
+        if (!active) return;
+        return;
+      }
+
+      if (!user) {
+        clearBusinessRegistrationHints();
         router.replace("/auth/business-register");
         return;
       }
 
-      if (!hasBusinessCookie && hasBusinessInProfile) {
+      const hasBusinessInProfile = hasBusinessRegistration(user);
+      if (!hasBusinessInProfile) {
+        clearBusinessRegistrationHints();
+        router.replace("/auth/business-register");
+        return;
+      }
+
+      const hasBusinessCookie = getCookie("business_registered") === "true";
+      if (!hasBusinessCookie) {
         setCookie("business_registered", "true", {
           maxAge: 60 * 60 * 24 * 30,
           path: "/",
@@ -112,7 +143,7 @@ export default function BrokerDashboardShell() {
     return () => {
       active = false;
     };
-  }, [isReady, isRestoring, router, status, user]);
+  }, [isReady, isRestoring, restoreSession, router, status, user]);
 
   useEffect(() => {
     if (!isProfileOpen) return undefined;

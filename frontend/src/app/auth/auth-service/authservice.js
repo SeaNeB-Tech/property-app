@@ -16,27 +16,15 @@ import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 const IDENTIFIER_TYPE_MOBILE = 0;
 const PURPOSE_SIGNUP_OR_LOGIN = 0;
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
-const AUTH_DEBUG =
-  String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true";
+const AUTH_DEBUG = false;
 
 const logAuthDebug = (...args) => {
   if (!AUTH_DEBUG || typeof console === "undefined") return;
   console.debug(...args);
 };
 
-const toPositiveNumber = (value, fallback) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
-
-const AUTH_COOKIE_WAIT_TIMEOUT_MS = toPositiveNumber(
-  process.env.NEXT_PUBLIC_AUTH_COOKIE_WAIT_TIMEOUT_MS,
-  5000
-);
-const AUTH_COOKIE_WAIT_POLL_MS = toPositiveNumber(
-  process.env.NEXT_PUBLIC_AUTH_COOKIE_WAIT_POLL_MS,
-  120
-);
+const AUTH_COOKIE_WAIT_TIMEOUT_MS = 5000;
+const AUTH_COOKIE_WAIT_POLL_MS = 120;
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const CSRF_COOKIE_NAMES = CSRF_COOKIE_KEYS;
 const OTP_VERIFY_PATHS = ["/auth/verify-otp", "/otp/verify-otp", "/auth/otp/verify-otp"];
@@ -61,18 +49,13 @@ export const waitForAuthCookies = async ({
   const startedAt = Date.now();
   logAuthDebug("[auth] waitForAuthCookies: start", { timeoutMs, pollMs });
   while (Date.now() - startedAt < timeoutMs) {
+    const hasRefreshSession = await requestSessionHint();
     const csrfToken = getFirstCookieValue(CSRF_COOKIE_NAMES);
-    if (csrfToken) {
-      logAuthDebug("[auth] waitForAuthCookies: csrf cookie detected");
+    if (hasRefreshSession) {
+      logAuthDebug("[auth] waitForAuthCookies: server session hint detected");
       return { ok: true, csrfToken, waitedMs: Date.now() - startedAt };
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
-  }
-
-  const hasRefreshSession = await requestSessionHint();
-  if (hasRefreshSession) {
-    logAuthDebug("[auth] waitForAuthCookies: server session hint detected");
-    return { ok: true, csrfToken: "", waitedMs: Date.now() - startedAt };
   }
 
   logAuthDebug("[auth] waitForAuthCookies: timed out");

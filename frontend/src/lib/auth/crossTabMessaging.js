@@ -7,13 +7,8 @@ const LOGOUT_MESSAGE_TYPE = "SEANEB_LOGOUT";
 const MESSAGE_VERSION = 1;
 
 const getAllowedOrigins = () => {
-  const fromEnv = String(process.env.NEXT_PUBLIC_ALLOWED_RETURN_ORIGINS || "")
-    .split(",")
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-
   const appUrl = String(process.env.NEXT_PUBLIC_LISTING_URL || "").trim();
-  const merged = Array.from(new Set([...fromEnv, ...(appUrl ? [appUrl] : [])]));
+  const merged = appUrl ? [appUrl] : [];
 
   return merged
     .map((value) => {

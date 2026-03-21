@@ -31,14 +31,14 @@ const isUsableUrl = (value) => {
 
 const getApiBaseCandidates = () => {
   // Choose exactly one API base depending on environment (no fallback to the other server).
-  const nextEnv = String(process.env.NEXT_ENV || process.env.EXT_ENV || "")
+  const nextEnv = String(process.env.NEXT_ENV || "")
     .trim()
     .toLowerCase();
   const devApiUrl = normalizeApiBase(
-    process.env.NEXT_PUBLIC_DEV_URL || process.env.NEXT_PUBLIC_API_BASE_URL || ""
+    process.env.NEXT_PUBLIC_DEV_URL || ""
   );
   const centralApiUrl = normalizeApiBase(
-    process.env.NEXT_PUBLIC_CENTRAL_URL || process.env.NEXT_PUBLIC_CENTRAL_API_URL || ""
+    process.env.NEXT_PUBLIC_CENTRAL_URL || ""
   );
 
   const baseUrl = nextEnv === "development" ? devApiUrl : centralApiUrl;

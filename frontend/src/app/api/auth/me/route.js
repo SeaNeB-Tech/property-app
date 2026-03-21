@@ -221,18 +221,144 @@ const toCookieHeader = (jar) => {
   return pairs.join("; ");
 };
 
-const copyResponse = async (upstreamResponse, extraHeaders = null, cookieContext = null) => {
-  const headers = new Headers(upstreamResponse.headers);
+const readJsonSafely = async (response) => {
+  if (!response) return null;
+  try {
+    return await response.clone().json();
+  } catch {
+    return null;
+  }
+};
+
+const readBearerToken = (value) => {
+  const source = String(value || "").trim();
+  if (!source) return "";
+  if (/^Bearer\s+/i.test(source)) {
+    return source.replace(/^Bearer\s+/i, "").trim();
+  }
+  return source;
+};
+
+const readAccessTokenFromRefresh = async (response) => {
+  const fromHeader = readBearerToken(
+    response?.headers?.get("authorization") || response?.headers?.get("Authorization") || ""
+  );
+  if (fromHeader) return fromHeader;
+
+  const payload = await readJsonSafely(response);
+  return String(
+    payload?.accessToken ||
+      payload?.access_token ||
+      payload?.data?.accessToken ||
+      payload?.data?.access_token ||
+      payload?.token ||
+      payload?.jwt ||
+      ""
+  ).trim();
+};
+
+const readCsrfTokenFromRefresh = async (response) => {
+  const fromHeader = String(
+    response?.headers?.get("x-csrf-token") ||
+      response?.headers?.get("x-xsrf-token") ||
+      response?.headers?.get("csrf-token") ||
+      ""
+  ).trim();
+  if (fromHeader) return fromHeader;
+
+  const payload = await readJsonSafely(response);
+  return String(
+    payload?.csrfToken ||
+      payload?.csrf_token ||
+      payload?.data?.csrfToken ||
+      payload?.data?.csrf_token ||
+      ""
+  ).trim();
+};
+
+const isPanelAccessRestrictedPayload = (payload = null) => {
+  const code = String(payload?.error?.code || payload?.code || "").trim().toLowerCase();
+  const message = String(payload?.error?.message || payload?.message || "").trim().toLowerCase();
+
+  return (
+    /no active branch associated/i.test(message) ||
+    message.includes("branch") ||
+    message.includes("business") ||
+    code.includes("access_denied") ||
+    code.includes("forbidden")
+  );
+};
+
+const buildLimitedProfilePayload = (payload = null) => {
+  const code = String(payload?.error?.code || payload?.code || "PANEL_ACCESS_RESTRICTED").trim();
+  const message = String(
+    payload?.error?.message || payload?.message || "Business profile is not ready yet."
+  ).trim();
+
+  const limitedState = {
+    authenticated: true,
+    auth_limited: true,
+    limited: true,
+    panel_access_restricted: true,
+    branch_required: true,
+    has_business: false,
+    business_registered: false,
+    user: null,
+    profile: null,
+    code,
+    message,
+  };
+
+  return {
+    ...limitedState,
+    data: {
+      ...limitedState,
+    },
+    error: {
+      code,
+      message,
+    },
+    upstream_status: 403,
+  };
+};
+
+const buildResponseHeaders = (upstreamResponse, extraHeaders = null, cookieContext = null) => {
+  const headers = new Headers(upstreamResponse?.headers);
   headers.delete("content-length");
   if (extraHeaders instanceof Headers) {
+    for (const [key, value] of extraHeaders.entries()) {
+      if (!value || key.toLowerCase() === "set-cookie") continue;
+      headers.set(key, value);
+    }
     const setCookies = extraHeaders.get("set-cookie");
     if (setCookies) {
       appendSetCookieHeaders(headers, extraHeaders, cookieContext);
     }
   }
+  return headers;
+};
+
+const copyResponse = async (upstreamResponse, extraHeaders = null, cookieContext = null) => {
+  const headers = buildResponseHeaders(upstreamResponse, extraHeaders, cookieContext);
   return new NextResponse(upstreamResponse.body, {
     status: upstreamResponse.status,
     statusText: upstreamResponse.statusText,
+    headers,
+  });
+};
+
+const createLimitedProfileResponse = async ({
+  upstreamResponse,
+  payload = null,
+  extraHeaders = null,
+  cookieContext = null,
+}) => {
+  const headers = buildResponseHeaders(upstreamResponse, extraHeaders, cookieContext);
+  headers.set("content-type", "application/json; charset=utf-8");
+  headers.set("x-auth-profile-state", "limited");
+
+  return NextResponse.json(buildLimitedProfilePayload(payload), {
+    status: 200,
     headers,
   });
 };
@@ -374,6 +500,7 @@ export async function GET(request) {
         }
 
         const status = Number(response.status || 0);
+        const initialPayload = status === 403 ? await readJsonSafely(response) : null;
         let skipInitialReturn = false;
         const shouldTryRefresh = status === 401 || status === 403;
         if (shouldTryRefresh) {
@@ -401,20 +528,42 @@ export async function GET(request) {
             const refreshedCookieJar = new Map(initialCookieJar);
             applySetCookiesToJar(refreshedCookieJar, refreshResponse.headers);
             const mergedCookieHeader = toCookieHeader(refreshedCookieJar);
+            const refreshedAccessToken = await readAccessTokenFromRefresh(refreshResponse);
+            const refreshedCsrfToken = await readCsrfTokenFromRefresh(refreshResponse);
             const csrfAfterRefresh =
-              getFirstCookieValueFromHeader(mergedCookieHeader, CSRF_COOKIE_KEYS) || incomingCsrf;
+              getFirstCookieValueFromHeader(mergedCookieHeader, CSRF_COOKIE_KEYS) ||
+              refreshedCsrfToken ||
+              incomingCsrf;
+
+            if (refreshedAccessToken) {
+              responseHeaders.set("authorization", `Bearer ${refreshedAccessToken}`);
+            }
+            if (csrfAfterRefresh) {
+              responseHeaders.set("x-csrf-token", csrfAfterRefresh);
+              responseHeaders.set("x-xsrf-token", csrfAfterRefresh);
+              responseHeaders.set("csrf-token", csrfAfterRefresh);
+            }
 
             const retryProfile = await requestProfile({
               base,
               path,
               cookieHeader: mergedCookieHeader,
               csrfHeader: csrfAfterRefresh,
-              authorizationHeader: incomingAuthorization,
-              accessToken: "",
+              authorizationHeader: refreshedAccessToken ? `Bearer ${refreshedAccessToken}` : "",
+              accessToken: refreshedAccessToken,
               forwardedHeaders,
             });
 
             const retryStatus = Number(retryProfile.status || 0);
+            const retryPayload = retryStatus === 403 ? await readJsonSafely(retryProfile) : null;
+            if (retryStatus === 403 && isPanelAccessRestrictedPayload(retryPayload)) {
+              return createLimitedProfileResponse({
+                upstreamResponse: retryProfile,
+                payload: retryPayload,
+                extraHeaders: responseHeaders,
+                cookieContext,
+              });
+            }
             const response = await copyResponse(retryProfile, responseHeaders, cookieContext);
             if (retryProfile.ok || ![404, 405, 500, 502, 503, 504].includes(retryStatus)) {
               return response;
@@ -424,6 +573,13 @@ export async function GET(request) {
         }
 
         if (!skipInitialReturn && ![404, 405, 500, 502, 503, 504].includes(status)) {
+          if (status === 403 && isPanelAccessRestrictedPayload(initialPayload)) {
+            return createLimitedProfileResponse({
+              upstreamResponse: response,
+              payload: initialPayload,
+              cookieContext,
+            });
+          }
           return copyResponse(response, null, cookieContext);
         }
       } catch {

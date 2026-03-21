@@ -112,7 +112,6 @@ export default function RequireAuth({
       if (!active) return;
 
       const hasRefresh = Boolean(payload?.hasRefreshSession);
-      const hasCsrf = Boolean(payload?.hasCsrfCookie);
       if (payload) {
         retryRef.current.hintFailures = 0;
       } else {
@@ -122,7 +121,7 @@ export default function RequireAuth({
       const elapsed = Date.now() - retryRef.current.startedAt;
       const canKeepTrying = elapsed < AUTH_RECOVERY_MAX_MS;
 
-      if (hasRefresh || hasCsrf) {
+      if (hasRefresh) {
         const restored = await attemptRestore();
         if (!active) return;
         if (restored) return;

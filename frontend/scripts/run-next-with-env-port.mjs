@@ -110,9 +110,7 @@ const parseHostList = (value) =>
     .split(",")
     .map((item) => String(item || "").trim().toLowerCase())
     .filter(Boolean);
-const devHosts = new Set(
-  parseHostList(process.env.LOCAL_DEV_HOSTS || process.env.NEXT_PUBLIC_LOCAL_DEV_HOSTS)
-);
+const devHosts = new Set(parseHostList("localhost,127.0.0.1,::1"));
 const shouldRewriteEnvUrl =
   parsedUrl && devHosts.size && devHosts.has(parsedUrl.hostname.toLowerCase());
 if (shouldRewriteEnvUrl) {

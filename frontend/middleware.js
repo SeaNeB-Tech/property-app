@@ -3,10 +3,8 @@ import { CSRF_COOKIE_KEYS, REFRESH_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 
 // ✅ ENV driven — no hardcoded fallbacks
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim();
-const BASE_PATH = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || "");
-const MIDDLEWARE_REFRESH_THROTTLE_MS = Number(
-  process.env.NEXT_PUBLIC_AUTH_REFRESH_TIMEOUT_MS || 3000
-);
+const BASE_PATH = "";
+const MIDDLEWARE_REFRESH_THROTTLE_MS = 3000;
 const SESSION_FETCH_TIMEOUT_MS = 4000;
 
 if (!PRODUCT_KEY) console.warn("[middleware] NEXT_PUBLIC_PRODUCT_KEY is not set");

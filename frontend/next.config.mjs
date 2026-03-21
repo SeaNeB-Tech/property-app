@@ -1,4 +1,4 @@
-const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const rawBasePath = "";
 const normalizedBasePath =
   rawBasePath && rawBasePath !== "/"
     ? `/${rawBasePath.replace(/^\/+|\/+$/g, "")}`
@@ -21,13 +21,9 @@ const toOrigin = (value) => {
 };
 const appBaseUrl = normalizeUrl(process.env.NEXT_PUBLIC_LISTING_URL || "");
 const authAppBaseUrl = normalizeUrl(process.env.NEXT_PUBLIC_APP_URL || "");
-const directApiBaseUrl =
-  process.env.BACKEND_API_URL ||
-  process.env.NEXT_PUBLIC_BACKEND_API_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "";
+const directApiBaseUrl = "";
 const devApiUrl = process.env.NEXT_PUBLIC_DEV_URL || "";
-const centralApiUrl = process.env.NEXT_PUBLIC_CENTRAL_URL || process.env.NEXT_PUBLIC_CENTRAL_API_URL || "";
+const centralApiUrl = process.env.NEXT_PUBLIC_CENTRAL_URL || "";
 const DEFAULT_FALLBACK_API_URL = "https://central-api.seaneb.com/api/v1";
 const nextEnv = String(process.env.NEXT_ENV || "").trim().toLowerCase();
 const apiBaseUrl = normalizeUrl(nextEnv === "development" ? devApiUrl : centralApiUrl);
@@ -84,12 +80,6 @@ const securityHeaders = [
 const nextConfig = {
   poweredByHeader: false,
   basePath: normalizedBasePath,
-  env: {
-    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || authAppBaseUrl,
-    NEXT_PUBLIC_LISTING_URL: process.env.NEXT_PUBLIC_LISTING_URL || appBaseUrl,
-    NEXT_PUBLIC_COOKIE_DOMAIN: process.env.NEXT_PUBLIC_COOKIE_DOMAIN || (isProduction ? ".seaneb.com" : ""),
-    NEXT_PUBLIC_COOKIE_SAMESITE: process.env.NEXT_PUBLIC_COOKIE_SAMESITE || "None",
-  },
   images: {
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 2678400,

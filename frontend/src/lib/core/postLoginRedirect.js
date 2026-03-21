@@ -17,23 +17,7 @@ const LISTING_APP_ORIGIN = (() => {
     return "";
   }
 })();
-const ALLOWED_RETURN_ORIGINS = Array.from(
-  new Set(
-    String(process.env.NEXT_PUBLIC_ALLOWED_RETURN_ORIGINS || "")
-      .split(",")
-      .map((item) => String(item || "").trim())
-      .filter(Boolean)
-      .map((origin) => {
-        try {
-          return new URL(origin).origin;
-        } catch {
-          return "";
-        }
-      })
-      .filter(Boolean)
-      .concat(LISTING_APP_ORIGIN ? [LISTING_APP_ORIGIN] : [])
-  )
-);
+const ALLOWED_RETURN_ORIGINS = LISTING_APP_ORIGIN ? [LISTING_APP_ORIGIN] : [];
 const PRIMARY_LISTING_ORIGIN = ALLOWED_RETURN_ORIGINS[0] || LISTING_APP_ORIGIN || "";
 const SOURCE_TO_TARGET_PATH = {
   "main-app": "/home",

@@ -16,8 +16,7 @@ import {
 } from "@/app/auth/auth-service/service.utils"
 
 const businessApi = authApi
-const AUTH_DEBUG =
-  String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true"
+const AUTH_DEBUG = false
 
 const logAuthDebug = (...args) => {
   if (!AUTH_DEBUG || typeof console === "undefined") return

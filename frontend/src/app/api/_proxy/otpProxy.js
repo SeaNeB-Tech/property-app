@@ -273,13 +273,14 @@ export const proxyOtpSend = async (request) => {
   return proxyJsonPost({
     request,
     upstreamPathCandidates: [
+      // Public OTP endpoints must be tried before auth-only variants.
+      "/otp/send-otp",
+      "/v1/otp/send-otp",
       "/auth/send-otp",
       "/auth/otp/send",
       "/auth/otp/send-otp",
-      "/otp/send-otp",
       "/auth/sendotp",
       "/v1/auth/send-otp",
-      "/v1/otp/send-otp",
     ],
   });
 };
@@ -288,12 +289,12 @@ export const proxyOtpVerify = async (request) => {
   return proxyJsonPost({
     request,
     upstreamPathCandidates: [
+      "/otp/verify-otp",
+      "/v1/otp/verify-otp",
       "/auth/verify-otp",
       "/auth/otp/verify",
       "/auth/otp/verify-otp",
-      "/otp/verify-otp",
       "/v1/auth/verify-otp",
-      "/v1/otp/verify-otp",
     ],
   });
 };
@@ -304,13 +305,13 @@ export const proxySendOtpLegacy = async (request) => {
   return proxyJsonPost({
     request,
     upstreamPathCandidates: [
-      "/auth/send-otp",
       "/otp/send-otp",
+      "/v1/otp/send-otp",
+      "/auth/send-otp",
       "/auth/otp/send-otp",
       "/auth/otp/send",
       "/auth/sendotp",
       "/v1/auth/send-otp",
-      "/v1/otp/send-otp",
     ],
   });
 };
@@ -319,12 +320,12 @@ export const proxyVerifyOtpLegacy = async (request) => {
   return proxyJsonPost({
     request,
     upstreamPathCandidates: [
-      "/auth/verify-otp",
       "/otp/verify-otp",
+      "/v1/otp/verify-otp",
+      "/auth/verify-otp",
       "/auth/otp/verify-otp",
       "/auth/otp/verify",
       "/v1/auth/verify-otp",
-      "/v1/otp/verify-otp",
     ],
   });
 };

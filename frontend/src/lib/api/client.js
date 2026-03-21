@@ -17,23 +17,16 @@ import {
 const REFRESH_ENDPOINT = "/auth/refresh";
 const LOCAL_REFRESH_ENDPOINT = `${String(API_BASE_URL || "").trim().replace(/\/+$/, "") || "/api"}/auth/refresh`;
 const DEFAULT_PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
-const AUTH_DEBUG =
-  String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true";
+const AUTH_DEBUG = false;
+const DEFAULT_COOKIE_DOMAIN =
+  String(process.env.NODE_ENV || "").trim() === "production" ? ".seaneb.com" : "";
 
 const logAuthDebug = (...args) => {
   if (!AUTH_DEBUG || typeof console === "undefined") return;
   console.debug(...args);
 };
 
-const toPositiveNumber = (value, fallback) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
-
-const REFRESH_TIMEOUT_MS = toPositiveNumber(
-  process.env.NEXT_PUBLIC_AUTH_REFRESH_TIMEOUT_MS,
-  7000
-);
+const REFRESH_TIMEOUT_MS = 7000;
 
 const normalizeBaseUrl = (value) =>
   String(value || "").trim().replace(/\/+$/, "");
@@ -294,7 +287,7 @@ const isAuthRoute = () => {
 
 const getAuthCookieDomains = () => {
   if (typeof window === "undefined") return [""];
-  const configuredDomain = String(process.env.NEXT_PUBLIC_COOKIE_DOMAIN || "").trim();
+  const configuredDomain = DEFAULT_COOKIE_DOMAIN;
   const host = String(window.location.hostname || "").toLowerCase();
   const maybeParentDomain = host.includes(".")
     ? `.${host.split(".").slice(-2).join(".")}`

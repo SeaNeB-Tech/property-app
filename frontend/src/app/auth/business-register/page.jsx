@@ -21,8 +21,8 @@ import {
 import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.service"
 import { sendOtp } from "@/app/auth/auth-service/otp.service"
 import { verifyOtpAndLogin, waitForAuthCookies } from "@/app/auth/auth-service/authservice"
-import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
 import { hydrateAuthSession, refreshAccessToken } from "@/lib/api/client"
+import { authApi } from "@/lib/auth/apiClient"
 import { getAccessToken, getCsrfToken } from "@/lib/auth/tokenStorage"
 import { getSessionHint } from "@/lib/auth/sessionHint"
 import { clearRefreshBudget } from "@/lib/auth/refreshBudget"
@@ -48,6 +48,7 @@ import {
   setAuthFlowContext,
   stripAuthFlowParamsFromAddressBar,
 } from "@/lib/auth/flowContext"
+import { useAuth } from "@/lib/auth/AuthContext"
 import { getAllowedReturnOrigins, getPrimaryListingOrigin } from "@/lib/core/postLoginRedirect"
 
 // i18n
@@ -65,7 +66,7 @@ const PURPOSE_BUSINESS_MOBILE_VERIFY = 2
 const PURPOSE_BUSINESS_EMAIL_VERIFY = 3
 const MAIN_APP_REGISTER_SOURCE = "main-app-register"
 const BUSINESS_REGISTER_SUCCESS_MESSAGE_TYPE = "SEANEB_BUSINESS_REGISTER_SUCCESS"
-const DEFAULT_MAIN_CATEGORY_ID = process.env.NEXT_PUBLIC_MAIN_CATEGORY_ID || ""
+const DEFAULT_MAIN_CATEGORY_ID = ""
 const OTP_VIA_WHATSAPP = "whatsapp"
 const OTP_VIA_SMS = "sms"
 const RESEND_COOLDOWN_SECONDS = 60
@@ -73,16 +74,19 @@ const VERIFIED_EDIT_COOLDOWN_SECONDS = 60
 const TERMS_TEXT_PATH = "/legal/terms-conditions-property.txt"
 const LANGUAGE_STORAGE_KEY = "auth_language"
 const DEFAULT_BUSINESS_IMAGE = "/default-business.png"
-const GOOGLE_PLACES_API_KEY = String(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "").trim()
+const GOOGLE_PLACES_API_KEY = ""
 const GOOGLE_PLACES_PHOTO_URL = "https://maps.googleapis.com/maps/api/place/photo"
 const GOOGLE_PLACES_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
-const AUTH_DEBUG =
-  String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true"
+const AUTH_DEBUG = false
+const POST_REGISTER_PROFILE_MAX_ATTEMPTS = 6
+const POST_REGISTER_PROFILE_RETRY_MS = 350
 
 const logAuthDebug = (...args) => {
   if (!AUTH_DEBUG || typeof console === "undefined") return
   console.debug(...args)
 }
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const buildCsrfHeaders = (token) => {
   const csrfToken = String(token || "").trim()
@@ -403,8 +407,95 @@ const redirectToBusinessRegisterLogin = (router, returnTo = "/auth/business-regi
   router.replace("/auth/login")
 }
 
+const hasBusinessRegistration = (payload = null) => {
+  const candidates = [
+    payload,
+    payload?.data,
+    payload?.result,
+    payload?.payload,
+    payload?.response,
+    payload?.session,
+    payload?.user,
+    payload?.profile,
+    payload?.business,
+    payload?.data?.user,
+    payload?.data?.profile,
+    payload?.data?.business,
+  ]
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue
+
+    const boolHints = [
+      candidate?.is_business_registered,
+      candidate?.isBusinessRegistered,
+      candidate?.business_registered,
+      candidate?.businessRegistered,
+      candidate?.has_business,
+      candidate?.hasBusiness,
+    ]
+    if (boolHints.some((value) => value === true || String(value || "").trim().toLowerCase() === "true")) {
+      return true
+    }
+
+    const idHints = [
+      candidate?.business_id,
+      candidate?.businessId,
+      candidate?.current_business_id,
+      candidate?.currentBusinessId,
+      candidate?.branch_id,
+      candidate?.branchId,
+      candidate?.business?.id,
+      candidate?.business?.business_id,
+    ]
+    if (idHints.some((value) => String(value || "").trim().length > 0)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+const readProfileRecord = (payload = null) => {
+  const profile =
+    payload?.data?.profile ||
+    payload?.data?.user ||
+    payload?.data ||
+    payload?.profile ||
+    payload?.user ||
+    payload
+
+  return profile && typeof profile === "object" ? profile : null
+}
+
+const readProfileBranchId = (profile = null) =>
+  String(
+    profile?.branch_id ||
+      profile?.branchId ||
+      profile?.default_branch_id ||
+      profile?.defaultBranchId ||
+      profile?.business?.branch_id ||
+      profile?.business?.branchId ||
+      profile?.business?.default_branch_id ||
+      profile?.business?.defaultBranchId ||
+      ""
+  ).trim()
+
+const clearBusinessRegistrationHints = () => {
+  ;[
+    "business_registered",
+    "business_id",
+    "branch_id",
+    "business_name",
+    "business_type",
+    "business_location",
+    "dashboard_mode",
+  ].forEach((key) => removeCookie(key))
+}
+
 export default function BusinessRegisterPage() {
   const router = useRouter()
+  const { applyUserProfile, user } = useAuth()
   const [language, setLanguage] = useState(() => {
     if (typeof window !== "undefined") {
       const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
@@ -460,6 +551,8 @@ export default function BusinessRegisterPage() {
   const sectionTopRef = useRef(null)
   const lockedProductKeyRef = useRef("")
   const suppressNextBusinessAutocompleteRef = useRef(false)
+  const initAttemptedRef = useRef(false)
+  const profileProbeAttemptedRef = useRef(false)
   const debouncedBusinessName = useDebounce(form.businessName, 300)
   const locationLookupRef = useRef("")
 
@@ -479,6 +572,213 @@ export default function BusinessRegisterPage() {
   const whatsappIsVerified = whatsappVerified || whatsappAutoVerified
   const hasSelectedBusiness = Boolean(form.businessPlaceId || form.photoReference)
   const selectedBusinessPhotoSrc = buildBusinessPhotoUrl(form.photoReference, 200)
+
+  const ensureAuthSessionReady = useCallback(async () => {
+    const hasAccessToken = () => Boolean(String(getAccessToken() || "").trim())
+    const hasCsrfToken = () =>
+      Boolean(String(getCsrfToken() || getCookie("csrf_token_property") || "").trim())
+    const hasUsableSession = () => hasAccessToken() && hasCsrfToken()
+
+    const tryRefreshAccessToken = async () => {
+      try {
+        await refreshAccessToken()
+        return true
+      } catch (err) {
+        const code = String(err?.response?.data?.code || err?.data?.code || "").trim().toUpperCase()
+        if (code === "REFRESH_LIMIT_REACHED") {
+          clearRefreshBudget()
+          try {
+            await refreshAccessToken()
+            return true
+          } catch {
+            return false
+          }
+        }
+        return false
+      }
+    }
+
+    if (hasUsableSession()) return true
+
+    let hint = null
+    try {
+      hint = await getSessionHint({ force: true })
+    } catch {
+      hint = null
+    }
+
+    const hasRecoverableSession =
+      Boolean(hint?.hasRefreshSession) || hasAccessToken()
+
+    if (hasRecoverableSession && !hasUsableSession()) {
+      await tryRefreshAccessToken()
+    }
+
+    if (hasUsableSession()) return true
+
+    try {
+      const waitResult = await waitForAuthCookies()
+      if (waitResult?.ok) {
+        if (!hasUsableSession()) {
+          await tryRefreshAccessToken()
+        }
+        return hasUsableSession()
+      }
+    } catch {
+      // ignore cookie wait failures
+    }
+
+    try {
+      const finalHint = await getSessionHint({ force: true })
+      if (finalHint?.hasRefreshSession || hasAccessToken()) {
+        if (!hasUsableSession()) {
+          await tryRefreshAccessToken()
+        }
+        return hasUsableSession()
+      }
+    } catch {
+      // ignore session hint failures
+    }
+
+    return hasUsableSession()
+  }, [])
+
+  const confirmRegisteredBusinessProfile = useCallback(async ({ expectedBranchId = "" } = {}) => {
+    const expectedBranch = String(expectedBranchId || "").trim()
+    let lastStatus = 0
+    let lastMessage = ""
+
+    const tryManualRefresh = async () => {
+      try {
+        const productKey = String(getDefaultProductKey() || "property").trim()
+        const csrfToken = String(getCsrfToken() || "").trim()
+        const refreshUrl = `${String(API_BASE_URL || "").trim().replace(/\/+$/, "") || "/api"}/auth/refresh`
+        const refreshLock = await acquireRefreshLock({ source: "business-register" })
+        if (!refreshLock.acquired) {
+          throw new Error("Refresh lock unavailable")
+        }
+
+        let refreshResp
+        try {
+          refreshResp = await fetch(refreshUrl, {
+            method: "POST",
+            credentials: "include",
+            cache: "no-store",
+            headers: {
+              "content-type": "application/json",
+              "x-product-key": productKey,
+              ...buildCsrfHeaders(csrfToken),
+            },
+            body: JSON.stringify({ product_key: productKey }),
+          })
+        } finally {
+          releaseRefreshLock(refreshLock.id)
+        }
+
+        let refreshPayload = null
+        try {
+          refreshPayload = await refreshResp.clone().json()
+        } catch {
+          refreshPayload = null
+        }
+
+        const respAuth = String(
+          refreshResp.headers.get("authorization") || refreshResp.headers.get("Authorization") || ""
+        ).trim()
+        const respHeaderToken = respAuth && /^Bearer\s+/i.test(respAuth)
+          ? respAuth.replace(/^Bearer\s+/i, "").trim()
+          : respAuth
+
+        const respBodyToken = String(
+          refreshPayload?.access_token || refreshPayload?.accessToken || refreshPayload?.token || refreshPayload?.jwt || ""
+        ).trim()
+
+        const respCsrf = String(
+          refreshResp.headers.get("x-csrf-token") ||
+            refreshResp.headers.get("x-xsrf-token") ||
+            refreshResp.headers.get("csrf-token") ||
+            refreshPayload?.csrf_token ||
+            refreshPayload?.csrfToken ||
+            ""
+        ).trim()
+
+        if (respHeaderToken || respBodyToken || respCsrf) {
+          hydrateAuthSession({
+            accessToken: respHeaderToken || respBodyToken,
+            csrfToken: respCsrf,
+            broadcast: true,
+          })
+        }
+
+        return await ensureAuthSessionReady()
+      } catch (manualRefreshError) {
+        console.warn("[business-register] manual refresh attempt failed:", manualRefreshError)
+        return false
+      }
+    }
+
+    for (let attempt = 0; attempt < POST_REGISTER_PROFILE_MAX_ATTEMPTS; attempt += 1) {
+      let sessionHydrated = false
+
+      try {
+        sessionHydrated = await ensureAuthSessionReady()
+        if (!sessionHydrated) {
+          const waitResult = await waitForAuthCookies()
+          if (waitResult?.ok) {
+            sessionHydrated = await ensureAuthSessionReady()
+          }
+        }
+      } catch {
+        sessionHydrated = false
+      }
+
+      if (!sessionHydrated) {
+        sessionHydrated = await tryManualRefresh()
+      }
+
+      if (sessionHydrated) {
+        try {
+          const payload = await authApi.me({ retryOn401: false })
+          const profile = readProfileRecord(payload)
+          const profileBranchId = readProfileBranchId(profile)
+          const hasBusinessProfile =
+            hasBusinessRegistration(profile) ||
+            (expectedBranch && profileBranchId === expectedBranch)
+
+          if (profile && hasBusinessProfile) {
+            applyUserProfile(profile)
+            notifyAuthChanged({ force: true })
+            return true
+          }
+
+          lastStatus = 200
+          lastMessage = "PROFILE_BUSINESS_NOT_READY"
+        } catch (profileError) {
+          lastStatus = Number(profileError?.status || profileError?.response?.status || 0)
+          lastMessage = String(
+            profileError?.data?.error?.message ||
+              profileError?.data?.message ||
+              profileError?.response?.data?.error?.message ||
+              profileError?.response?.data?.message ||
+              profileError?.message ||
+              ""
+          ).trim()
+        }
+      }
+
+      if (attempt < POST_REGISTER_PROFILE_MAX_ATTEMPTS - 1) {
+        await sleep(POST_REGISTER_PROFILE_RETRY_MS * (attempt + 1))
+      }
+    }
+
+    console.warn("[business-register] unable to confirm /api/auth/me after registration", {
+      status: lastStatus,
+      message: lastMessage || "profile_not_ready",
+      expectedBranchId: expectedBranch,
+    })
+
+    return false
+  }, [applyUserProfile, ensureAuthSessionReady])
 
   const validateStep = (step) => {
     if (step === 1) {
@@ -562,8 +862,20 @@ export default function BusinessRegisterPage() {
   }, [ensureAuthSessionReady, router])
 
   useEffect(() => {
+    if (!hasBusinessRegistration(user)) return
+    router.replace("/dashboard/broker")
+  }, [router, user])
+
+  useEffect(() => {
     let active = true
     let timer = null
+
+    if (initAttemptedRef.current) {
+      return () => {
+        active = false
+      }
+    }
+    initAttemptedRef.current = true
 
     const isSsoCallback = () => {
       try {
@@ -586,6 +898,34 @@ export default function BusinessRegisterPage() {
         // Continue initialization without forcing login redirect.
         console.info("[business-register] no session detected; continuing as guest")
       } else {
+        if (!profileProbeAttemptedRef.current) {
+          profileProbeAttemptedRef.current = true
+          try {
+            const payload = await authApi.me({ retryOn401: false })
+            const profile = readProfileRecord(payload)
+            if (profile) {
+              applyUserProfile(profile)
+            }
+          } catch (profileProbeError) {
+            const status = Number(profileProbeError?.status || profileProbeError?.response?.status || 0)
+            const message = String(
+              profileProbeError?.data?.error?.message ||
+                profileProbeError?.data?.message ||
+                profileProbeError?.response?.data?.error?.message ||
+                profileProbeError?.response?.data?.message ||
+                profileProbeError?.message ||
+                ""
+            ).trim()
+
+            if (status === 403) {
+              console.info("[business-register] /api/auth/me is branch-restricted before registration:", message || "forbidden")
+            } else {
+              console.warn("[business-register] initial /api/auth/me probe failed:", profileProbeError)
+            }
+          }
+          if (!active) return
+        }
+
         if (profileCompleted !== "true") {
           setCookie("profile_completed", "true", {
             maxAge: 60 * 60 * 24 * 30,
@@ -594,12 +934,16 @@ export default function BusinessRegisterPage() {
         }
       }
 
-      // If business was already registered earlier, do not show registration again.
+      // Do not trust stale business cookies here. A previous user/session may have
+      // left them behind, which causes a redirect loop into /dashboard/broker.
       const hasBusinessCookie = getCookie("business_registered") === "true"
       const existingBranchId = String(getCookie("branch_id") || "").trim()
       if (hasBusinessCookie || existingBranchId) {
-        router.replace("/dashboard/broker")
-        return
+        logAuthDebug("[business-register] clearing stale business hints before form init", {
+          hasBusinessCookie,
+          hasBranchId: Boolean(existingBranchId),
+        })
+        clearBusinessRegistrationHints()
       }
 
       const verifiedMobile = getJsonCookie("verified_mobile")
@@ -769,7 +1113,7 @@ export default function BusinessRegisterPage() {
       active = false
       if (timer) window.clearTimeout(timer)
     }
-  }, [ensureAuthSessionReady, router])
+  }, [applyUserProfile, ensureAuthSessionReady, router])
 
   useEffect(() => {
     const fromSession = getResolvedCountryCode()
@@ -935,65 +1279,6 @@ export default function BusinessRegisterPage() {
       active = false
     }
   }, [debouncedBusinessName])
-
-  const ensureAuthSessionReady = useCallback(async () => {
-    const hasAccessToken = () => Boolean(String(getAccessToken() || "").trim())
-
-    const tryRefreshAccessToken = async () => {
-      try {
-        await refreshAccessToken()
-        return true
-      } catch (err) {
-        const code = String(err?.response?.data?.code || err?.data?.code || "").trim().toUpperCase()
-        if (code === "REFRESH_LIMIT_REACHED") {
-          clearRefreshBudget()
-          try {
-            await refreshAccessToken()
-            return true
-          } catch {
-            return false
-          }
-        }
-        return false
-      }
-    }
-
-    const ready = await ensureSessionReady({ force: true })
-    if (ready && !hasAccessToken()) {
-      await tryRefreshAccessToken()
-    }
-
-    if (ready) return true
-
-    try {
-      const waitResult = await waitForAuthCookies()
-      if (waitResult?.ok) {
-        const retried = await ensureSessionReady({ force: true })
-        if (retried && !hasAccessToken()) {
-          await tryRefreshAccessToken()
-        }
-        return retried
-      }
-    } catch {
-      // ignore cookie wait failures
-    }
-
-    try {
-      const hint = await getSessionHint({ force: true })
-      if (hint?.hasRefreshSession || hint?.hasCsrfCookie) {
-        await tryRefreshAccessToken()
-        const retried = await ensureSessionReady({ force: true })
-        if (retried && !hasAccessToken()) {
-          await tryRefreshAccessToken()
-        }
-        return retried
-      }
-    } catch {
-      // ignore session hint failures
-    }
-
-    return false
-  }, [])
 
   const handleEmailVerify = async () => {
     const email = form.businessEmail.trim()
@@ -1605,99 +1890,14 @@ export default function BusinessRegisterPage() {
             maxAge: 60 * 60 * 24 * 30,
             path: "/",
           })
-          // Try to hydrate client session (refresh access token into memory)
-          let sessionHydrated = false
-          try {
-            sessionHydrated = await ensureSessionReady({ force: true })
-            if (!sessionHydrated) {
-              const waitResult = await waitForAuthCookies()
-              if (waitResult?.ok) {
-                sessionHydrated = await ensureSessionReady({ force: true })
-              }
-            }
-          } catch (e) {
-            console.warn("[business-register] ensureSessionReady failed after registration:", e)
-            sessionHydrated = false
-          }
-
-          // If initial hydration failed, attempt a manual /api/auth/refresh request
-          // which may return an access token in headers or body that our bootstrap
-          // flow missed due to timing or CSRF differences.
-          if (!sessionHydrated) {
-            try {
-              const productKey = String(getDefaultProductKey() || "property").trim()
-              const csrfToken = String(getCsrfToken() || "").trim()
-              const refreshUrl = `${String(API_BASE_URL || "").trim().replace(/\/+$/, "") || "/api"}/auth/refresh`
-              logAuthDebug("[business-register] manual refresh after register", {
-                hasCsrfHeader: Boolean(csrfToken),
-              })
-              const refreshLock = await acquireRefreshLock({ source: "business-register" })
-              if (!refreshLock.acquired) {
-                throw new Error("Refresh lock unavailable")
-              }
-
-              let refreshResp
-              try {
-                refreshResp = await fetch(refreshUrl, {
-                  method: "POST",
-                  credentials: "include",
-                  cache: "no-store",
-                  headers: {
-                    "content-type": "application/json",
-                    "x-product-key": productKey,
-                    ...buildCsrfHeaders(csrfToken),
-                  },
-                  body: JSON.stringify({ product_key: productKey }),
-                })
-              } finally {
-                releaseRefreshLock(refreshLock.id)
-              }
-
-              let refreshPayload = null
-              try {
-                refreshPayload = await refreshResp.clone().json()
-              } catch {
-                refreshPayload = null
-              }
-
-              // Prefer Authorization header
-              const respAuth = String(
-                refreshResp.headers.get("authorization") || refreshResp.headers.get("Authorization") || ""
-              ).trim()
-              const respHeaderToken = respAuth && /^Bearer\s+/i.test(respAuth)
-                ? respAuth.replace(/^Bearer\s+/i, "").trim()
-                : respAuth
-
-              const respBodyToken = String(
-                refreshPayload?.access_token || refreshPayload?.accessToken || refreshPayload?.token || refreshPayload?.jwt || ""
-              ).trim()
-
-              const finalRefreshToken = respHeaderToken || respBodyToken || ""
-              if (finalRefreshToken) {
-                try {
-                  hydrateAuthSession({ accessToken: finalRefreshToken, broadcast: true })
-                } catch (e) {
-                  // ignore
-                }
-              }
-
-              // Retry session hydrate after manual refresh attempt
-              try {
-                sessionHydrated = await ensureSessionReady({ force: true })
-              } catch (e) {
-                sessionHydrated = false
-              }
-            } catch (manErr) {
-              console.warn("[business-register] manual refresh attempt failed:", manErr)
-            }
-          }
-
-          notifyAuthChanged({ force: true })
-          if (!sessionHydrated) {
-            logAuthDebug("[business-register] session not hydrated; continuing with cookie session")
-            finalizeRegistration({ router, businessId, branchId: createdBranchId })
+          const profileConfirmed = await confirmRegisteredBusinessProfile({
+            expectedBranchId: createdBranchId,
+          })
+          if (!profileConfirmed) {
+            redirectToBusinessRegisterLogin(router, "/dashboard/broker")
             return
           }
+
           finalizeRegistration({ router, businessId, branchId: createdBranchId })
         },
         onError: (err) => {
@@ -1742,21 +1942,10 @@ export default function BusinessRegisterPage() {
                   path: "/",
                 })
 
-                let recoveredSession = false
-                try {
-                  recoveredSession = await ensureSessionReady({ force: true })
-                  if (!recoveredSession) {
-                    const waitResult = await waitForAuthCookies()
-                    if (waitResult?.ok) {
-                      recoveredSession = await ensureSessionReady({ force: true })
-                    }
-                  }
-                } catch {
-                  recoveredSession = false
-                }
-
-                notifyAuthChanged({ force: true })
-                if (!recoveredSession) {
+                const recoveredProfile = await confirmRegisteredBusinessProfile({
+                  expectedBranchId: createdBranchId,
+                })
+                if (!recoveredProfile) {
                   redirectToBusinessRegisterLogin(router, "/dashboard/broker")
                   return
                 }

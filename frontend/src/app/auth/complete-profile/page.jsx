@@ -24,7 +24,6 @@ import { signupUser } from "@/app/auth/auth-service/signup.service"
 import { ensureSessionReady } from "@/app/auth/auth-service/auth.bootstrap"
 import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.service"
 import { authApi } from "@/lib/api/client"
-import { API } from "@/lib/config/apiPaths"
 import { getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { authStore } from "@/app/auth/auth-service/store/authStore"
 import { getAuthAppUrl, getListingAppUrl } from "@/lib/core/appUrls"
@@ -48,7 +47,8 @@ import {
 const LANG_MAP = { eng, guj, hindi }
 const LANGUAGE_STORAGE_KEY = "auth_language"
 const RETURN_TO_COOKIE = "auth_return_to"
-const OTP_PURPOSE_SIGNUP_OR_LOGIN = 0
+const OTP_PURPOSE_SIGNUP = 0
+const OTP_PURPOSE_LOGIN = 0
 const TERMS_TEXT_PATH = "/legal/terms-conditions-property.txt"
 const LISTING_APP_ORIGIN = (() => {
   try {
@@ -91,6 +91,14 @@ const isAge13Plus = (dob) => {
   }
 
   return age >= 13
+}
+
+const normalizeMobileOtpPurpose = (value, fallback = OTP_PURPOSE_LOGIN) => {
+  const parsed = Number(value)
+  if (parsed === OTP_PURPOSE_SIGNUP || parsed === OTP_PURPOSE_LOGIN) {
+    return parsed
+  }
+  return fallback
 }
 
 const resolveVerifiedMobile = () => {
@@ -152,6 +160,80 @@ const resolveRedirectTarget = (target) => {
   return getListingAppUrl("/home")
 }
 
+const isDashboardTarget = (target) => {
+  const safeTarget = String(target || "").trim()
+  if (!safeTarget) return false
+  if (safeTarget.startsWith("/dashboard")) return true
+
+  try {
+    const parsed = new URL(safeTarget)
+    return String(parsed.pathname || "").startsWith("/dashboard")
+  } catch {
+    return false
+  }
+}
+
+const hasBusinessRegistrationPayload = (payload = null) => {
+  const candidates = [
+    payload,
+    payload?.data,
+    payload?.result,
+    payload?.payload,
+    payload?.response,
+    payload?.session,
+    payload?.user,
+    payload?.profile,
+    payload?.business,
+    payload?.data?.user,
+    payload?.data?.profile,
+    payload?.data?.business,
+  ]
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue
+
+    const boolHints = [
+      candidate?.is_business_registered,
+      candidate?.isBusinessRegistered,
+      candidate?.business_registered,
+      candidate?.businessRegistered,
+      candidate?.has_business,
+      candidate?.hasBusiness,
+    ]
+    if (boolHints.some((value) => value === true || String(value || "").trim().toLowerCase() === "true")) {
+      return true
+    }
+
+    const idHints = [
+      candidate?.business_id,
+      candidate?.businessId,
+      candidate?.current_business_id,
+      candidate?.currentBusinessId,
+      candidate?.branch_id,
+      candidate?.branchId,
+      candidate?.business?.id,
+      candidate?.business?.business_id,
+    ]
+    if (idHints.some((value) => String(value || "").trim().length > 0)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+const clearBusinessRegistrationHints = () => {
+  ;[
+    "business_registered",
+    "business_id",
+    "branch_id",
+    "business_name",
+    "business_type",
+    "business_location",
+    "dashboard_mode",
+  ].forEach((key) => removeCookie(key))
+}
+
 export default function CompleteProfilePage() {
   const router = useRouter()
   const lockedProductKey = getDefaultProductKey()
@@ -182,6 +264,7 @@ export default function CompleteProfilePage() {
   const [termsModalOpen, setTermsModalOpen] = useState(false)
 
   const [mobileVerifiedData, setMobileVerifiedData] = useState({ country_code: "", mobile_number: "" })
+  const [mobileVerificationPurpose, setMobileVerificationPurpose] = useState(OTP_PURPOSE_LOGIN)
   const [verifiedMobileLabel, setVerifiedMobileLabel] = useState("")
   const [hasFreshSignupOtpProof, setHasFreshSignupOtpProof] = useState(false)
 
@@ -190,16 +273,26 @@ export default function CompleteProfilePage() {
   const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition()
 
   const redirectToPostLoginTarget = useCallback(async ({ sourcePayload = null } = {}) => {
+    const hasRegisteredBusiness = hasBusinessRegistrationPayload(sourcePayload)
+    if (!hasRegisteredBusiness) {
+      clearBusinessRegistrationHints()
+    }
+
     const target = resolveRedirectTarget(getPostLoginTarget())
-    if (target === "/dashboard" || target.startsWith("/dashboard/")) {
+    const effectiveTarget =
+      !hasRegisteredBusiness && isDashboardTarget(target)
+        ? getListingAppUrl("/home")
+        : target
+
+    if (effectiveTarget === "/dashboard" || effectiveTarget.startsWith("/dashboard/")) {
       removeCookie(RETURN_TO_COOKIE)
       clearAuthFlowContext()
-      router.replace(target)
+      router.replace(effectiveTarget)
       return true
     }
     try {
       const redirected = await redirectToListingWithBridgeToken({
-        returnTo: target,
+        returnTo: effectiveTarget,
         sourcePayload,
       })
       if (!redirected) {
@@ -284,9 +377,9 @@ export default function CompleteProfilePage() {
     const signupOtpProof = getJsonCookie("signup_otp_verified")
     const proofCc = String(signupOtpProof?.country_code || "").trim()
     const proofMobile = String(signupOtpProof?.mobile_number || "").trim()
-    const proofPurpose = Number(signupOtpProof?.purpose ?? -1)
+    const proofPurpose = normalizeMobileOtpPurpose(signupOtpProof?.purpose, OTP_PURPOSE_SIGNUP)
     const hasAcceptedProofPurpose =
-      proofPurpose === OTP_PURPOSE_SIGNUP_OR_LOGIN || proofPurpose === 1
+      proofPurpose === OTP_PURPOSE_SIGNUP || proofPurpose === OTP_PURPOSE_LOGIN
     let hasValidProof =
       proofCc === cc &&
       proofMobile === mobile &&
@@ -302,7 +395,7 @@ export default function CompleteProfilePage() {
           {
             country_code: cc,
             mobile_number: mobile,
-            purpose: OTP_PURPOSE_SIGNUP_OR_LOGIN,
+            purpose: OTP_PURPOSE_SIGNUP,
             verified_at: Date.now(),
           },
           { maxAge: 60 * 60 * 24 * 7, path: "/" }
@@ -321,7 +414,7 @@ export default function CompleteProfilePage() {
           {
             country_code: cc,
             mobile_number: mobile,
-            purpose: OTP_PURPOSE_SIGNUP_OR_LOGIN,
+            purpose: OTP_PURPOSE_SIGNUP,
             verified_at: Date.now(),
           },
           { maxAge: 60 * 60 * 24 * 7, path: "/" }
@@ -336,7 +429,40 @@ export default function CompleteProfilePage() {
       return
     }
 
+    const effectiveProofPurpose = OTP_PURPOSE_SIGNUP
+    setCookie("mobile_verified", "true", {
+      maxAge: 60 * 60 * 24 * 7,
+      path: "/",
+    })
+    setCookie("otp_cc", cc, {
+      maxAge: 60 * 60 * 24 * 7,
+      path: "/",
+    })
+    setCookie("otp_mobile", mobile, {
+      maxAge: 60 * 60 * 24 * 7,
+      path: "/",
+    })
+    setJsonCookie(
+      "verified_mobile",
+      {
+        country_code: cc,
+        mobile_number: mobile,
+      },
+      { maxAge: 60 * 60 * 24 * 7, path: "/" }
+    )
+    setJsonCookie(
+      "signup_otp_verified",
+      {
+        country_code: cc,
+        mobile_number: mobile,
+        purpose: effectiveProofPurpose,
+        verified_at: Number(signupOtpProof?.verified_at || Date.now()),
+      },
+      { maxAge: 60 * 60 * 24 * 7, path: "/" }
+    )
+
     setMobileVerifiedData({ country_code: cc, mobile_number: mobile })
+    setMobileVerificationPurpose(effectiveProofPurpose)
     setVerifiedMobileLabel(`+${cc} ${mobile}`)
     setSubmitError("")
     setHasFreshSignupOtpProof(true)
@@ -438,9 +564,7 @@ export default function CompleteProfilePage() {
 
   const finalizeAuthenticatedSession = async () => {
     try {
-      await authApi.get(API.PROFILE, {
-        skipAuthRedirect: true,
-      })
+      await authApi.me({ retryOn401: false })
     } catch {
       // Refresh success is enough for session finalization; profile check is best effort.
     }
@@ -487,6 +611,7 @@ export default function CompleteProfilePage() {
         const response = await signupUser({
           country_code: cc,
           mobile_number: mobile,
+          purpose: mobileVerificationPurpose,
           first_name: form.firstName.trim(),
           last_name: form.lastName.trim(),
           email: form.email.trim(),
@@ -524,6 +649,7 @@ export default function CompleteProfilePage() {
             removeCookie("otp_mobile")
             removeCookie("mobile_verified")
             removeCookie("signup_otp_verified")
+            removeCookie("verified_mobile")
             removeCookie("verified_email")
             router.replace(getAuthAppUrl("/auth/login"))
             return
@@ -535,6 +661,7 @@ export default function CompleteProfilePage() {
           removeCookie("otp_mobile")
           removeCookie("mobile_verified")
           removeCookie("signup_otp_verified")
+          removeCookie("verified_mobile")
           removeCookie("verified_email")
 
           await redirectToPostLoginTarget({ sourcePayload: response?.data || response })
@@ -561,6 +688,7 @@ export default function CompleteProfilePage() {
             removeCookie("otp_context")
             removeCookie("otp_cc")
             removeCookie("otp_mobile")
+            removeCookie("verified_mobile")
             void redirectToPostLoginTarget({ sourcePayload: err?.response?.data || null })
             return
           }

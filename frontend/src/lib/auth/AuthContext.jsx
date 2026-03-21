@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { authApi, setAuthFailureHandler } from "@/lib/auth/apiClient";
 import { API } from "@/lib/config/apiPaths";
 import { notifyAuthChanged, removeCookie, subscribeAuthState } from "@/services/auth.service";
@@ -17,6 +18,113 @@ const AUTH_PROBE_FAILURE_COOLDOWN_MS = 5000;
 
 let inFlightRestoreSessionPromise = null;
 let lastAuthProbeFailureAt = 0;
+
+const readBearerTokenFromHeaders = (headers) => {
+  const headerAuth = String(
+    headers?.get?.("authorization") || headers?.get?.("Authorization") || ""
+  ).trim();
+
+  if (!headerAuth) return "";
+  return /^Bearer\s+/i.test(headerAuth)
+    ? headerAuth.replace(/^Bearer\s+/i, "").trim()
+    : headerAuth;
+};
+
+const readCsrfTokenFromHeaders = (headers) =>
+  String(
+    headers?.get?.("x-csrf-token") ||
+      headers?.get?.("x-xsrf-token") ||
+      headers?.get?.("csrf-token") ||
+      ""
+  ).trim();
+
+const hydrateSessionFromProfileResponse = (response) => {
+  const accessToken = readBearerTokenFromHeaders(response?.headers);
+  const csrfToken = readCsrfTokenFromHeaders(response?.headers);
+
+  if (accessToken || csrfToken) {
+    hydrateAuthSession({
+      accessToken,
+      csrfToken,
+      broadcast: false,
+    });
+  }
+};
+
+const readProfilePayload = async (response) => {
+  try {
+    return await response.clone().json();
+  } catch {
+    return null;
+  }
+};
+
+const isPanelAccessRestrictedPayload = (payload = null) => {
+  const message = String(
+    payload?.error?.message || payload?.message || ""
+  ).trim();
+  return /no active branch associated/i.test(message);
+};
+
+const isBusinessPanelRoute = (pathname = "") => {
+  const safePath = String(pathname || "").trim();
+  return (
+    safePath.startsWith("/dashboard/broker") ||
+    safePath.startsWith("/auth/business-register")
+  );
+};
+
+const shouldTreatForbiddenProfileAsAuthenticated = ({
+  pathname = "",
+  payload = null,
+} = {}) => {
+  if (isPanelAccessRestrictedPayload(payload)) return true;
+  if (!isBusinessPanelRoute(pathname)) return false;
+
+  const code = String(payload?.error?.code || payload?.code || "").trim().toLowerCase();
+  const message = String(payload?.error?.message || payload?.message || "").trim().toLowerCase();
+  if (!code && !message) return true;
+
+  return (
+    code.includes("access_denied") ||
+    code.includes("forbidden") ||
+    message.includes("access denied") ||
+    message.includes("forbidden") ||
+    message.includes("branch") ||
+    message.includes("business")
+  );
+};
+
+const isLimitedAuthenticatedProfilePayload = (payload = null) => {
+  const candidates = [
+    payload,
+    payload?.data,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+
+    const limitedHints = [
+      candidate?.auth_limited,
+      candidate?.limited,
+      candidate?.branch_required,
+      candidate?.panel_access_restricted,
+    ];
+    const message = String(
+      candidate?.error?.message || candidate?.message || ""
+    ).trim();
+
+    const hasLimitedFlag = limitedHints.some(
+      (value) => value === true || String(value || "").trim().toLowerCase() === "true"
+    );
+
+    if (hasLimitedFlag || /no active branch associated/i.test(message)) {
+      return true;
+    }
+  }
+
+  return false;
+};
 
 const buildAuthProbeHeaders = () => {
   const headers = new Headers();
@@ -35,12 +143,27 @@ const buildAuthProbeHeaders = () => {
 };
 
 export function AuthProvider({ children }) {
+  const pathname = usePathname();
   const [status, setStatus] = useState("logged_out");
   const [user, setUser] = useState(null);
   const [isReady, setIsReady] = useState(false);
+  const shouldSkipProfileRestore = String(pathname || "").startsWith("/auth/business-register");
 
   const applyUserProfile = useCallback((profile) => {
-    const nextUser = profile?.data || profile?.user || profile || null;
+    if (isLimitedAuthenticatedProfilePayload(profile)) {
+      setUser(null);
+      setStatus("authenticated");
+      return true;
+    }
+
+    const nextUser =
+      profile?.data?.profile ||
+      profile?.data?.user ||
+      profile?.profile ||
+      profile?.user ||
+      profile?.data ||
+      profile ||
+      null;
 
     if (nextUser) {
       setUser(nextUser);
@@ -72,6 +195,12 @@ export function AuthProvider({ children }) {
 
     const runRestore = async () => {
       try {
+        if (shouldSkipProfileRestore && !force) {
+          lastAuthProbeFailureAt = 0;
+          setIsReady(true);
+          return false;
+        }
+
         setStatus("restoring");
 
         // Single-flight bootstrap: ensure refresh-cookie session is converted into a usable
@@ -102,13 +231,35 @@ export function AuthProvider({ children }) {
         }
 
         if (!response.ok) {
+          const payload = await readProfilePayload(response);
+          if (
+            Number(response.status || 0) === 403 &&
+            shouldTreatForbiddenProfileAsAuthenticated({ pathname, payload })
+          ) {
+            hydrateSessionFromProfileResponse(response);
+            lastAuthProbeFailureAt = 0;
+            setUser(null);
+            setStatus("authenticated");
+            clearRefreshBudget();
+            return true;
+          }
+
           lastAuthProbeFailureAt = Date.now();
           setUser(null);
           setStatus("logged_out");
           return false;
         }
 
+        hydrateSessionFromProfileResponse(response);
+
         const profile = await response.json();
+        if (isLimitedAuthenticatedProfilePayload(profile)) {
+          lastAuthProbeFailureAt = 0;
+          setUser(null);
+          setStatus("authenticated");
+          clearRefreshBudget();
+          return true;
+        }
         hydrateAuthSession({
           accessToken: getAccessToken(),
           csrfToken: getCsrfToken(),
@@ -136,7 +287,7 @@ export function AuthProvider({ children }) {
     });
 
     return inFlightRestoreSessionPromise;
-  }, [applyUserProfile]);
+  }, [applyUserProfile, pathname, shouldSkipProfileRestore]);
 
   const logout = useCallback(async ({ redirect } = { redirect: false }) => {
     try {

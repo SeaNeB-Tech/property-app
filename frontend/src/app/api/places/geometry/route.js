@@ -4,14 +4,7 @@ const GOOGLE_PLACES_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/de
 const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
 const DEFAULT_USER_AGENT = "SeaNeB-Property-App";
 
-const getApiKey = () =>
-  String(
-    process.env.GOOGLE_MAPS_API_KEY ||
-      process.env.GOOGLE_PLACES_API_KEY ||
-      process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
-      process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY ||
-      ""
-  ).trim();
+const getApiKey = () => "";
 
 const normalizeCoordinate = (value) => {
   if (value === "" || value === null || value === undefined) return "";

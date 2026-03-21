@@ -4,6 +4,9 @@ import { CSRF_COOKIE_KEYS, REFRESH_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 import { getCookieOptions } from "@/lib/auth/cookieOptions";
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
 const REFRESH_COOKIE_NAME = "refresh_token_property";
+const CLEAR_AUTH_COOKIE_KEYS = Array.from(
+  new Set([...REFRESH_COOKIE_KEYS, ...CSRF_COOKIE_KEYS])
+);
 
 // --- Server-side refresh deduplication to prevent race conditions on rapid reloads ---
 const _refreshDedup = new Map();
@@ -63,6 +66,22 @@ const getCookieContext = (request) => ({
   host: getRequestHost(request),
   isSecure: getRequestProtocol(request) === "https",
 });
+
+const clearAuthCookiesOnResponse = (response, request) => {
+  const cookieOpts = getCookieOptions(request);
+  for (const name of CLEAR_AUTH_COOKIE_KEYS) {
+    response.cookies.set({
+      name,
+      value: "",
+      httpOnly: REFRESH_COOKIE_KEYS.includes(name),
+      sameSite: cookieOpts.sameSite,
+      secure: cookieOpts.secure,
+      ...(cookieOpts?.domain ? { domain: cookieOpts.domain } : {}),
+      path: "/",
+      maxAge: 0,
+    });
+  }
+};
 
 const normalizeHost = (host) => String(host || "").trim().replace(/:\d+$/, "").toLowerCase();
 
@@ -743,7 +762,7 @@ export async function POST(request) {
   const invalidRefresh = status === 401 || status === 403;
   if (invalidRefresh) {
     _completeDedup(false);
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         error: {
           code: "INVALID_REFRESH_TOKEN",
@@ -758,6 +777,8 @@ export async function POST(request) {
       },
       { status: 401, headers: responseHeaders }
     );
+    clearAuthCookiesOnResponse(response, request);
+    return response;
   }
 
   _completeDedup(false);

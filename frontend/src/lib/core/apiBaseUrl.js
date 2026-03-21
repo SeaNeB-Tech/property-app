@@ -1,13 +1,5 @@
-const BACKEND_API_URL =
-  process.env.BACKEND_API_URL ||
-  process.env.NEXT_PUBLIC_BACKEND_API_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "";
 const DEV_API_URL = process.env.NEXT_PUBLIC_DEV_URL || "";
-const CENTRAL_API_URL =
-  process.env.NEXT_PUBLIC_CENTRAL_URL ||
-  process.env.NEXT_PUBLIC_CENTRAL_API_URL ||
-  "";
+const CENTRAL_API_URL = process.env.NEXT_PUBLIC_CENTRAL_URL || "";
 const DEFAULT_FALLBACK_URL = "https://central-api.seaneb.com/api/v1";
 
 const normalizeUrl = (value) => String(value || "").trim().replace(/\/+$/, "");
@@ -32,8 +24,6 @@ const normalizeBasePath = (value) => {
   return `/${raw.replace(/^\/+|\/+$/g, "")}`;
 };
 const resolveClientBasePath = () => {
-  const envBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || "");
-  if (envBasePath) return envBasePath;
   if (typeof window !== "undefined") {
     const nextData = window.__NEXT_DATA__ || {};
     const dataBasePath = normalizeBasePath(nextData?.basePath || "");
@@ -50,17 +40,17 @@ const isUsableUrl = (value) => {
   }
 };
 
-const NEXT_ENV = String(process.env.NEXT_ENV || process.env.EXT_ENV || "")
+const NEXT_ENV = String(process.env.NEXT_ENV || "")
   .trim()
   .toLowerCase();
 const API_BASE =
   NEXT_ENV === "development"
-    ? DEV_API_URL || CENTRAL_API_URL || BACKEND_API_URL
-    : CENTRAL_API_URL || DEV_API_URL || BACKEND_API_URL;
+    ? DEV_API_URL || CENTRAL_API_URL
+    : CENTRAL_API_URL || DEV_API_URL;
 const API_FALLBACK =
   NEXT_ENV === "development"
-    ? CENTRAL_API_URL || DEV_API_URL || BACKEND_API_URL
-    : DEV_API_URL || CENTRAL_API_URL || BACKEND_API_URL;
+    ? CENTRAL_API_URL || DEV_API_URL
+    : DEV_API_URL || CENTRAL_API_URL;
 
 const pushUnique = (list, value) => {
   const normalized = normalizeApiUrl(value);
@@ -69,14 +59,10 @@ const pushUnique = (list, value) => {
 };
 
 const API_REMOTE_CANDIDATES = [];
-pushUnique(API_REMOTE_CANDIDATES, BACKEND_API_URL);
 pushUnique(API_REMOTE_CANDIDATES, API_BASE);
 pushUnique(API_REMOTE_CANDIDATES, API_FALLBACK);
 pushUnique(API_REMOTE_CANDIDATES, CENTRAL_API_URL);
 pushUnique(API_REMOTE_CANDIDATES, DEV_API_URL);
-pushUnique(API_REMOTE_CANDIDATES, process.env.NEXT_PUBLIC_API_BASE_URL);
-pushUnique(API_REMOTE_CANDIDATES, process.env.NEXT_PUBLIC_CENTRAL_API_URL);
-pushUnique(API_REMOTE_CANDIDATES, process.env.NEXT_PUBLIC_DEV_URL);
 
 if (!API_REMOTE_CANDIDATES.length) {
   pushUnique(API_REMOTE_CANDIDATES, DEFAULT_FALLBACK_URL);
@@ -92,7 +78,7 @@ export const API_REMOTE_CANDIDATE_BASE_URLS = API_REMOTE_CANDIDATES;
 const CLIENT_BASE_PATH =
   typeof window !== "undefined"
     ? resolveClientBasePath()
-    : normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || "");
+    : "";
 
 export const API_BASE_URL =
   typeof window !== "undefined"

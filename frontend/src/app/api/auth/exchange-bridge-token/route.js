@@ -268,12 +268,8 @@ export async function POST(req) {
       API_REMOTE_BASE_URL,
       API_REMOTE_FALLBACK_BASE_URL,
       env: {
-        BACKEND_API_URL: process.env.BACKEND_API_URL,
-        NEXT_PUBLIC_BACKEND_API_URL: process.env.NEXT_PUBLIC_BACKEND_API_URL,
-        NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
         NEXT_PUBLIC_DEV_URL: process.env.NEXT_PUBLIC_DEV_URL,
         NEXT_PUBLIC_CENTRAL_URL: process.env.NEXT_PUBLIC_CENTRAL_URL,
-        NEXT_PUBLIC_CENTRAL_API_URL: process.env.NEXT_PUBLIC_CENTRAL_API_URL,
         NEXT_ENV: process.env.NEXT_ENV,
       },
     });

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { hydrateAuthSession } from "@/lib/api/client";
+import { getAllowedReturnOrigins, getPrimaryListingOrigin } from "@/lib/postLoginRedirect";
 import { clearAuthFailureArtifacts, shouldClearAuthOnError } from "@/services/auth.service";
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
 
@@ -10,31 +11,8 @@ const AUTH_SSO_RESULT_KEY = "seaneb_sso_exchange_result";
 const AUTH_SSO_MESSAGE_TYPE = "seaneb:sso:exchange";
 const SSO_TOKEN_ONCE_KEY = "seaneb_sso_bridge_token_used";
 
-const LISTING_APP_ORIGIN = (() => {
-  try {
-    return new URL(String(process.env.NEXT_PUBLIC_LISTING_URL || "").trim()).origin;
-  } catch {
-    return "";
-  }
-})();
-
-const ALLOWED_SOURCE_ORIGINS = Array.from(
-  new Set(
-    String(process.env.NEXT_PUBLIC_ALLOWED_RETURN_ORIGINS || "")
-      .split(",")
-      .map((item) => String(item || "").trim())
-      .filter(Boolean)
-      .map((origin) => {
-        try {
-          return new URL(origin).origin;
-        } catch {
-          return "";
-        }
-      })
-      .filter(Boolean)
-      .concat(LISTING_APP_ORIGIN ? [LISTING_APP_ORIGIN] : [])
-  )
-);
+const LISTING_APP_ORIGIN = getPrimaryListingOrigin();
+const ALLOWED_SOURCE_ORIGINS = getAllowedReturnOrigins();
 
 const resolveSafeSource = (value) => {
   const source = String(value || "").trim();

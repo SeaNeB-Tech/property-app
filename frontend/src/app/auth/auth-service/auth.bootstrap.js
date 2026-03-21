@@ -12,8 +12,7 @@ import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
 import { acquireRefreshLock, releaseRefreshLock } from "@/lib/auth/refreshLock";
 
 const PRODUCT_KEY = process.env.NEXT_PUBLIC_PRODUCT_KEY?.trim() || "property";
-const AUTH_DEBUG =
-  String(process.env.NEXT_PUBLIC_AUTH_DEBUG || "").trim().toLowerCase() === "true";
+const AUTH_DEBUG = false;
 
 const logAuthDebug = (...args) => {
   if (!AUTH_DEBUG || typeof console === "undefined") return;
@@ -211,6 +210,40 @@ const buildApiPath = (path) => {
   return base ? `${base}${safePath}` : safePath;
 };
 
+const readBearerTokenFromHeaders = (headers) => {
+  const headerAuth = String(
+    headers?.get?.("authorization") || headers?.get?.("Authorization") || ""
+  ).trim();
+
+  if (!headerAuth) return "";
+  return /^Bearer\s+/i.test(headerAuth)
+    ? headerAuth.replace(/^Bearer\s+/i, "").trim()
+    : headerAuth;
+};
+
+const readCsrfTokenFromHeaders = (headers) =>
+  String(
+    headers?.get?.("x-csrf-token") ||
+      headers?.get?.("x-xsrf-token") ||
+      headers?.get?.("csrf-token") ||
+      ""
+  ).trim();
+
+const hydrateSessionFromFetchResponse = (response) => {
+  const accessToken = readBearerTokenFromHeaders(response?.headers);
+  const csrfToken = readCsrfTokenFromHeaders(response?.headers);
+
+  if (accessToken || csrfToken) {
+    hydrateAuthSession({
+      accessToken,
+      csrfToken,
+      broadcast: false,
+    });
+  }
+
+  return { accessToken, csrfToken };
+};
+
 const buildAuthProbeHeaders = () => {
   const headers = new Headers();
 
@@ -243,12 +276,18 @@ const hasClientSession = () => {
 };
 
 const requestMe = async () => {
-  return fetch(buildApiPath("/auth/me"), {
+  const response = await fetch(buildApiPath("/auth/me"), {
     method: "GET",
     credentials: "include",
     cache: "no-store",
     headers: buildAuthProbeHeaders(),
   });
+
+  if (response.ok) {
+    hydrateSessionFromFetchResponse(response);
+  }
+
+  return response;
 };
 
 const requestRefresh = async () => {
@@ -302,6 +341,58 @@ const readRefreshPayload = async (response) => {
   }
 };
 
+const readResponsePayload = async (response) => {
+  try {
+    return await response.clone().json();
+  } catch {
+    return null;
+  }
+};
+
+const isPanelAccessRestrictedPayload = (payload = null) => {
+  const message = String(
+    payload?.error?.message || payload?.message || ""
+  ).trim();
+  return /no active branch associated/i.test(message);
+};
+
+const getCurrentPathname = () => {
+  if (typeof window === "undefined") return "";
+  return String(window.location.pathname || "").trim();
+};
+
+const isBusinessPanelRoute = (pathname = getCurrentPathname()) => {
+  const safePath = String(pathname || "").trim();
+  return (
+    safePath.startsWith("/dashboard/broker") ||
+    safePath.startsWith("/auth/business-register")
+  );
+};
+
+const shouldTreatForbiddenProfileAsAuthenticated = (payload = null) => {
+  if (isPanelAccessRestrictedPayload(payload)) return true;
+  if (!isBusinessPanelRoute()) return false;
+
+  const code = String(payload?.error?.code || payload?.code || "").trim().toLowerCase();
+  const message = String(payload?.error?.message || payload?.message || "").trim().toLowerCase();
+  if (!code && !message) return true;
+
+  return (
+    code.includes("access_denied") ||
+    code.includes("forbidden") ||
+    message.includes("access denied") ||
+    message.includes("forbidden") ||
+    message.includes("branch") ||
+    message.includes("business")
+  );
+};
+
+const isPanelAccessRestrictedResponse = async (response) => {
+  if (Number(response?.status || 0) !== 403) return false;
+  const payload = await readResponsePayload(response);
+  return shouldTreatForbiddenProfileAsAuthenticated(payload);
+};
+
 export const ensureSessionReady = async ({ force = false } = {}) => {
   const now = Date.now();
 
@@ -324,6 +415,9 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
         if (postLockMe.ok) {
           return true;
         }
+        if (await isPanelAccessRestrictedResponse(postLockMe)) {
+          return true;
+        }
       }
 
       // Fast-path: if there are no client-side hints of a session (in-memory
@@ -335,10 +429,8 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
         String(getInMemoryAccessToken() || "").trim()
       );
 
-      const hasCsrfCookie = hasCsrfTokenCookie();
-
       let sessionHint = null;
-      if (!force && !hasAccessToken && !hasCsrfCookie) {
+      if (!force && !hasAccessToken) {
         sessionHint = await requestSessionHint({ force });
         if (!sessionHint?.hasRefreshSession) {
           lastFailureAt = Date.now();
@@ -357,9 +449,7 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
       if (
         sessionHint?.success &&
         !hasRefreshSession &&
-        !hasSessionCsrfCookie &&
-        !hasAccessToken &&
-        !hasCsrfCookie
+        !hasAccessToken
       ) {
         lastFailureAt = Date.now();
         return false;
@@ -448,7 +538,7 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
       let firstMe = null;
 
       const shouldRefreshFirst =
-        hasRefreshSession && !hasAccessToken && !hasCsrfCookie && !hasSessionCsrfCookie;
+        hasRefreshSession && !hasAccessToken;
 
       if (shouldRefreshFirst) {
         const refresh = await hydrateTokenFromRefresh();
@@ -458,6 +548,11 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
           if (firstMe.ok) {
             return true;
           }
+        }
+        if (refresh.invalidSession || [401, 403].includes(Number(refresh.refreshStatus || 0))) {
+          clearAccessToken();
+          lastFailureAt = Date.now();
+          return false;
         }
       }
 
@@ -483,6 +578,10 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
           return false;
         }
 
+        return true;
+      }
+
+      if (await isPanelAccessRestrictedResponse(firstMe)) {
         return true;
       }
 
@@ -546,6 +645,10 @@ export const ensureSessionReady = async ({ force = false } = {}) => {
         const retryMe = await requestMe();
 
         if (retryMe.ok) {
+          return true;
+        }
+
+        if (await isPanelAccessRestrictedResponse(retryMe)) {
           return true;
         }
 

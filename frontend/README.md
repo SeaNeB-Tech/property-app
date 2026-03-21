@@ -19,19 +19,18 @@ Open the URL configured in `NEXT_PUBLIC_APP_URL` with your browser to see the re
 
 ## Environment
 
-Set these variables for production-safe cookie behavior:
+Use the existing env keys below. Cookie and auth timing defaults are handled in code now, so you do not need extra cookie/api env aliases.
 
 ```env
-NEXT_PUBLIC_COOKIE_DOMAIN=property.seaneb.app
-NEXT_PUBLIC_COOKIE_PATH=/
-NEXT_PUBLIC_COOKIE_SAMESITE=None
 NEXT_PUBLIC_APP_URL=https://your-app-domain
 NEXT_PUBLIC_LISTING_URL=https://your-listing-domain
-NEXT_PUBLIC_API_BASE_URL=https://dev.seaneb.com/api/v1
+NEXT_ENV=development
+NEXT_PUBLIC_DEV_URL=https://dev.seaneb.com
+NEXT_PUBLIC_CENTRAL_URL=https://central-api.seaneb.com
+NEXT_PUBLIC_PRODUCT_KEY=property
 ```
 
-- If hosted on same origin under a subpath, set `NEXT_PUBLIC_COOKIE_PATH` to that path (example: `/panel`).
-- Keep cookie domain aligned with panel host.
+- In production, cookie defaults use the `.seaneb.com` parent domain automatically.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 

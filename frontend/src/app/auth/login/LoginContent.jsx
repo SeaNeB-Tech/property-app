@@ -20,7 +20,11 @@ import { sendOtp } from "@/app/auth/auth-service/otp.service";
 import { clearPreAuthCsrfCookies, getCookie, removeCookie, setCookie, setJsonCookie } from "@/services/auth.service";
 import { getListingAppUrl } from "@/lib/core/appUrls";
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition";
-import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect";
+import {
+  getAllowedReturnOrigins,
+  getPrimaryListingOrigin,
+  redirectToListingWithBridgeToken,
+} from "@/lib/postLoginRedirect";
 import { useAuth } from "@/lib/auth/AuthContext";
 import {
   getAuthFlowContext,
@@ -34,34 +38,12 @@ const LANG_MAP = { eng, guj, hindi };
 const LANGUAGE_STORAGE_KEY = "auth_language";
 const RETURN_TO_COOKIE = "auth_return_to";
 const POST_OTP_VERIFIED_COOKIE = "post_otp_verified";
-// Use shared signup/login purpose so first OTP can continue directly into complete-profile
-// without requiring a second mobile OTP verification.
+// The current auth entry flow uses the shared signup/login OTP purpose.
+// The backend complete-profile/signup handoff still depends on this value.
 const PURPOSE_LOGIN = 0;
 const MAIN_APP_REGISTER_SOURCE = "main-app-register";
-const LISTING_APP_ORIGIN = (() => {
-  try {
-    return new URL(String(process.env.NEXT_PUBLIC_LISTING_URL || "").trim()).origin;
-  } catch {
-    return "";
-  }
-})();
-const ALLOWED_RETURN_ORIGINS = Array.from(
-  new Set(
-    String(process.env.NEXT_PUBLIC_ALLOWED_RETURN_ORIGINS || "")
-      .split(",")
-      .map((value) => String(value || "").trim())
-      .filter(Boolean)
-      .map((value) => {
-        try {
-          return new URL(value).origin;
-        } catch {
-          return "";
-        }
-      })
-      .filter(Boolean)
-      .concat(LISTING_APP_ORIGIN ? [LISTING_APP_ORIGIN] : [])
-  )
-);
+const LISTING_APP_ORIGIN = getPrimaryListingOrigin();
+const ALLOWED_RETURN_ORIGINS = getAllowedReturnOrigins();
 
 const isSafeReturnTo = (value) => {
   const target = String(value || "").trim();
@@ -145,7 +127,7 @@ const getFriendlyOtpError = (err) => {
 
 export default function LoginContent({ initialHold = false } = {}) {
   const router = useRouter();
-  const { authInitialized, isAuthenticated, isLoading, restoreSession } = useAuth();
+  const { authInitialized, isAuthenticated, isLoading } = useAuth();
 
   const [language, setLanguage] = useState(() => {
     if (typeof window !== "undefined") {
@@ -193,10 +175,6 @@ export default function LoginContent({ initialHold = false } = {}) {
       setCookie(RETURN_TO_COOKIE, returnTo, { maxAge: 10 * 60, path: "/" });
     }
   }, []);
-
-  useEffect(() => {
-    void restoreSession();
-  }, [restoreSession]);
 
   useEffect(() => {
     let active = true;

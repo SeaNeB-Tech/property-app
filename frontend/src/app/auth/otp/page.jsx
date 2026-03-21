@@ -32,7 +32,7 @@ import {
 
 const LANG_MAP = { eng, guj, hindi };
 const PURPOSE_BUSINESS_MOBILE_VERIFY = 2;
-const PURPOSE_SIGNUP_OR_LOGIN = 0;
+const PURPOSE_LOGIN = 0;
 const LANGUAGE_STORAGE_KEY = "auth_language";
 const POST_OTP_VERIFIED_COOKIE = "post_otp_verified";
 const MAIN_APP_LOGIN_SOURCE = "main-app";
@@ -314,7 +314,7 @@ export default function OtpPage() {
               ? {
                   country_code: String((mobileLabel.split(" ")[0] || "").replace("+", "")).trim(),
                   mobile_number: String(mobileLabel.split(" ").slice(1).join(" ")).trim(),
-                  purpose: 0,
+                  purpose: PURPOSE_LOGIN,
                   via: otpVia,
                 }
               : null);
@@ -408,7 +408,7 @@ export default function OtpPage() {
                   {
                     country_code: String(contextSnapshot.country_code),
                     mobile_number: String(contextSnapshot.mobile_number),
-                    purpose: PURPOSE_SIGNUP_OR_LOGIN,
+                    purpose: PURPOSE_LOGIN,
                     verified_at: Date.now(),
                   },
                   { maxAge: 60 * 60 * 24 * 7, path: "/" }
