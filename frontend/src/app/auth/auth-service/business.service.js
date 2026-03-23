@@ -258,6 +258,16 @@ export const registerBusiness = async (data = {}) => {
   }
 }
 
+export const getOnboardingChargePreview = async () => {
+  const productKey = toText(getDefaultProductKey())
+
+  return withRecovery(() =>
+    businessApi.get("/v1/payment/onboarding-charge-preview", {
+      headers: getAuthHeaders({ includeProductKey: true, productKey }),
+    })
+  )
+}
+
 export const createBusinessBranch = async (data = {}) => {
   const businessId = toText(pickFirst(data.business_id, data.businessId))
   const placeId = toText(pickFirst(data.place_id, data.placeId))

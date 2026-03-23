@@ -6,7 +6,6 @@ import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
 const AUTH_COOKIE_KEYS = [
   ...CSRF_COOKIE_KEYS,
 ];
-const CSRF_STORAGE_KEY = "seaneb:auth:csrf_token";
 const parseCookies = () => {
   if (typeof window === "undefined") return {};
   const pairs = document.cookie.split("; ");
@@ -24,28 +23,16 @@ const parseCookies = () => {
   return cookieMap;
 };
 
-const readStoredCsrfToken = () => {
-  if (typeof window === "undefined") return "";
+const clearLegacyStoredCsrfToken = () => {
+  if (typeof window === "undefined") return;
   try {
-    return String(window.sessionStorage.getItem(CSRF_STORAGE_KEY) || "").trim();
+    window.sessionStorage.removeItem("seaneb:auth:csrf_token");
   } catch {
-    return "";
+    // Ignore storage cleanup errors
   }
 };
 
-const writeStoredCsrfToken = (token) => {
-  if (typeof window === "undefined") return;
-  const safeToken = String(token || "").trim();
-  try {
-    if (safeToken) {
-      window.sessionStorage.setItem(CSRF_STORAGE_KEY, safeToken);
-    } else {
-      window.sessionStorage.removeItem(CSRF_STORAGE_KEY);
-    }
-  } catch {
-    // Ignore storage write errors
-  }
-};
+clearLegacyStoredCsrfToken();
 
 const authStore = {
   accessToken: null,
@@ -71,9 +58,9 @@ const authStore = {
     return this.refreshToken || null;
   },
 
-  setRefreshToken(token) {
-    const safeToken = String(token || "").trim();
-    this.refreshToken = safeToken || null;
+  setRefreshToken() {
+    // Refresh token lifecycle is cookie-backed only.
+    this.refreshToken = null;
   },
 
   getSessionStartTime() {
@@ -103,26 +90,27 @@ const authStore = {
   },
 
   getCsrfToken() {
+    clearLegacyStoredCsrfToken();
+
     for (const key of CSRF_COOKIE_KEYS) {
       const cookieToken = String(getCookie(key) || "").trim();
       if (cookieToken) return cookieToken;
     }
-    const storedToken = readStoredCsrfToken();
-    if (storedToken) return storedToken;
     return this.csrfToken || null;
   },
 
   setCsrfToken(token) {
+    clearLegacyStoredCsrfToken();
+
     const safeToken = String(token || "").trim();
     this.csrfToken = safeToken || null;
-    writeStoredCsrfToken(safeToken);
   },
 
   clearAll() {
     this.accessToken = null;
     this.refreshToken = null;
     this.csrfToken = null;
-    writeStoredCsrfToken("");
+    clearLegacyStoredCsrfToken();
     AUTH_COOKIE_KEYS.forEach((key) => removeCookie(key));
   },
 
@@ -135,9 +123,6 @@ const authStore = {
         accessToken: getLength(this.accessToken),
         refreshToken: getLength(this.refreshToken),
         csrfToken: getLength(this.csrfToken),
-      },
-      storage: {
-        csrfToken: getLength(readStoredCsrfToken()),
       },
       cookies: {
         access_token: getLength(cookies.access_token),

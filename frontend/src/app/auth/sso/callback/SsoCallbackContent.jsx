@@ -11,11 +11,9 @@ const AUTH_SSO_RESULT_KEY = "seaneb_sso_exchange_result";
 const AUTH_SSO_MESSAGE_TYPE = "seaneb:sso:exchange";
 const SSO_TOKEN_ONCE_KEY = "seaneb_sso_bridge_token_used";
 
-const LISTING_APP_ORIGIN = getPrimaryListingOrigin();
-const ALLOWED_SOURCE_ORIGINS = getAllowedReturnOrigins();
-
 const resolveSafeSource = (value) => {
   const source = String(value || "").trim();
+  const allowedSourceOrigins = getAllowedReturnOrigins();
 
   if (!source) return "/dashboard";
 
@@ -31,8 +29,8 @@ const resolveSafeSource = (value) => {
     }
 
     if (
-      ALLOWED_SOURCE_ORIGINS.length &&
-      !ALLOWED_SOURCE_ORIGINS.includes(parsed.origin)
+      allowedSourceOrigins.length &&
+      !allowedSourceOrigins.includes(parsed.origin)
     ) {
       return "/dashboard";
     }
@@ -222,8 +220,9 @@ export default function SsoCallbackContent() {
         if (window.opener && !window.opener.closed) {
           try {
             const openerTarget = String(source || "").trim();
-            if (openerTarget.startsWith("/") && LISTING_APP_ORIGIN) {
-              window.opener.location.href = new URL(openerTarget, LISTING_APP_ORIGIN).toString();
+            const listingAppOrigin = getPrimaryListingOrigin();
+            if (openerTarget.startsWith("/") && listingAppOrigin) {
+              window.opener.location.href = new URL(openerTarget, listingAppOrigin).toString();
             } else if (/^https?:\/\//i.test(openerTarget)) {
               window.opener.location.href = openerTarget;
             }

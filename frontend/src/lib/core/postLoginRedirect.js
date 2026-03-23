@@ -7,26 +7,21 @@ import {
 } from "@/lib/api/client";
 import { postLoginSuccessToOpener } from "@/lib/auth/crossTabMessaging";
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { getListingAppOrigin } from "@/lib/core/appUrls";
 
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "property").trim() || "property";
 const AUTH_RETURN_TO_COOKIE = "auth_return_to";
-const LISTING_APP_ORIGIN = (() => {
-  try {
-    return new URL(String(process.env.NEXT_PUBLIC_LISTING_URL || "").trim()).origin;
-  } catch {
-    return "";
-  }
-})();
-const ALLOWED_RETURN_ORIGINS = LISTING_APP_ORIGIN ? [LISTING_APP_ORIGIN] : [];
-const PRIMARY_LISTING_ORIGIN = ALLOWED_RETURN_ORIGINS[0] || LISTING_APP_ORIGIN || "";
 const SOURCE_TO_TARGET_PATH = {
   "main-app": "/home",
   "main-app-register": "/auth/business-register",
 };
 
-export const getAllowedReturnOrigins = () => [...ALLOWED_RETURN_ORIGINS];
+export const getAllowedReturnOrigins = () => {
+  const origin = getListingAppOrigin();
+  return origin ? [origin] : [];
+};
 
-export const getPrimaryListingOrigin = () => PRIMARY_LISTING_ORIGIN;
+export const getPrimaryListingOrigin = () => getAllowedReturnOrigins()[0] || getListingAppOrigin() || "";
 
 const readBridgeTokenFromPayload = (payload = {}) => {
   const candidates = [
@@ -57,11 +52,13 @@ const readBridgeTokenFromPayload = (payload = {}) => {
 
 const sanitizeReturnTo = (value) => {
   const target = String(value || "").trim();
+  const primaryListingOrigin = getPrimaryListingOrigin();
+  const allowedReturnOrigins = getAllowedReturnOrigins();
   if (!target) return "";
   if (target.startsWith("/")) {
-    if (!PRIMARY_LISTING_ORIGIN) return "";
+    if (!primaryListingOrigin) return "";
     try {
-      return new URL(target, PRIMARY_LISTING_ORIGIN).toString();
+      return new URL(target, primaryListingOrigin).toString();
     } catch {
       return "";
     }
@@ -69,19 +66,19 @@ const sanitizeReturnTo = (value) => {
   try {
     const parsed = new URL(target);
     if (!/^https?:$/i.test(parsed.protocol)) return "";
-    const allowed = ALLOWED_RETURN_ORIGINS.length
-      ? ALLOWED_RETURN_ORIGINS.includes(parsed.origin)
-      : (LISTING_APP_ORIGIN ? parsed.origin === LISTING_APP_ORIGIN : true);
+    const allowed = allowedReturnOrigins.length
+      ? allowedReturnOrigins.includes(parsed.origin)
+      : (primaryListingOrigin ? parsed.origin === primaryListingOrigin : true);
     if (allowed) return parsed.toString();
 
     // Safety rewrite: if callback accidentally points to auth origin, move it to listing origin.
     if (
-      PRIMARY_LISTING_ORIGIN &&
+      primaryListingOrigin &&
       typeof window !== "undefined" &&
       parsed.origin === window.location.origin &&
       parsed.pathname === "/auth/sso/callback"
     ) {
-      const rewritten = new URL(parsed.pathname + parsed.search + parsed.hash, PRIMARY_LISTING_ORIGIN);
+      const rewritten = new URL(parsed.pathname + parsed.search + parsed.hash, primaryListingOrigin);
       return rewritten.toString();
     }
 
@@ -92,16 +89,18 @@ const sanitizeReturnTo = (value) => {
 };
 
 const buildDefaultListingCallback = () => {
-  if (!PRIMARY_LISTING_ORIGIN) return "";
-  const callbackUrl = new URL("/auth/sso/callback", PRIMARY_LISTING_ORIGIN);
-  callbackUrl.searchParams.set("source", `${PRIMARY_LISTING_ORIGIN}/home`);
+  const primaryListingOrigin = getPrimaryListingOrigin();
+  if (!primaryListingOrigin) return "";
+  const callbackUrl = new URL("/auth/sso/callback", primaryListingOrigin);
+  callbackUrl.searchParams.set("source", `${primaryListingOrigin}/home`);
   return callbackUrl.toString();
 };
 
 const buildListingCallbackForSource = (targetUrl) => {
-  if (!PRIMARY_LISTING_ORIGIN) return "";
-  const callbackUrl = new URL("/auth/sso/callback", PRIMARY_LISTING_ORIGIN);
-  callbackUrl.searchParams.set("source", String(targetUrl || `${PRIMARY_LISTING_ORIGIN}/home`).trim());
+  const primaryListingOrigin = getPrimaryListingOrigin();
+  if (!primaryListingOrigin) return "";
+  const callbackUrl = new URL("/auth/sso/callback", primaryListingOrigin);
+  callbackUrl.searchParams.set("source", String(targetUrl || `${primaryListingOrigin}/home`).trim());
   return callbackUrl.toString();
 };
 
@@ -167,8 +166,11 @@ export const redirectToListingWithBridgeToken = async ({
   if (typeof window === "undefined") return false;
   const normalizedSource = String(source || "").trim().toLowerCase();
   const sourceTargetPath = SOURCE_TO_TARGET_PATH[normalizedSource] || "";
+  const primaryListingOrigin = getPrimaryListingOrigin();
   const safeSourceTarget =
-    sanitizeReturnTo(returnTo) || sanitizeReturnTo(sourceTargetPath) || `${PRIMARY_LISTING_ORIGIN}/home`;
+    sanitizeReturnTo(returnTo) ||
+    sanitizeReturnTo(sourceTargetPath) ||
+    (primaryListingOrigin ? `${primaryListingOrigin}/home` : "");
   const callbackUrl = buildListingCallbackForSource(safeSourceTarget) || buildDefaultListingCallback();
   if (!callbackUrl) return false;
 

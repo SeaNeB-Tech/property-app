@@ -301,7 +301,7 @@ article {
 .business-wizard-stepper {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.65rem;
   padding-top: 0.15rem;
 }
@@ -358,6 +358,11 @@ article {
 .business-wizard-step.done .business-wizard-step-index {
   background: #4b5563;
   color: #fff;
+}
+
+.business-wizard-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
 .business-wizard-nav {
@@ -805,6 +810,175 @@ article {
   gap: 0.75rem;
 }
 
+.business-section-card--payment {
+  border-color: #dbe7ff;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.business-payment-banner {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.business-payment-loading {
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+  color: #475569;
+  font-size: 0.92rem;
+}
+
+.business-payment-loading--error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.business-payment-loading--info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.cashfree-inline-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(10px);
+}
+
+.cashfree-inline-frame {
+  width: min(960px, calc(100vw - 48px));
+  height: min(720px, calc(100vh - 48px));
+  border-radius: 24px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.3);
+}
+
+.cashfree-inline-stage {
+  width: 100%;
+  height: 100%;
+  background: #ffffff;
+}
+
+.business-payment-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr);
+  gap: 1rem;
+}
+
+.business-payment-card {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 18px;
+  padding: 1.1rem 1.15rem;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+.business-payment-card--charge {
+  background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+  border-color: #111827;
+  color: #f8fafc;
+}
+
+.business-payment-card-label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.business-payment-card--charge .business-payment-card-label {
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.business-payment-charge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.business-payment-provider {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.16);
+  color: #bfdbfe;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.business-payment-card h3 {
+  margin: 0.6rem 0 1rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: inherit;
+}
+
+.business-payment-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.business-payment-summary-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.92rem;
+  color: #475569;
+}
+
+.business-payment-summary-row strong {
+  color: #111827;
+  font-weight: 700;
+  text-align: right;
+}
+
+.business-payment-card--charge .business-payment-summary-row {
+  color: rgba(226, 232, 240, 0.84);
+}
+
+.business-payment-card--charge .business-payment-summary-row strong {
+  color: #f8fafc;
+}
+
+.business-payment-summary-row--total {
+  padding-top: 0.8rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  font-size: 1rem;
+}
+
+.business-payment-summary-row--total strong {
+  font-size: 1.2rem;
+}
+
+.business-payment-note {
+  margin: 1rem 0 0;
+  color: rgba(226, 232, 240, 0.82);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
 @media (max-width: 1024px) {
   .business-register-title {
     font-size: 1.8rem;
@@ -815,12 +989,16 @@ article {
   }
 
   .business-wizard-stepper {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .business-wizard-stepper::before,
   .business-wizard-step-line {
     display: none;
+  }
+
+  .business-payment-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -834,6 +1012,10 @@ article {
   }
 
   .business-contact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .business-wizard-stepper {
     grid-template-columns: 1fr;
   }
 

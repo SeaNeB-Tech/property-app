@@ -26,7 +26,7 @@ import { sendEmailOtp, verifyEmailOtp } from "@/app/auth/auth-service/email.serv
 import { authApi } from "@/lib/api/client"
 import { getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { authStore } from "@/app/auth/auth-service/store/authStore"
-import { getAuthAppUrl, getListingAppUrl } from "@/lib/core/appUrls"
+import { getAuthAppUrl, getListingAppOrigin, getListingAppUrl } from "@/lib/core/appUrls"
 import { redirectToListingWithBridgeToken } from "@/lib/postLoginRedirect"
 import useAuthSubmitTransition from "@/hooks/useAuthSubmitTransition"
 import { notifyAuthChanged } from "@/services/auth.service"
@@ -46,17 +46,12 @@ import {
 
 const LANG_MAP = { eng, guj, hindi }
 const LANGUAGE_STORAGE_KEY = "auth_language"
+const BUSINESS_SUBSCRIPTION_ACTIVE_COOKIE = "business_subscription_active"
+const BUSINESS_SUBSCRIPTION_BRANCH_COOKIE = "business_subscription_branch_id"
 const RETURN_TO_COOKIE = "auth_return_to"
 const OTP_PURPOSE_SIGNUP = 0
 const OTP_PURPOSE_LOGIN = 0
 const TERMS_TEXT_PATH = "/legal/terms-conditions-property.txt"
-const LISTING_APP_ORIGIN = (() => {
-  try {
-    return new URL(String(process.env.NEXT_PUBLIC_LISTING_URL || "").trim()).origin
-  } catch {
-    return ""
-  }
-})()
 const hasCsrfCookie = () =>
   Boolean(
     String(getCookie("csrf_token_property") || "").trim()
@@ -134,7 +129,8 @@ const isSafeReturnTo = (value) => {
   try {
     const parsed = new URL(target)
     if (!/^https?:$/i.test(parsed.protocol)) return false
-    if (LISTING_APP_ORIGIN) return parsed.origin === LISTING_APP_ORIGIN
+    const listingAppOrigin = getListingAppOrigin()
+    if (listingAppOrigin) return parsed.origin === listingAppOrigin
     if (typeof window === "undefined") return true
     return parsed.hostname === window.location.hostname
   } catch {
@@ -228,8 +224,18 @@ const clearBusinessRegistrationHints = () => {
     "business_id",
     "branch_id",
     "business_name",
+    "display_name",
     "business_type",
     "business_location",
+    "business_email",
+    "about_branch",
+    "branch_activation_status",
+    "branch_activation_branch_id",
+    "payment_order_id",
+    "payment_session_id",
+    "payment_last_error",
+    BUSINESS_SUBSCRIPTION_ACTIVE_COOKIE,
+    BUSINESS_SUBSCRIPTION_BRANCH_COOKIE,
     "dashboard_mode",
   ].forEach((key) => removeCookie(key))
 }

@@ -5,9 +5,9 @@ import {
   setInMemoryCsrfToken,
 } from "@/lib/api/client";
 import { authStore } from "@/app/auth/auth-service/store/authStore";
-import { route } from "./route";
 
 const AUTH_CHANGE_EVENT = "seaneb:auth-changed";
+const LOGOUT_ENDPOINT = "/v1/logout";
 const AUTH_FAILURE_STATUS = new Set([401, 403]);
 const AUTH_FAILURE_CODES = new Set([
   "USER_NOT_FOUND",
@@ -70,8 +70,18 @@ const AUTH_STORAGE_KEYS = [
   "business_id",
   "branch_id",
   "business_name",
+  "display_name",
   "business_type",
   "business_location",
+  "business_email",
+  "about_branch",
+  "branch_activation_status",
+  "branch_activation_branch_id",
+  "payment_order_id",
+  "payment_session_id",
+  "payment_last_error",
+  "business_subscription_active",
+  "business_subscription_branch_id",
   "verified_email",
   "user_email",
   "seaneb_id",
@@ -250,7 +260,7 @@ export const clearPanelAuthSession = () => {
 export const logoutPanelSession = async () => {
   let canClearClientState = false;
   try {
-    await authApi.post(`${route?.logout?.url}`, {}, { skipAuthRedirect: true });
+    await authApi.post(LOGOUT_ENDPOINT, {}, { skipAuthRedirect: true });
     canClearClientState = true;
   } catch (error) {
     const status = Number(error?.response?.status || 0);
@@ -262,6 +272,9 @@ export const logoutPanelSession = async () => {
   } finally {
     if (canClearClientState) {
       forceDeleteAuthCookies();
+      for (const key of AUTH_STORAGE_KEYS) {
+        removeCookie(key);
+      }
       clearPanelAuthSession();
     }
   }

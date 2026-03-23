@@ -1,12 +1,11 @@
- "use client";
-
-import BrokerDashboardShell from "@/components/dashboard/BrokerDashboardShell";
-import RequireAuth from "@/components/auth/RequireAuth";
+import { BrokerDashboardWorkspace } from "@/modules/broker-dashboard/components/BrokerDashboardWorkspace";
 
 export default function BrokerDashboardPage() {
   return (
-    <RequireAuth>
-      <BrokerDashboardShell />
-    </RequireAuth>
+    <div className="min-h-screen bg-[#f3f4f6]">
+      <main className="mx-auto w-full max-w-[1280px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <BrokerDashboardWorkspace />
+      </main>
+    </div>
   );
 }

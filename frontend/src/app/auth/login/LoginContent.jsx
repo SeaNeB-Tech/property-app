@@ -42,19 +42,19 @@ const POST_OTP_VERIFIED_COOKIE = "post_otp_verified";
 // The backend complete-profile/signup handoff still depends on this value.
 const PURPOSE_LOGIN = 0;
 const MAIN_APP_REGISTER_SOURCE = "main-app-register";
-const LISTING_APP_ORIGIN = getPrimaryListingOrigin();
-const ALLOWED_RETURN_ORIGINS = getAllowedReturnOrigins();
 
 const isSafeReturnTo = (value) => {
   const target = String(value || "").trim();
+  const listingAppOrigin = getPrimaryListingOrigin();
+  const allowedReturnOrigins = getAllowedReturnOrigins();
   if (!target) return false;
   if (target.startsWith("/")) return true;
 
   try {
     const parsed = new URL(target);
     if (!/^https?:$/.test(parsed.protocol)) return false;
-    if (ALLOWED_RETURN_ORIGINS.length) return ALLOWED_RETURN_ORIGINS.includes(parsed.origin);
-    if (LISTING_APP_ORIGIN) return parsed.origin === LISTING_APP_ORIGIN;
+    if (allowedReturnOrigins.length) return allowedReturnOrigins.includes(parsed.origin);
+    if (listingAppOrigin) return parsed.origin === listingAppOrigin;
     if (typeof window === "undefined") return true;
     return parsed.hostname === window.location.hostname;
   } catch {

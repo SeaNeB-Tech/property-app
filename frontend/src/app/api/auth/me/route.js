@@ -1,6 +1,17 @@
 import { NextResponse } from "next/server";
 import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
 import { CSRF_COOKIE_KEYS } from "@/lib/auth/cookieKeys";
+import {
+  BRANCH_PAYMENT_BRANCH_ID_COOKIE,
+  BRANCH_PAYMENT_ORDER_ID_COOKIE,
+  BRANCH_PAYMENT_SESSION_ID_COOKIE,
+  BRANCH_PAYMENT_STATUS_ACTIVE,
+  BRANCH_PAYMENT_STATUS_FAILED,
+  BRANCH_PAYMENT_STATUS_COOKIE,
+  normalizeBranchPaymentStatus,
+  shouldBlockBranchAccess,
+} from "@/lib/payment/branchPaymentState";
+import { appendPaymentFlowLog, getTrackedBranchPaymentState } from "@/lib/server/paymentFlowLogger";
 const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim() || "property";
 
 const getBaseCandidates = () =>
@@ -276,6 +287,86 @@ const readCsrfTokenFromRefresh = async (response) => {
   ).trim();
 };
 
+const readText = (...values) => {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+};
+
+const readProfileRecord = (payload = null) => {
+  const profile =
+    payload?.data?.profile ||
+    payload?.data?.user ||
+    payload?.data ||
+    payload?.profile ||
+    payload?.user ||
+    payload;
+
+  return profile && typeof profile === "object" ? profile : {};
+};
+
+const readProfileBranchId = (payload = null) => {
+  const profile = readProfileRecord(payload);
+  return readText(
+    profile?.branch_id,
+    profile?.branchId,
+    profile?.current_branch_id,
+    profile?.currentBranchId,
+    profile?.default_branch_id,
+    profile?.defaultBranchId,
+    profile?.branch?.branch_id,
+    profile?.branch?.branchId,
+    profile?.current_branch?.branch_id,
+    profile?.current_branch?.branchId,
+    profile?.currentBranch?.branch_id,
+    profile?.currentBranch?.branchId,
+    profile?.default_branch?.branch_id,
+    profile?.default_branch?.branchId,
+    profile?.defaultBranch?.branch_id,
+    profile?.defaultBranch?.branchId,
+    profile?.business?.branch_id,
+    profile?.business?.branchId,
+    profile?.business?.default_branch_id,
+    profile?.business?.defaultBranchId
+  );
+};
+
+const readProfileBusinessId = (payload = null) => {
+  const profile = readProfileRecord(payload);
+  return readText(
+    profile?.business_id,
+    profile?.businessId,
+    profile?.current_business_id,
+    profile?.currentBusinessId,
+    profile?.business?.business_id,
+    profile?.business?.businessId,
+    profile?.business?.id
+  );
+};
+
+const readProfileBranchStatus = (payload = null) => {
+  const profile = readProfileRecord(payload);
+  return normalizeBranchPaymentStatus(
+    readText(
+      profile?.branch_status,
+      profile?.branchStatus,
+      profile?.current_branch_status,
+      profile?.currentBranchStatus,
+      profile?.default_branch_status,
+      profile?.defaultBranchStatus,
+      profile?.branch?.status,
+      profile?.current_branch?.status,
+      profile?.currentBranch?.status,
+      profile?.default_branch?.status,
+      profile?.defaultBranch?.status,
+      profile?.business?.branch_status,
+      profile?.business?.branchStatus
+    )
+  );
+};
+
 const isPanelAccessRestrictedPayload = (payload = null) => {
   const code = String(payload?.error?.code || payload?.code || "").trim().toLowerCase();
   const message = String(payload?.error?.message || payload?.message || "").trim().toLowerCase();
@@ -496,6 +587,51 @@ export async function GET(request) {
 
         lastResponse = response;
         if (response.ok) {
+          const okPayload = await readJsonSafely(response);
+          const profileBranchId =
+            readProfileBranchId(okPayload) ||
+            readText(
+              request.cookies.get(BRANCH_PAYMENT_BRANCH_ID_COOKIE)?.value,
+              request.cookies.get("branch_id")?.value
+            );
+          const trackedState = await getTrackedBranchPaymentState({
+            branchId: profileBranchId,
+            orderId: readText(request.cookies.get(BRANCH_PAYMENT_ORDER_ID_COOKIE)?.value),
+            sessionId: readText(request.cookies.get(BRANCH_PAYMENT_SESSION_ID_COOKIE)?.value),
+          });
+          const explicitBranchStatus = readProfileBranchStatus(okPayload);
+          const trackedBranchStatus = normalizeBranchPaymentStatus(
+            readText(
+              trackedState?.status,
+              request.cookies.get(BRANCH_PAYMENT_STATUS_COOKIE)?.value
+            )
+          );
+          const resolvedBranchStatus =
+            explicitBranchStatus ||
+            (trackedBranchStatus === BRANCH_PAYMENT_STATUS_FAILED ? trackedBranchStatus : "");
+
+          if (shouldBlockBranchAccess(resolvedBranchStatus)) {
+            await appendPaymentFlowLog({
+              event: "access_blocked_non_active_branch",
+              branchId: profileBranchId,
+              businessId: readProfileBusinessId(okPayload),
+              orderId: trackedState?.orderId,
+              sessionId: trackedState?.sessionId,
+              status: resolvedBranchStatus,
+              source: "auth-me",
+              error: `Branch status ${resolvedBranchStatus} is not ${BRANCH_PAYMENT_STATUS_ACTIVE}`,
+            });
+
+            return createLimitedProfileResponse({
+              upstreamResponse: response,
+              payload: {
+                code: "BRANCH_NOT_ACTIVE",
+                message: `Branch status is ${resolvedBranchStatus}. Only ACTIVE branches can access the dashboard.`,
+              },
+              cookieContext,
+            });
+          }
+
           return copyResponse(response, null, cookieContext);
         }
 

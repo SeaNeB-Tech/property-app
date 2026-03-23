@@ -3,8 +3,23 @@
 import { useMemo, useState } from "react";
 import { checkSeanebId } from "@/services/user.service";
 
-export default function SeanebIdField({ value, onChange, verified, setVerified }) {
+export default function SeanebIdField({
+  value,
+  onChange,
+  verified,
+  setVerified,
+  labels = {},
+}) {
   const [checking, setChecking] = useState(false);
+  const label = labels.label || "SeaNeB ID *";
+  const placeholder = labels.placeholder || "username01";
+  const verifyLabel = labels.verify || "Verify";
+  const editLabel = labels.edit || "Edit";
+  const checkingLabel = labels.checking || "Checking...";
+  const hint = labels.hint || "6-30 characters. Lowercase letters, numbers, and hyphen (-) only.";
+  const existsError = labels.existsError || "SeaNeB ID already exists";
+  const invalidError = labels.invalidError || "Invalid SeaNeB ID";
+  const unavailableError = labels.unavailableError || "Unable to verify SeaNeB ID";
 
   const seanebRegex = /^[a-z0-9-]{6,30}$/;
   const isValidSeaneb = seanebRegex.test(value);
@@ -12,10 +27,10 @@ export default function SeanebIdField({ value, onChange, verified, setVerified }
   const seanebError = useMemo(() => {
     if (!value) return "";
     if (!isValidSeaneb) {
-      return "6-30 characters. Lowercase letters, numbers, and hyphen (-) only.";
+      return hint;
     }
     return "";
-  }, [value, isValidSeaneb]);
+  }, [value, isValidSeaneb, hint]);
 
   const handleVerify = async () => {
     if (!isValidSeaneb || checking || verified) return;
@@ -29,12 +44,12 @@ export default function SeanebIdField({ value, onChange, verified, setVerified }
       const status = err?.response?.status;
 
       if (status === 409) {
-        alert("SeaNeB ID already exists");
+        alert(existsError);
       } else if (status === 400) {
-        alert("Invalid SeaNeB ID");
+        alert(invalidError);
       } else {
         console.error("SeaNeB verify failed:", err);
-        alert("Unable to verify SeaNeB ID");
+        alert(unavailableError);
       }
     } finally {
       setChecking(false);
@@ -48,7 +63,7 @@ export default function SeanebIdField({ value, onChange, verified, setVerified }
 
   return (
     <div className="space-y-1.5 md:col-span-2">
-      <label className="text-sm font-medium text-slate-800">SeaNeB ID *</label>
+      <label className="text-sm font-medium text-slate-800">{label}</label>
 
       <div className="flex items-center gap-2">
         <input
@@ -59,7 +74,7 @@ export default function SeanebIdField({ value, onChange, verified, setVerified }
               : "border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
           }`}
           value={value}
-          placeholder="username01"
+          placeholder={placeholder}
           disabled={verified}
           onChange={(e) => {
             const next = e.target.value.toLowerCase();
@@ -78,13 +93,13 @@ export default function SeanebIdField({ value, onChange, verified, setVerified }
           disabled={checking || (!verified && !isValidSeaneb)}
           onClick={verified ? handleEdit : handleVerify}
         >
-          {checking ? "Checking..." : verified ? "Edit" : "Verify"}
+          {checking ? checkingLabel : verified ? editLabel : verifyLabel}
         </button>
       </div>
 
       {(value || seanebError) && (
         <p className={`mt-1 text-xs ${seanebError ? "text-red-500" : "text-slate-500"}`}>
-          {seanebError || "6-30 characters. Lowercase letters, numbers, and hyphen (-) only."}
+          {seanebError || hint}
         </p>
       )}
     </div>

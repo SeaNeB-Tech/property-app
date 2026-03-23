@@ -6,6 +6,15 @@ const PRODUCT_KEY = String(process.env.NEXT_PUBLIC_PRODUCT_KEY || "").trim();
 const BASE_PATH = "";
 const MIDDLEWARE_REFRESH_THROTTLE_MS = 3000;
 const SESSION_FETCH_TIMEOUT_MS = 4000;
+const LISTING_MIRROR_PATHS = new Set([
+  "/home",
+  "/about",
+  "/contact",
+  "/blogs",
+  "/solution",
+  "/partner",
+  "/faq",
+]);
 
 if (!PRODUCT_KEY) console.warn("[middleware] NEXT_PUBLIC_PRODUCT_KEY is not set");
 
@@ -45,10 +54,6 @@ function hasCsrfCookie(request) {
   return hasAnyCookie(request, CSRF_COOKIE_KEYS);
 }
 
-function hasPostOtpVerified(request) {
-  return hasAnyCookie(request, ["post_otp_verified"]);
-}
-
 function getSafeInternalReturnPath(request) {
   const returnTo = String(request.nextUrl.searchParams.get("returnTo") || "").trim();
   if (!returnTo) return "";
@@ -71,6 +76,65 @@ function hasCrossOriginReturnTo(request) {
   } catch {
     return false;
   }
+}
+
+function normalizeHost(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^\[|\]$/g, "")
+    .replace(/:\d+$/, "")
+    .toLowerCase();
+}
+
+function isLoopbackOrIp(value) {
+  const hostname = normalizeHost(value);
+  if (!hostname) return false;
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname)) return true;
+  return hostname.includes(":");
+}
+
+function normalizeBaseUrl(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function resolveExternalAppBaseUrl(rawUrl, request) {
+  const normalized = normalizeBaseUrl(rawUrl);
+  if (!normalized) return "";
+
+  try {
+    const targetUrl = new URL(normalized);
+    const requestHost = normalizeHost(request?.nextUrl?.hostname || request?.headers?.get("host") || "");
+    const targetHost = normalizeHost(targetUrl.hostname);
+
+    if (requestHost && requestHost !== targetHost && isLoopbackOrIp(targetHost)) {
+      targetUrl.protocol = request?.nextUrl?.protocol || targetUrl.protocol;
+      targetUrl.hostname = requestHost;
+    }
+
+    return normalizeBaseUrl(targetUrl.toString());
+  } catch {
+    return normalized;
+  }
+}
+
+function buildListingAppUrl(request, path = "/") {
+  const baseUrl = resolveExternalAppBaseUrl(process.env.NEXT_PUBLIC_LISTING_URL || "", request);
+  if (!baseUrl) return "";
+  const safePath = String(path || "").trim() || "/";
+  try {
+    return new URL(safePath, `${baseUrl}/`).toString();
+  } catch {
+    return "";
+  }
+}
+
+function resolveListingMirrorPath(pathname = "") {
+  const safePath = String(pathname || "").trim();
+  if (!safePath) return "";
+  if (LISTING_MIRROR_PATHS.has(safePath)) return safePath;
+  if (safePath === "/in" || safePath.startsWith("/in/")) return safePath;
+  return "";
 }
 
 function getSetCookieLines(headers) {
@@ -210,6 +274,14 @@ async function tryRefreshSession(request) {
 
 export async function middleware(request) {
   const pathname = request.nextUrl.pathname;
+  const listingMirrorPath = resolveListingMirrorPath(pathname);
+  if (listingMirrorPath) {
+    const targetUrl = buildListingAppUrl(request, `${listingMirrorPath}${request.nextUrl.search}`);
+    if (targetUrl && targetUrl !== request.nextUrl.href) {
+      return NextResponse.redirect(targetUrl);
+    }
+  }
+
   const hasRefreshCookie = hasSessionCookie(request);
   const hasCsrfSessionHint = hasCsrfCookie(request);
 
@@ -262,7 +334,14 @@ export async function middleware(request) {
     response = NextResponse.redirect(loginUrl);
   }
 
-  // ✅ Dashboard with session but no business — let client handle
+  // ✅ Broker dashboard requires an ACTIVE branch.
+  if (!response && pathname.startsWith("/dashboard/broker") && probeAuthenticated && !hasBusiness) {
+    response = NextResponse.redirect(
+      new URL(withBasePath(request, "/auth/business-register"), request.url)
+    );
+  }
+
+  // ✅ Other dashboard areas with session but no business — let client handle
   if (!response && pathname.startsWith("/dashboard") && probeAuthenticated && !hasBusiness) {
     response = NextResponse.next();
   }
@@ -279,15 +358,9 @@ export async function middleware(request) {
     }
   }
 
-  // ✅ Complete profile — needs post_otp_verified cookie
+  // ✅ Complete profile access is validated client-side from volatile auth flow state.
   if (!response && pathname === "/auth/complete-profile" && !hasSession) {
-    if (hasPostOtpVerified(request)) {
-      response = NextResponse.next();
-    } else {
-      const loginUrl = new URL(withBasePath(request, "/auth/login"), request.url);
-      loginUrl.searchParams.set("returnTo", request.nextUrl.href);
-      response = NextResponse.redirect(loginUrl);
-    }
+    response = NextResponse.next();
   }
 
   // ✅ Default — let request through

@@ -1,0 +1,30 @@
+Payment Flow Audit
+
+Runtime files
+- payment.log: append-only runtime trace for branch creation, payment session creation, payment initiation, confirmation, webhook events, and access blocks.
+- payment-state.json: runtime status cache keyed by branch/order/session so auth checks can see the latest tracked branch payment state.
+
+Routes
+- /api/payment/flow: client-side payment lifecycle logger used by the business registration page.
+- /api/payment/cashfree/webhook: webhook receiver that records payment outcomes into payment.log/payment-state.json.
+- /api/auth/me: now checks the tracked branch payment state before allowing business-dashboard access.
+
+Tracked checkpoints
+1. branch_created -> branch must exist and is tracked as PENDING.
+2. payment_session_created -> session ID exists and is logged with the branch/order/session references.
+3. payment_session_missing -> branch is marked FAILED immediately.
+4. payment_initiated -> checkout launch started and remains PENDING.
+5. payment_initiation_failed -> user cancelled, checkout errored, or payment did not complete; branch is marked FAILED.
+6. payment_confirmed -> post-payment confirmation succeeded; branch is marked ACTIVE.
+7. payment_confirmation_failed -> checkout returned but branch never became active; branch is marked FAILED.
+8. payment_webhook_received -> webhook writes the final payment status into the log/state trail.
+9. access_blocked_non_active_branch -> non-ACTIVE branches are denied dashboard access and the denial is logged.
+
+Where the flow now breaks, when it breaks
+- Order creation break: branch_creation_failed or order_creation_failed.
+- Payment initiation break: payment_session_missing or payment_initiation_failed.
+- Payment confirmation break: payment_confirmation_failed or payment_webhook_received with FAILED status.
+
+Access rule
+- Only ACTIVE branches are allowed into /dashboard/broker.
+- Non-ACTIVE business states are redirected back to /auth/business-register and recorded in payment.log.

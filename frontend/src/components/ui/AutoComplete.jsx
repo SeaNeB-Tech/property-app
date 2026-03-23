@@ -9,6 +9,8 @@ export default function AutoComplete({
   onChange,
   onSelect,
   placeholder,
+  loadingText = "Loading...",
+  noResultsText = "No cities found",
 }) {
   const [open, setOpen] = useState(false);
   const [cities, setCities] = useState([]);
@@ -127,13 +129,13 @@ export default function AutoComplete({
         <div className="autocomplete-box">
           {loading && (
             <div className="autocomplete-item loading">
-              Loading...
+              {loadingText}
             </div>
           )}
 
           {!loading && cities.length === 0 && (
             <div className="autocomplete-item">
-              No cities found
+              {noResultsText}
             </div>
           )}
 

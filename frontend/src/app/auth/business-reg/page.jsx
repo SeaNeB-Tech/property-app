@@ -1,12 +1,5 @@
-import { Suspense } from "react";
-import BusinessRegContent from "./BusinessRegContent";
-
-export const dynamic = "force-dynamic";
+import { redirect } from "next/navigation";
 
 export default function BusinessRegAliasPage() {
-  return (
-    <Suspense fallback={null}>
-      <BusinessRegContent />
-    </Suspense>
-  );
+  redirect("/auth/business-register");
 }

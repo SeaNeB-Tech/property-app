@@ -14,6 +14,7 @@ import {
 } from "@/services/auth.service"
 import {
   registerBusiness,
+  getOnboardingChargePreview,
   verifyPanForBranch,
   verifyGstForBranch,
   getBusinessAutocomplete,
@@ -50,6 +51,17 @@ import {
 } from "@/lib/auth/flowContext"
 import { useAuth } from "@/lib/auth/AuthContext"
 import { getAllowedReturnOrigins, getPrimaryListingOrigin } from "@/lib/core/postLoginRedirect"
+import {
+  BRANCH_PAYMENT_BRANCH_ID_COOKIE,
+  BRANCH_PAYMENT_ERROR_COOKIE,
+  BRANCH_PAYMENT_ORDER_ID_COOKIE,
+  BRANCH_PAYMENT_SESSION_ID_COOKIE,
+  BRANCH_PAYMENT_STATUS_ACTIVE,
+  BRANCH_PAYMENT_STATUS_FAILED,
+  BRANCH_PAYMENT_STATUS_PENDING,
+  BRANCH_PAYMENT_STATUS_COOKIE,
+  normalizeBranchPaymentStatus,
+} from "@/lib/payment/branchPaymentState"
 
 // i18n
 import eng from "@/constants/i18/eng/business_register.json"
@@ -80,6 +92,9 @@ const GOOGLE_PLACES_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/de
 const AUTH_DEBUG = false
 const POST_REGISTER_PROFILE_MAX_ATTEMPTS = 6
 const POST_REGISTER_PROFILE_RETRY_MS = 350
+const PAYMENT_POLL_INTERVAL_MS = 2500
+const PAYMENT_POLL_TIMEOUT_MS = 3 * 60 * 1000
+const CASHFREE_REDIRECT_TARGET_MODAL = "_modal"
 
 const logAuthDebug = (...args) => {
   if (!AUTH_DEBUG || typeof console === "undefined") return
@@ -88,6 +103,12 @@ const logAuthDebug = (...args) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const createTaggedError = (message, code) => {
+  const error = new Error(message)
+  error.code = code
+  return error
+}
+
 const buildCsrfHeaders = (token) => {
   const csrfToken = String(token || "").trim()
   return {
@@ -95,6 +116,16 @@ const buildCsrfHeaders = (token) => {
     "x-xsrf-token": csrfToken,
     "csrf-token": csrfToken,
   }
+}
+
+const formatMessage = (template, values = {}) => {
+  let output = String(template || "")
+
+  for (const [key, value] of Object.entries(values)) {
+    output = output.split(`{${key}}`).join(String(value))
+  }
+
+  return output
 }
 
 const EMPTY_FORM = {
@@ -107,7 +138,7 @@ const EMPTY_FORM = {
   whatsappNumber: "",
   businessWebsite: "",
   businessEmail: "",
-  aboutBranch: "Head office branch",
+  aboutBranch: "",
   businessLocation: "",
   placeId: "",
   cityId: "",
@@ -126,6 +157,75 @@ const getErrorMessage = (err, fallback) =>
   err?.response?.data?.message ||
   err?.message ||
   fallback
+
+const extractPayload = (payload = null) =>
+  payload?.data || payload?.result || payload?.payload || payload || {}
+
+const extractPaymentSessionId = (payload = null) => {
+  const data = extractPayload(payload)
+  const sessionId =
+    data?.payment_session_id ||
+    data?.paymentSessionId ||
+    data?.payment_session?.id ||
+    payload?.payment_session_id ||
+    payload?.paymentSessionId
+
+  return String(sessionId || "").trim()
+}
+
+const extractOrderId = (payload = null) => {
+  const data = extractPayload(payload)
+  const orderId =
+    data?.order_id ||
+    data?.orderId ||
+    data?.payment_order_id ||
+    data?.paymentOrderId ||
+    data?.cf_order_id ||
+    data?.cfOrderId ||
+    data?.order?.id ||
+    data?.order?.order_id ||
+    data?.order?.orderId ||
+    payload?.order_id ||
+    payload?.orderId
+
+  return String(orderId || "").trim()
+}
+
+const extractOnboardingChargePreview = (payload = null) => {
+  const data = extractPayload(payload)
+  const baseAmount = Number(data?.base_amount ?? data?.baseAmount ?? 0)
+  const gstPercentage = Number(data?.gst_percentage ?? data?.gstPercentage ?? 0)
+
+  return {
+    description: String(data?.description || "").trim(),
+    baseAmount: Number.isFinite(baseAmount) ? baseAmount : 0,
+    gstPercentage: Number.isFinite(gstPercentage) ? gstPercentage : 0,
+  }
+}
+
+const formatInr = (value) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: Number.isInteger(Number(value)) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0)
+
+const getCashfreeMode = () => {
+  if (typeof window !== "undefined") {
+    const hostname = String(window.location.hostname || "").trim().toLowerCase()
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname.startsWith("dev.") ||
+      hostname.includes("staging")
+    ) {
+      return "sandbox"
+    }
+  }
+
+  return process.env.NODE_ENV === "production" ? "production" : "sandbox"
+}
 
 const getCategoryId = (category) =>
   String(category?.main_category_id || category?.category_id || category?.id || "").trim()
@@ -290,13 +390,18 @@ const DEFAULT_COUNTRY =
   getCountryByCode("91") ||
   phoneCodes[0] || { name: "India", dialCode: "+91" }
 
-const WIZARD_STEPS = [
-  { id: 1, title: "Basic Info" },
-  { id: 2, title: "Contact" },
-  { id: 3, title: "Location & Compliance" },
+const buildWizardSteps = (labels = {}) => [
+  { id: 1, title: String(labels.stepBasicInfo || "Basic Info") },
+  { id: 2, title: String(labels.stepContact || "Contact") },
+  { id: 3, title: String(labels.stepAddress || "Address") },
+  { id: 4, title: String(labels.stepCompliance || "Compliance") },
+  { id: 5, title: String(labels.stepPayment || "Payment") },
 ]
 
-const getOtpChannelLabel = (via) => (via === OTP_VIA_SMS ? "SMS" : "WhatsApp")
+const getOtpChannelLabel = (via, labels = {}) =>
+  via === OTP_VIA_SMS
+    ? String(labels.sms || "SMS")
+    : String(labels.whatsapp || "WhatsApp")
 
 const resolveListingOrigin = (returnTo = "") => {
   const allowedOrigins = getAllowedReturnOrigins()
@@ -481,16 +586,44 @@ const readProfileBranchId = (profile = null) =>
       ""
   ).trim()
 
+const readProfileBranchStatus = (profile = null) =>
+  normalizeBranchPaymentStatus(
+    profile?.branch_status ||
+      profile?.branchStatus ||
+      profile?.current_branch_status ||
+      profile?.currentBranchStatus ||
+      profile?.default_branch_status ||
+      profile?.defaultBranchStatus ||
+      profile?.branch?.status ||
+      profile?.current_branch?.status ||
+      profile?.currentBranch?.status ||
+      profile?.default_branch?.status ||
+      profile?.defaultBranch?.status ||
+      profile?.business?.branch_status ||
+      profile?.business?.branchStatus ||
+      ""
+  )
+
+const BUSINESS_HINT_COOKIE_KEYS = [
+  "business_registered",
+  "business_id",
+  "branch_id",
+  "business_name",
+  "display_name",
+  "business_type",
+  "business_location",
+  "business_email",
+  "about_branch",
+  BRANCH_PAYMENT_STATUS_COOKIE,
+  BRANCH_PAYMENT_BRANCH_ID_COOKIE,
+  BRANCH_PAYMENT_ORDER_ID_COOKIE,
+  BRANCH_PAYMENT_SESSION_ID_COOKIE,
+  BRANCH_PAYMENT_ERROR_COOKIE,
+  "dashboard_mode",
+]
+
 const clearBusinessRegistrationHints = () => {
-  ;[
-    "business_registered",
-    "business_id",
-    "branch_id",
-    "business_name",
-    "business_type",
-    "business_location",
-    "dashboard_mode",
-  ].forEach((key) => removeCookie(key))
+  BUSINESS_HINT_COOKIE_KEYS.forEach((key) => removeCookie(key))
 }
 
 export default function BusinessRegisterPage() {
@@ -508,7 +641,7 @@ export default function BusinessRegisterPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [mounted, setMounted] = useState(false)
   const [submitError, setSubmitError] = useState("")
-  const { isTransitioning, showTransition, runWithTransition } = useAuthSubmitTransition()
+  const { isTransitioning, showTransition, runWithTransition, stopTransition } = useAuthSubmitTransition()
   const [branchId, setBranchId] = useState("")
   const [panVerified, setPanVerified] = useState(false)
   const [gstVerified, setGstVerified] = useState(false)
@@ -548,6 +681,12 @@ export default function BusinessRegisterPage() {
   const [categories, setCategories] = useState([])
   const [productCategoryId, setProductCategoryId] = useState("")
   const [currentStep, setCurrentStep] = useState(1)
+  const [onboardingChargePreview, setOnboardingChargePreview] = useState(null)
+  const [loadingOnboardingCharge, setLoadingOnboardingCharge] = useState(false)
+  const [paymentLaunching, setPaymentLaunching] = useState(false)
+  const [paymentAwaitingConfirmation, setPaymentAwaitingConfirmation] = useState(false)
+  const [paymentNotice, setPaymentNotice] = useState("")
+  const [pendingPaymentContext, setPendingPaymentContext] = useState(null)
   const sectionTopRef = useRef(null)
   const lockedProductKeyRef = useRef("")
   const suppressNextBusinessAutocompleteRef = useRef(false)
@@ -556,13 +695,58 @@ export default function BusinessRegisterPage() {
   const debouncedBusinessName = useDebounce(form.businessName, 300)
   const locationLookupRef = useRef("")
 
-  const t = LANG_MAP[language]
-  const currentStepMeta = WIZARD_STEPS.find((step) => step.id === currentStep) || WIZARD_STEPS[0]
-  const completionPercent = Math.round((currentStep / WIZARD_STEPS.length) * 100)
-  const isStepThreeReady =
-    form.businessLocation.trim().length > 0 &&
-    form.placeId.trim().length > 0 &&
-    form.agree
+  const t = LANG_MAP[language] || eng
+  const text = useCallback((key, fallback) => String(t?.[key] || fallback), [t])
+  const textf = useCallback(
+    (key, fallback, values = {}) => formatMessage(text(key, fallback), values),
+    [text]
+  )
+  const reportPaymentFlow = useCallback(async ({
+    event = "",
+    branchId = "",
+    businessId = "",
+    orderId = "",
+    sessionId = "",
+    status = "",
+    error = "",
+    details = null,
+  } = {}) => {
+    try {
+      await fetch("/api/payment/flow", {
+        method: "POST",
+        credentials: "include",
+        keepalive: true,
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          event,
+          branchId,
+          businessId,
+          orderId,
+          sessionId,
+          status,
+          error,
+          source: "business-register",
+          details: details && typeof details === "object" ? details : null,
+        }),
+      })
+    } catch (logError) {
+      console.warn("[business-register] payment flow log failed:", logError)
+    }
+  }, [])
+  const wizardSteps = buildWizardSteps(t)
+  const currentStepMeta = wizardSteps.find((step) => step.id === currentStep) || wizardSteps[0]
+  const completionPercent = Math.round((currentStep / wizardSteps.length) * 100)
+  const defaultAboutBranch = text("defaultAboutBranch", "Head office branch")
+  const paymentPreviewReady = Boolean(onboardingChargePreview)
+  const isPaymentStepReady = pendingPaymentContext?.paymentSessionId
+    ? true
+    : form.businessLocation.trim().length > 0 &&
+      form.placeId.trim().length > 0 &&
+      form.agree &&
+      paymentPreviewReady &&
+      !loadingOnboardingCharge
   const normalizedPrimaryNumber = normalizeMobileNumber(form.primaryNumber)
   const normalizedWhatsappNumber = normalizeMobileNumber(form.whatsappNumber)
   const isWhatsappSameAsPrimary =
@@ -572,6 +756,35 @@ export default function BusinessRegisterPage() {
   const whatsappIsVerified = whatsappVerified || whatsappAutoVerified
   const hasSelectedBusiness = Boolean(form.businessPlaceId || form.photoReference)
   const selectedBusinessPhotoSrc = buildBusinessPhotoUrl(form.photoReference, 200)
+  const onboardingBaseAmount = Number(onboardingChargePreview?.baseAmount || 0)
+  const onboardingGstPercentage = Number(onboardingChargePreview?.gstPercentage || 0)
+  const onboardingGstAmount = (onboardingBaseAmount * onboardingGstPercentage) / 100
+  const onboardingTotalAmount = onboardingBaseAmount + onboardingGstAmount
+
+  useEffect(() => {
+    const knownDefaults = new Set(
+      [
+        "",
+        "Head office branch",
+        eng.defaultAboutBranch,
+        guj.defaultAboutBranch,
+        hindi.defaultAboutBranch,
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+
+    setForm((prev) => {
+      const currentValue = String(prev.aboutBranch || "").trim()
+      if (!knownDefaults.has(currentValue)) return prev
+      if (currentValue === defaultAboutBranch) return prev
+
+      return {
+        ...prev,
+        aboutBranch: defaultAboutBranch,
+      }
+    })
+  }, [defaultAboutBranch])
 
   const ensureAuthSessionReady = useCallback(async () => {
     const hasAccessToken = () => Boolean(String(getAccessToken() || "").trim())
@@ -741,18 +954,21 @@ export default function BusinessRegisterPage() {
           const payload = await authApi.me({ retryOn401: false })
           const profile = readProfileRecord(payload)
           const profileBranchId = readProfileBranchId(profile)
-          const hasBusinessProfile =
-            hasBusinessRegistration(profile) ||
-            (expectedBranch && profileBranchId === expectedBranch)
+          const profileBranchStatus = readProfileBranchStatus(profile)
+          const hasMatchingBranch =
+            (expectedBranch && profileBranchId === expectedBranch) ||
+            (!expectedBranch && hasBusinessRegistration(profile))
+          const hasActiveBusinessProfile =
+            hasMatchingBranch && profileBranchStatus === BRANCH_PAYMENT_STATUS_ACTIVE
 
-          if (profile && hasBusinessProfile) {
+          if (profile && hasActiveBusinessProfile) {
             applyUserProfile(profile)
             notifyAuthChanged({ force: true })
             return true
           }
 
           lastStatus = 200
-          lastMessage = "PROFILE_BUSINESS_NOT_READY"
+          lastMessage = profileBranchStatus || "PROFILE_BRANCH_NOT_ACTIVE"
         } catch (profileError) {
           lastStatus = Number(profileError?.status || profileError?.response?.status || 0)
           lastMessage = String(
@@ -780,20 +996,404 @@ export default function BusinessRegisterPage() {
     return false
   }, [applyUserProfile, ensureAuthSessionReady])
 
+  const applySuccessfulBusinessRegistration = useCallback(async ({
+    businessId = "",
+    createdBranchId = "",
+    businessName = "",
+    displayName = "",
+    businessType = "",
+    businessEmail = "",
+    aboutBranch = "",
+    businessLocation = "",
+    pan = "",
+    gstin = "",
+  } = {}) => {
+    const normalizedBusinessId = String(businessId || "").trim()
+    const normalizedBranchId = String(createdBranchId || "").trim()
+    const normalizedPan = String(pan || "").trim().toUpperCase()
+    const normalizedGstin = String(gstin || "").trim().toUpperCase()
+
+    setBranchId(normalizedBranchId)
+
+    if (normalizedBranchId && normalizedPan && !panVerified && PAN_REGEX.test(normalizedPan)) {
+      try {
+        await verifyPanForBranch({ pan: normalizedPan, branch_id: normalizedBranchId })
+        setPanVerified(true)
+        setPanStatusText("PAN verified successfully.")
+        setCookie("verified_pan", normalizedPan, { maxAge: 60 * 60 * 24 * 7, path: "/" })
+      } catch {
+        setPanStatusText("PAN could not be verified right now. You can retry from dashboard.")
+      }
+    }
+
+    if (normalizedBranchId && normalizedGstin && !gstVerified && GST_REGEX.test(normalizedGstin)) {
+      try {
+        await verifyGstForBranch({ gstin: normalizedGstin, branch_id: normalizedBranchId })
+        setGstVerified(true)
+        setGstStatusText("GSTIN verified successfully.")
+        setCookie("verified_gstin", normalizedGstin, { maxAge: 60 * 60 * 24 * 7, path: "/" })
+      } catch {
+        setGstStatusText("GSTIN could not be verified right now. You can retry from dashboard.")
+      }
+    }
+
+    setCookie("business_name", businessName, { path: "/" })
+    setCookie("display_name", displayName, { path: "/" })
+    setCookie("business_type", businessType, { path: "/" })
+    setCookie("business_email", businessEmail, { path: "/" })
+    setCookie("about_branch", aboutBranch, { path: "/" })
+    setCookie("business_location", businessLocation, { path: "/" })
+    setCookie("business_id", normalizedBusinessId, { path: "/" })
+    setCookie("branch_id", normalizedBranchId, { path: "/" })
+    setCookie("business_registered", "true", {
+      maxAge: 60 * 60 * 24 * 30,
+      path: "/",
+    })
+    setDashboardMode(DASHBOARD_MODE_BUSINESS)
+
+    setCookie("profile_completed", "true", {
+      maxAge: 60 * 60 * 24 * 30,
+      path: "/",
+    })
+
+    const profileConfirmed = await confirmRegisteredBusinessProfile({
+      expectedBranchId: normalizedBranchId,
+    })
+
+    return {
+      profileConfirmed,
+      businessId: normalizedBusinessId,
+      branchId: normalizedBranchId,
+    }
+  }, [confirmRegisteredBusinessProfile, gstVerified, panVerified])
+
+  const hydrateRegistrationTokens = useCallback((response) => {
+    const data = response?.data || response || {}
+
+    try {
+      const headers = response?.headers || {}
+      const headerCandidates = [
+        headers?.authorization,
+        headers?.Authorization,
+        headers["authorization"],
+        headers["Authorization"],
+        headers["x-access-token"],
+        headers["x-access_token"],
+        headers["x-access-token"],
+        headers["access-token"],
+        headers["access_token"],
+        headers["x-auth-token"],
+      ]
+      let headerAuth = ""
+      for (const headerValue of headerCandidates) {
+        if (!headerValue) continue
+        headerAuth = String(headerValue || "").trim()
+        if (headerAuth) break
+      }
+
+      const headerToken = headerAuth && /^Bearer\s+/i.test(headerAuth)
+        ? headerAuth.replace(/^Bearer\s+/i, "").trim()
+        : headerAuth
+
+      const bodyToken = String(
+        data?.access_token || data?.accessToken || data?.token || data?.jwt || ""
+      ).trim()
+
+      const headerCsrf = String(
+        headers?.["x-csrf-token"] || headers?.["x-xsrf-token"] || headers?.["x-csrf_token"] || headers?.["x-csrf"] || ""
+      ).trim()
+
+      const bodyCsrf = String(
+        data?.csrf_token || data?.csrfToken || data?.csrf || ""
+      ).trim()
+
+      const finalToken = headerToken || bodyToken || ""
+      const finalCsrf = headerCsrf || bodyCsrf || ""
+
+      if (finalToken || finalCsrf) {
+        hydrateAuthSession({ accessToken: finalToken, csrfToken: finalCsrf, broadcast: true })
+      }
+    } catch {
+      // Ignore token extraction failures; registration fallback handling already covers missing auth.
+    }
+  }, [])
+
+  const completeSuccessfulRegistration = useCallback(async ({
+    businessId = "",
+    createdBranchId = "",
+    orderId = "",
+    paymentSessionId = "",
+    businessName = "",
+    displayName = "",
+    businessType = "",
+    businessEmail = "",
+    aboutBranch = "",
+    businessLocation = "",
+    pan = "",
+    gstin = "",
+  } = {}) => {
+    const registrationState = await applySuccessfulBusinessRegistration({
+      businessId,
+      createdBranchId,
+      businessName,
+      displayName,
+      businessType,
+      businessEmail,
+      aboutBranch,
+      businessLocation,
+      pan,
+      gstin,
+    })
+
+    if (!registrationState?.profileConfirmed) {
+      await reportPaymentFlow({
+        event: "payment_confirmation_failed",
+        branchId: createdBranchId || registrationState?.branchId,
+        businessId: businessId || registrationState?.businessId,
+        orderId,
+        sessionId: paymentSessionId,
+        status: BRANCH_PAYMENT_STATUS_FAILED,
+        error: "Branch remained non-active after payment confirmation.",
+      })
+      return false
+    }
+
+    await reportPaymentFlow({
+      event: "payment_confirmed",
+      branchId: registrationState.branchId,
+      businessId: registrationState.businessId,
+      orderId,
+      sessionId: paymentSessionId,
+      status: BRANCH_PAYMENT_STATUS_ACTIVE,
+    })
+
+    finalizeRegistration({
+      router,
+      businessId: registrationState.businessId,
+      branchId: registrationState.branchId,
+    })
+    return true
+  }, [applySuccessfulBusinessRegistration, reportPaymentFlow, router])
+
+  const readTrackedPaymentState = useCallback(async ({
+    branchId = "",
+    orderId = "",
+    sessionId = "",
+  } = {}) => {
+    if (typeof window === "undefined") {
+      return { status: "", tracked: null }
+    }
+
+    const url = new URL("/api/payment/flow", window.location.origin)
+    if (branchId) url.searchParams.set("branchId", branchId)
+    if (orderId) url.searchParams.set("orderId", orderId)
+    if (sessionId) url.searchParams.set("sessionId", sessionId)
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    })
+
+    if (!response.ok) {
+      throw new Error("Unable to read tracked payment state.")
+    }
+
+    const payload = await response.json().catch(() => ({}))
+    return {
+      status: String(payload?.status || payload?.tracked?.status || "").trim().toUpperCase(),
+      tracked: payload?.tracked || null,
+    }
+  }, [])
+
+  const waitForTrackedPaymentResolution = useCallback(async ({
+    branchId = "",
+    orderId = "",
+    paymentSessionId = "",
+  } = {}) => {
+    const startedAt = Date.now()
+    let lastTrackedError = null
+
+    while (Date.now() - startedAt < PAYMENT_POLL_TIMEOUT_MS) {
+      try {
+        const trackedState = await readTrackedPaymentState({
+          branchId,
+          orderId,
+          sessionId: paymentSessionId,
+        })
+        const trackedStatus = trackedState.status
+
+        if (trackedStatus === BRANCH_PAYMENT_STATUS_ACTIVE) {
+          return trackedState
+        }
+
+        if (trackedStatus === BRANCH_PAYMENT_STATUS_FAILED) {
+          const trackedMessage =
+            String(trackedState?.tracked?.error || "").trim() ||
+            text("errorPaymentFailed", "Payment could not be completed. Please try again.")
+          throw createTaggedError(trackedMessage, "PAYMENT_TRACKED_FAILED")
+        }
+      } catch (error) {
+        lastTrackedError = error
+        if (String(error?.code || "").trim() === "PAYMENT_TRACKED_FAILED") {
+          throw error
+        }
+      }
+
+      await sleep(PAYMENT_POLL_INTERVAL_MS)
+    }
+
+    throw createTaggedError(
+      text(
+        "paymentConfirmationPending",
+        "Payment is still being confirmed. Keep this page open, and click Continue payment if you already completed the checkout."
+      ),
+      "PAYMENT_CONFIRMATION_PENDING"
+    )
+  }, [readTrackedPaymentState, text])
+
+  const startPayment = useCallback(async (sessionId) => {
+    const paymentSessionId = String(sessionId || "").trim()
+
+    if (!paymentSessionId) {
+      throw new Error(text("errorPaymentUnavailable", "Payment session is unavailable right now."))
+    }
+
+    if (typeof window === "undefined" || typeof window.Cashfree !== "function") {
+      throw new Error(
+        text(
+          "errorCashfreeUnavailable",
+          "Cashfree checkout is unavailable right now. Please refresh and try again."
+        )
+      )
+    }
+
+    const cashfree = window.Cashfree({
+      mode: getCashfreeMode(),
+    })
+
+    const result = await cashfree.checkout({
+      paymentSessionId,
+      redirectTarget: CASHFREE_REDIRECT_TARGET_MODAL,
+    })
+
+    if (result?.error) {
+      throw new Error(
+        result?.error?.message ||
+          result?.error?.reason ||
+          text("errorPaymentFailed", "Payment could not be completed. Please try again.")
+      )
+    }
+
+    return result
+  }, [text])
+
+  useEffect(() => {
+    if (currentStep !== 5) return
+
+    let cancelled = false
+
+    const loadOnboardingCharge = async () => {
+      setLoadingOnboardingCharge(true)
+
+      try {
+        const sessionReady = await ensureAuthSessionReady()
+        if (!sessionReady) {
+          if (!cancelled) {
+            setOnboardingChargePreview(null)
+            setSubmitError(
+              text(
+                "errorSessionExpiredBeforePayment",
+                "Session expired. Please login again before reviewing payment."
+              )
+            )
+          }
+          return
+        }
+
+        const response = await getOnboardingChargePreview()
+        if (cancelled) return
+
+        setOnboardingChargePreview(extractOnboardingChargePreview(response?.data || response))
+        setSubmitError("")
+      } catch (err) {
+        if (cancelled) return
+        setOnboardingChargePreview(null)
+        setSubmitError(
+          getErrorMessage(
+            err,
+            text("errorChargePreviewUnavailable", "Unable to load onboarding charge preview right now.")
+          )
+        )
+      } finally {
+        if (!cancelled) {
+          setLoadingOnboardingCharge(false)
+        }
+      }
+    }
+
+    loadOnboardingCharge()
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentStep, ensureAuthSessionReady, text])
+
   const validateStep = (step) => {
     if (step === 1) {
-      if (!form.businessName.trim()) return "Enter business name to continue"
-      if (!form.displayName.trim()) return "Enter display name to continue"
-      if (!form.businessType) return "Select business type to continue"
-      if (!form.seanebId.trim()) return "Enter SeaNeB ID to continue"
+      if (!form.businessName.trim()) return text("validationBusinessNameContinue", "Enter business name to continue")
+      if (!form.displayName.trim()) return text("validationDisplayNameContinue", "Enter display name to continue")
+      if (!form.businessType) return text("validationBusinessTypeContinue", "Select business type to continue")
+      if (!form.seanebId.trim()) return text("validationSeanebIdContinue", "Enter SeaNeB ID to continue")
       return ""
     }
 
     if (step === 2) {
-      if (!form.primaryNumber.trim()) return "Enter primary number to continue"
-      if (!MOBILE_REGEX.test(form.primaryNumber.trim())) return "Enter a valid primary number to continue"
+      if (!form.primaryNumber.trim()) return text("validationPrimaryNumberContinue", "Enter primary number to continue")
+      if (!MOBILE_REGEX.test(form.primaryNumber.trim())) {
+        return text("validationPrimaryNumberValidContinue", "Enter a valid primary number to continue")
+      }
       if (form.businessEmail.trim() && !EMAIL_REGEX.test(form.businessEmail.trim())) {
-        return "Enter a valid business email or keep it empty"
+        return text("validationBusinessEmailValid", "Enter a valid business email or keep it empty")
+      }
+      return ""
+    }
+
+    if (step === 3) {
+      if (!form.businessLocation.trim()) {
+        return text("validationBusinessLocationContinue", "Enter business location to continue")
+      }
+      if (!form.placeId.trim()) {
+        return text(
+          "validationBusinessLocationAutocompleteContinue",
+          "Select a valid location from autocomplete to continue"
+        )
+      }
+      return ""
+    }
+
+    if (step === 4) {
+      if (form.pan.trim() && !PAN_REGEX.test(form.pan.trim().toUpperCase())) {
+        return text("validationPanValidOptional", "Enter a valid PAN number or leave it empty")
+      }
+      if (form.gstin.trim() && !GST_REGEX.test(form.gstin.trim().toUpperCase())) {
+        return text("validationGstinValidOptional", "Enter a valid GSTIN number or leave it empty")
+      }
+      if (!form.agree) {
+        return text("validationAgreeTerms", "You must agree to the terms and conditions")
+      }
+      return ""
+    }
+
+    if (step === 5) {
+      if (loadingOnboardingCharge) {
+        return text("validationPaymentLoading", "Loading onboarding charge preview. Please wait a moment.")
+      }
+      if (pendingPaymentContext?.paymentSessionId) {
+        return ""
+      }
+      if (!paymentPreviewReady) {
+        return text("validationPaymentPreviewUnavailable", "Onboarding charge preview is unavailable right now.")
       }
       return ""
     }
@@ -808,10 +1408,14 @@ export default function BusinessRegisterPage() {
       return
     }
     setSubmitError("")
-    setCurrentStep((prev) => Math.min(prev + 1, WIZARD_STEPS.length))
+    setCurrentStep((prev) => Math.min(prev + 1, wizardSteps.length))
   }
-  const goPreviousStep = () => setCurrentStep((prev) => Math.max(prev - 1, 1))
+  const goPreviousStep = () => {
+    if (pendingPaymentContext) return
+    setCurrentStep((prev) => Math.max(prev - 1, 1))
+  }
   const handleStepChange = (stepId) => {
+    if (pendingPaymentContext && stepId !== currentStep) return
     if (stepId <= currentStep) {
       setCurrentStep(stepId)
       return
@@ -836,7 +1440,6 @@ export default function BusinessRegisterPage() {
     }
   }, [language])
 
-
   useEffect(() => {
     if (!otpModalOpen || otpResendCooldown <= 0) return
     const timer = window.setInterval(() => {
@@ -860,11 +1463,6 @@ export default function BusinessRegisterPage() {
     ingestAuthFlowContextFromUrl()
     stripAuthFlowParamsFromAddressBar()
   }, [ensureAuthSessionReady, router])
-
-  useEffect(() => {
-    if (!hasBusinessRegistration(user)) return
-    router.replace("/dashboard/broker")
-  }, [router, user])
 
   useEffect(() => {
     let active = true
@@ -938,10 +1536,14 @@ export default function BusinessRegisterPage() {
       // left them behind, which causes a redirect loop into /dashboard/broker.
       const hasBusinessCookie = getCookie("business_registered") === "true"
       const existingBranchId = String(getCookie("branch_id") || "").trim()
-      if (hasBusinessCookie || existingBranchId) {
+      const existingTrackedBranchId = String(getCookie(BRANCH_PAYMENT_BRANCH_ID_COOKIE) || "").trim()
+      const existingTrackedBranchStatus = String(getCookie(BRANCH_PAYMENT_STATUS_COOKIE) || "").trim()
+      if (hasBusinessCookie || existingBranchId || existingTrackedBranchId || existingTrackedBranchStatus) {
         logAuthDebug("[business-register] clearing stale business hints before form init", {
           hasBusinessCookie,
           hasBranchId: Boolean(existingBranchId),
+          hasTrackedBranchId: Boolean(existingTrackedBranchId),
+          hasTrackedBranchStatus: Boolean(existingTrackedBranchStatus),
         })
         clearBusinessRegistrationHints()
       }
@@ -1142,6 +1744,10 @@ export default function BusinessRegisterPage() {
       setForm((prev) => ({
         ...prev,
         businessName: safeValue,
+        displayName:
+          !String(prev.displayName || "").trim() || prev.displayName === prev.businessName
+            ? safeValue
+            : prev.displayName,
         businessPlaceId: "",
         photoReference: "",
       }))
@@ -1309,7 +1915,9 @@ export default function BusinessRegisterPage() {
       setOtpResendCooldown(RESEND_COOLDOWN_SECONDS)
       setOtpModalOpen(true)
     } catch (err) {
-      setSubmitError(getErrorMessage(err, "Failed to send business email OTP"))
+      setSubmitError(
+        getErrorMessage(err, text("errorSendBusinessEmailOtp", "Failed to send business email OTP"))
+      )
     } finally {
       setEmailLoading(false)
     }
@@ -1323,14 +1931,14 @@ export default function BusinessRegisterPage() {
     if (!mobile || mobileLoading || mobileVerified) return false
 
     if (!MOBILE_REGEX.test(mobile)) {
-      setSubmitError("Enter a valid primary number to verify")
+      setSubmitError(text("errorVerifyPrimaryNumber", "Enter a valid primary number to verify"))
       return false
     }
 
     const countryCode = selectedCountryCode || getResolvedCountryCode()
 
     if (!countryCode) {
-      setSubmitError("Please select country code.")
+      setSubmitError(text("errorSelectCountryCode", "Please select country code."))
       return false
     }
 
@@ -1366,14 +1974,14 @@ export default function BusinessRegisterPage() {
     if (!mobile || whatsappLoading || whatsappVerified || whatsappAutoVerified) return false
 
     if (!MOBILE_REGEX.test(mobile)) {
-      setSubmitError("Enter a valid WhatsApp number to verify")
+      setSubmitError(text("errorVerifyWhatsappNumber", "Enter a valid WhatsApp number to verify"))
       return false
     }
 
     const countryCode = selectedCountryCode || getResolvedCountryCode()
 
     if (!countryCode) {
-      setSubmitError("Please select country code.")
+      setSubmitError(text("errorSelectCountryCode", "Please select country code."))
       return false
     }
 
@@ -1590,15 +2198,20 @@ export default function BusinessRegisterPage() {
     if (!pan || panVerified || verifyingPan) return
     setPanStatusText("")
     if (!PAN_REGEX.test(pan)) {
-      setSubmitError("Invalid PAN number")
+      setSubmitError(text("errorInvalidPan", "Invalid PAN number"))
       return
     }
     if (!branchId) {
-      setPanStatusText("PAN verification will be available right after branch creation.")
+      setPanStatusText(
+        text(
+          "panVerificationAfterBranch",
+          "PAN verification will be available right after branch creation."
+        )
+      )
       return
     }
     if (!(await ensureAuthSessionReady())) {
-      setSubmitError("Session expired. Please login again.")
+      setSubmitError(text("errorSessionExpired", "Session expired. Please login again."))
       redirectToBusinessRegisterLogin(router)
       return
     }
@@ -1608,11 +2221,11 @@ export default function BusinessRegisterPage() {
       setVerifyingPan(true)
       await verifyPanForBranch({ pan, branch_id: branchId })
       setPanVerified(true)
-      setPanStatusText("PAN verified successfully.")
+      setPanStatusText(text("panVerifiedSuccess", "PAN verified successfully."))
       setCookie("verified_pan", pan, { maxAge: 60 * 60 * 24 * 7, path: "/" })
     } catch (err) {
       setPanVerified(false)
-      setPanStatusText(getErrorMessage(err, "PAN verification failed"))
+      setPanStatusText(getErrorMessage(err, text("errorPanVerificationFailed", "PAN verification failed")))
     } finally {
       setVerifyingPan(false)
     }
@@ -1624,15 +2237,20 @@ export default function BusinessRegisterPage() {
     if (!gstin || gstVerified || verifyingGst) return
     setGstStatusText("")
     if (!GST_REGEX.test(gstin)) {
-      setSubmitError("Invalid GSTIN number")
+      setSubmitError(text("errorInvalidGstin", "Invalid GSTIN number"))
       return
     }
     if (!branchId) {
-      setGstStatusText("GSTIN verification will be available right after branch creation.")
+      setGstStatusText(
+        text(
+          "gstinVerificationAfterBranch",
+          "GSTIN verification will be available right after branch creation."
+        )
+      )
       return
     }
     if (!(await ensureAuthSessionReady())) {
-      setSubmitError("Session expired. Please login again.")
+      setSubmitError(text("errorSessionExpired", "Session expired. Please login again."))
       redirectToBusinessRegisterLogin(router)
       return
     }
@@ -1642,28 +2260,193 @@ export default function BusinessRegisterPage() {
       setVerifyingGst(true)
       await verifyGstForBranch({ gstin, branch_id: branchId })
       setGstVerified(true)
-      setGstStatusText("GSTIN verified successfully.")
+      setGstStatusText(text("gstinVerifiedSuccess", "GSTIN verified successfully."))
       setCookie("verified_gstin", gstin, { maxAge: 60 * 60 * 24 * 7, path: "/" })
     } catch (err) {
       setGstVerified(false)
-      setGstStatusText(getErrorMessage(err, "GSTIN verification failed"))
+      setGstStatusText(
+        getErrorMessage(err, text("errorGstinVerificationFailed", "GSTIN verification failed"))
+      )
     } finally {
       setVerifyingGst(false)
     }
   }
 
+  const launchPaymentAndFinalize = useCallback(async (registrationContext = {}) => {
+    const branchId = String(registrationContext?.createdBranchId || "").trim()
+    const businessId = String(registrationContext?.businessId || "").trim()
+    const orderId = String(registrationContext?.orderId || "").trim()
+    const paymentSessionId = String(registrationContext?.paymentSessionId || "").trim()
+
+    if (!paymentSessionId) {
+      await reportPaymentFlow({
+        event: "payment_session_missing",
+        branchId,
+        businessId,
+        orderId,
+        status: BRANCH_PAYMENT_STATUS_FAILED,
+        error: "Payment session ID was not generated for the branch.",
+      })
+      setSubmitError(text("errorPaymentUnavailable", "Payment session is unavailable right now."))
+      return false
+    }
+
+    setSubmitError("")
+    setPaymentNotice("")
+    setPaymentLaunching(true)
+
+    try {
+      const trackedState = await readTrackedPaymentState({
+        branchId,
+        orderId,
+        sessionId: paymentSessionId,
+      })
+
+      if (trackedState.status === BRANCH_PAYMENT_STATUS_ACTIVE) {
+        setPendingPaymentContext(null)
+        const completed = await completeSuccessfulRegistration(registrationContext)
+        if (!completed) {
+          setSubmitError(
+            text(
+              "errorPaymentConfirmationFailed",
+              "Payment was received, but branch activation could not be confirmed yet."
+            )
+          )
+        }
+        return completed
+      }
+
+      if (trackedState.status === BRANCH_PAYMENT_STATUS_FAILED) {
+        const trackedError =
+          String(trackedState?.tracked?.error || "").trim() ||
+          text("errorPaymentFailed", "Payment could not be completed. Please try again.")
+        setSubmitError(trackedError)
+        return false
+      }
+    } catch {
+      // If the status probe fails, continue to checkout launch and let the standard flow recover.
+    }
+
+      await reportPaymentFlow({
+        event: "payment_initiated",
+        branchId,
+        businessId,
+        orderId,
+        sessionId: paymentSessionId,
+        status: BRANCH_PAYMENT_STATUS_PENDING,
+      })
+
+    try {
+      await startPayment(paymentSessionId)
+      setPaymentAwaitingConfirmation(true)
+      setPaymentNotice(
+        text(
+          "paymentProcessingNotice",
+          "Cashfree is finalizing your payment. Please keep this page open."
+        )
+      )
+
+      const profileConfirmed = await confirmRegisteredBusinessProfile({
+        expectedBranchId: branchId,
+      })
+      if (profileConfirmed) {
+        setPendingPaymentContext(null)
+        setPaymentNotice("")
+        const completed = await completeSuccessfulRegistration(registrationContext)
+        if (!completed) {
+          setSubmitError(
+            text(
+              "errorPaymentConfirmationFailed",
+              "Payment was received, but branch activation could not be confirmed yet."
+            )
+          )
+        }
+        return completed
+      }
+
+      await waitForTrackedPaymentResolution({
+        branchId,
+        orderId,
+        paymentSessionId,
+      })
+
+      setPendingPaymentContext(null)
+      setPaymentNotice("")
+      const completed = await completeSuccessfulRegistration(registrationContext)
+      if (!completed) {
+        setSubmitError(
+          text(
+            "errorPaymentConfirmationFailed",
+            "Payment was received, but branch activation could not be confirmed yet."
+          )
+        )
+        return false
+      }
+      return true
+    } catch (err) {
+      const paymentErrorCode = String(err?.code || "").trim()
+      const paymentError = getErrorMessage(
+        err,
+        text("errorPaymentFailed", "Payment could not be completed. Please try again.")
+      )
+
+      if (paymentErrorCode === "PAYMENT_CONFIRMATION_PENDING") {
+        await reportPaymentFlow({
+          event: "payment_confirmation_pending",
+          branchId,
+          businessId,
+          orderId,
+          sessionId: paymentSessionId,
+          status: BRANCH_PAYMENT_STATUS_PENDING,
+          error: paymentError,
+        })
+        setPaymentNotice(paymentError)
+        setSubmitError("")
+        return false
+      }
+
+      await reportPaymentFlow({
+        event:
+          paymentErrorCode === "PAYMENT_TRACKED_FAILED"
+            ? "payment_confirmation_failed"
+            : "payment_initiation_failed",
+        branchId,
+        businessId,
+        orderId,
+        sessionId: paymentSessionId,
+        status: BRANCH_PAYMENT_STATUS_FAILED,
+        error: paymentError,
+      })
+      setPaymentNotice("")
+      setSubmitError(paymentError)
+      return false
+    } finally {
+      setPaymentLaunching(false)
+      setPaymentAwaitingConfirmation(false)
+    }
+  }, [
+    completeSuccessfulRegistration,
+    confirmRegisteredBusinessProfile,
+    readTrackedPaymentState,
+    reportPaymentFlow,
+    startPayment,
+    text,
+    waitForTrackedPaymentResolution,
+  ])
+
   const handleSubmit = async () => {
     const businessName = normalizeBusinessLabel(form.businessName)
     const displayName = normalizeBusinessLabel(form.displayName)
-      const businessType = form.businessType
-      const placeId = form.placeId.trim()
-      const cityId = form.cityId.trim()
-      const primaryNumber = form.primaryNumber.trim()
-      const whatsappNumber = form.whatsappNumber.trim()
-      const effectiveWhatsappNumber = whatsappNumber || primaryNumber
-      const countryCode = normalizeCountryCode(selectedCountry?.dialCode)
-      const businessWebsite = form.businessWebsite.trim()
-      const businessEmail = form.businessEmail.trim()
+    const businessType = form.businessType
+    const placeId = form.placeId.trim()
+    const cityId = form.cityId.trim()
+    const primaryNumber = form.primaryNumber.trim()
+    const whatsappNumber = form.whatsappNumber.trim()
+    const effectiveWhatsappNumber = whatsappNumber || primaryNumber
+    const countryCode = normalizeCountryCode(selectedCountry?.dialCode)
+    const businessWebsite = form.businessWebsite.trim()
+    const businessEmail = form.businessEmail.trim()
+    const aboutBranch = form.aboutBranch.trim() || defaultAboutBranch
     const pan = form.pan.trim().toUpperCase()
     const gstin = form.gstin.trim().toUpperCase()
     const businessPlaceId = form.businessPlaceId.trim()
@@ -1672,11 +2455,11 @@ export default function BusinessRegisterPage() {
     let longitude = normalizeCoordinate(form.longitude)
 
     if (!businessName) {
-      setSubmitError("Business name is required")
+      setSubmitError(text("errorBusinessNameRequired", "Business name is required"))
       return
     }
     if (!displayName) {
-      setSubmitError("Display name is required")
+      setSubmitError(text("errorDisplayNameRequired", "Display name is required"))
       return
     }
     const lockedProductKey = String(lockedProductKeyRef.current || getDefaultProductKey() || "").trim()
@@ -1706,28 +2489,38 @@ export default function BusinessRegisterPage() {
       setForm((prev) => ({ ...prev, mainCategoryId: resolvedMainCategoryId }))
     }
     if (!resolvedMainCategoryId) {
-      setSubmitError("Main category is not available right now. Please retry in a moment.")
+      setSubmitError(
+        text(
+          "errorMainCategoryUnavailable",
+          "Main category is not available right now. Please retry in a moment."
+        )
+      )
       return
     }
     if (businessType === "") {
-      setSubmitError("Business type is required")
+      setSubmitError(text("errorBusinessTypeRequired", "Business type is required"))
       return
     }
     if (!primaryNumber || !MOBILE_REGEX.test(primaryNumber)) {
-      setSubmitError("Valid primary number is required")
+      setSubmitError(text("errorPrimaryNumberRequired", "Valid primary number is required"))
       return
     }
     if (!mobileVerified) {
-      setSubmitError("Please verify business mobile number before registration")
+      setSubmitError(
+        text(
+          "errorVerifyBusinessMobile",
+          "Please verify business mobile number before registration"
+        )
+      )
       return
     }
     if (form.seanebId.trim() && !seanebVerified) {
-      setSubmitError("Please verify SeaNeB ID before registration")
+      setSubmitError(text("errorVerifySeaNeB", "Please verify SeaNeB ID before registration"))
       return
     }
     const resolvedPlaceId = placeId || cityId
     if (!resolvedPlaceId) {
-      setSubmitError("Business location is required")
+      setSubmitError(text("errorBusinessLocationRequired", "Business location is required"))
       return
     }
       if (resolvedPlaceId && !hasMeaningfulCoordinates(latitude, longitude)) {
@@ -1743,43 +2536,60 @@ export default function BusinessRegisterPage() {
       }
     }
     if (!hasMeaningfulCoordinates(latitude, longitude)) {
-      setSubmitError("Please select a valid location from autocomplete to capture coordinates")
+      setSubmitError(
+        text(
+          "errorSelectValidLocation",
+          "Please select a valid location from autocomplete to capture coordinates"
+        )
+      )
       return
     }
     if (pan && !PAN_REGEX.test(pan)) {
-      setSubmitError("Invalid PAN format")
+      setSubmitError(text("errorInvalidPanFormat", "Invalid PAN format"))
       return
     }
     if (gstin && !GST_REGEX.test(gstin)) {
-      setSubmitError("Invalid GSTIN format")
+      setSubmitError(text("errorInvalidGstinFormat", "Invalid GSTIN format"))
       return
     }
     if (!form.agree) {
-      setSubmitError("You must agree to the terms and conditions")
+      setSubmitError(text("errorAgreeTerms", "You must agree to the terms and conditions"))
       return
     }
+
+    if (pendingPaymentContext?.paymentSessionId) {
+      await launchPaymentAndFinalize(pendingPaymentContext)
+      return
+    }
+
     if (!(await ensureAuthSessionReady())) {
-      setSubmitError("Session expired. Please login again.")
+      setSubmitError(text("errorSessionExpired", "Session expired. Please login again."))
       redirectToBusinessRegisterLogin(router)
       return
     }
 
     setSubmitError("")
 
+    const paymentStepError = validateStep(5)
+    if (paymentStepError) {
+      setSubmitError(paymentStepError)
+      return
+    }
+
     await runWithTransition(
       async () => {
-          const response = await registerBusiness({
-            business_name: businessName,
-            display_name: displayName,
-            main_category_id: resolvedMainCategoryId,
-            business_type: Number(form.businessType),
-            seaneb_id: form.seanebId.trim(),
-            country_code: countryCode || undefined,
-            primary_number: primaryNumber,
-            whatsapp_number: effectiveWhatsappNumber,
+        const response = await registerBusiness({
+          business_name: businessName,
+          display_name: displayName,
+          main_category_id: resolvedMainCategoryId,
+          business_type: Number(form.businessType),
+          seaneb_id: form.seanebId.trim(),
+          country_code: countryCode || undefined,
+          primary_number: primaryNumber,
+          whatsapp_number: effectiveWhatsappNumber,
           business_website: businessWebsite || undefined,
           business_email: businessEmail || undefined,
-          about_branch: form.aboutBranch.trim() || "Head office branch",
+          about_branch: aboutBranch,
           address: form.businessLocation.trim(),
           landmark: form.landmark.trim(),
           place_id: resolvedPlaceId,
@@ -1797,159 +2607,172 @@ export default function BusinessRegisterPage() {
       {
         onSuccess: async (response) => {
           const data = response?.data || response || {}
-          // Attempt to hydrate any access token returned in response headers or body.
-          try {
-            const headers = response?.headers || {}
-            const headerCandidates = [
-              headers?.authorization,
-              headers?.Authorization,
-              headers["authorization"],
-              headers["Authorization"],
-              headers["x-access-token"],
-              headers["x-access_token"],
-              headers["x-access-token"],
-              headers["access-token"],
-              headers["access_token"],
-              headers["x-auth-token"],
-            ]
-            let headerAuth = ""
-            for (const h of headerCandidates) {
-              if (!h) continue
-              headerAuth = String(h || "").trim()
-              if (headerAuth) break
-            }
+          const payload = extractPayload(data)
+          const businessId = String(payload?.business_id || payload?.id || data?.business_id || data?.id || "").trim()
+          const createdBranchId = String(
+            payload?.branch_id || payload?.default_branch_id || data?.branch_id || data?.default_branch_id || ""
+          ).trim()
+          const orderId = extractOrderId(data)
+          const paymentSessionId = extractPaymentSessionId(data)
 
-            const headerToken = headerAuth && /^Bearer\s+/i.test(headerAuth)
-              ? headerAuth.replace(/^Bearer\s+/i, "").trim()
-              : headerAuth
+          hydrateRegistrationTokens(response)
 
-            const bodyToken = String(
-              data?.access_token || data?.accessToken || data?.token || data?.jwt || ""
-            ).trim()
-
-            // Also prefer CSRF token from headers or body if present
-            const headerCsrf = String(
-              headers?.["x-csrf-token"] || headers?.["x-xsrf-token"] || headers?.["x-csrf_token"] || headers?.["x-csrf"] || ""
-            ).trim()
-
-            const bodyCsrf = String(
-              data?.csrf_token || data?.csrfToken || data?.csrf || ""
-            ).trim()
-
-            const finalToken = headerToken || bodyToken || ""
-            const finalCsrf = headerCsrf || bodyCsrf || ""
-
-            if (finalToken || finalCsrf) {
-              try {
-                hydrateAuthSession({ accessToken: finalToken, csrfToken: finalCsrf, broadcast: true })
-              } catch (e) {
-                // ignore
-              }
-            }
-          } catch (e) {
-            // ignore token extraction errors
-          }
-          const businessId = data?.business_id || data?.id || ""
-          const createdBranchId = String(data?.branch_id || data?.default_branch_id || "")
-          setBranchId(createdBranchId)
-
-          if (createdBranchId && pan && !panVerified && PAN_REGEX.test(pan)) {
-            try {
-              await verifyPanForBranch({ pan, branch_id: createdBranchId })
-              setPanVerified(true)
-              setPanStatusText("PAN verified successfully.")
-              setCookie("verified_pan", pan, { maxAge: 60 * 60 * 24 * 7, path: "/" })
-            } catch {
-              setPanStatusText("PAN could not be verified right now. You can retry from dashboard.")
-            }
-          }
-
-          if (createdBranchId && gstin && !gstVerified && GST_REGEX.test(gstin)) {
-            try {
-              await verifyGstForBranch({ gstin, branch_id: createdBranchId })
-              setGstVerified(true)
-              setGstStatusText("GSTIN verified successfully.")
-              setCookie("verified_gstin", gstin, { maxAge: 60 * 60 * 24 * 7, path: "/" })
-            } catch {
-              setGstStatusText("GSTIN could not be verified right now. You can retry from dashboard.")
-            }
-          }
-
-          setCookie("business_name", businessName, { path: "/" })
-          setCookie("business_type", String(form.businessType), { path: "/" })
-          setCookie("business_location", form.businessLocation, { path: "/" })
-          setCookie("business_id", String(businessId), { path: "/" })
-          setCookie("branch_id", createdBranchId, { path: "/" })
-          setCookie("business_registered", "true", {
-            maxAge: 60 * 60 * 24 * 30,
-            path: "/",
+          await reportPaymentFlow({
+            event: createdBranchId ? "branch_created" : "branch_creation_failed",
+            branchId: createdBranchId,
+            businessId,
+            orderId,
+            sessionId: paymentSessionId,
+            status: createdBranchId ? BRANCH_PAYMENT_STATUS_PENDING : BRANCH_PAYMENT_STATUS_FAILED,
+            error: createdBranchId ? "" : "Business was created without a branch identifier.",
           })
-          setDashboardMode(DASHBOARD_MODE_BUSINESS)
 
-          setCookie("profile_completed", "true", {
-            maxAge: 60 * 60 * 24 * 30,
-            path: "/",
-          })
-          const profileConfirmed = await confirmRegisteredBusinessProfile({
-            expectedBranchId: createdBranchId,
-          })
-          if (!profileConfirmed) {
-            redirectToBusinessRegisterLogin(router, "/dashboard/broker")
+          if (!createdBranchId) {
+            setSubmitError(
+              text("errorBranchCreationFailed", "Branch could not be created. Please retry registration.")
+            )
             return
           }
 
-          finalizeRegistration({ router, businessId, branchId: createdBranchId })
+          const registrationContext = {
+            businessId,
+            createdBranchId,
+            orderId,
+            businessName,
+            displayName,
+            businessType: String(form.businessType),
+            businessEmail,
+            aboutBranch,
+            businessLocation: form.businessLocation.trim(),
+            placeId: resolvedPlaceId,
+            pan,
+            gstin,
+          }
+
+          if (paymentSessionId) {
+            await reportPaymentFlow({
+              event: "payment_session_created",
+              branchId: createdBranchId,
+              businessId,
+              orderId,
+              sessionId: paymentSessionId,
+              status: BRANCH_PAYMENT_STATUS_PENDING,
+            })
+            stopTransition()
+            setPendingPaymentContext({
+              ...registrationContext,
+              paymentSessionId,
+            })
+            await launchPaymentAndFinalize({
+              ...registrationContext,
+              paymentSessionId,
+            })
+            return
+          }
+
+          await reportPaymentFlow({
+            event: "payment_session_missing",
+            branchId: createdBranchId,
+            businessId,
+            orderId,
+            status: BRANCH_PAYMENT_STATUS_FAILED,
+            error: "Payment session ID missing after branch creation.",
+          })
+          setSubmitError(text("errorPaymentUnavailable", "Payment session is unavailable right now."))
         },
         onError: (err) => {
           (async () => {
             const status = Number(err?.response?.status || 0)
             const data = err?.response?.data || err?.response || {}
+            const payload = extractPayload(data)
+            const orderId = extractOrderId(data)
+            const initialErrorMessage = getErrorMessage(err, text("errorRegistrationFailed", "Registration failed"))
 
             const maybeBusinessId =
-              data?.business_id || data?.id || data?.data?.business_id || data?.data?.id || data?.result?.business_id || data?.result?.id || ""
+              payload?.business_id || payload?.id || data?.business_id || data?.id || ""
             const maybeBranchId = String(
-              data?.branch_id || data?.default_branch_id || data?.data?.branch_id || data?.data?.default_branch_id || ""
+              payload?.branch_id || payload?.default_branch_id || data?.branch_id || data?.default_branch_id || ""
             )
+            const maybePaymentSessionId = extractPaymentSessionId(data)
 
             // If auth error but payload contains created business/branch info,
             // treat it as a success fallback instead of forcing login.
-            if ((status === 401 || status === 403) && !maybeBusinessId && !maybeBranchId) {
+            if ((status === 401 || status === 403) && !maybeBusinessId && !maybeBranchId && !maybePaymentSessionId) {
+              await reportPaymentFlow({
+                event: "order_creation_failed",
+                orderId,
+                status: BRANCH_PAYMENT_STATUS_FAILED,
+                error: initialErrorMessage,
+              })
               redirectToBusinessRegisterLogin(router)
               return
             }
 
-            if (maybeBusinessId || maybeBranchId) {
+            if (maybeBusinessId || maybeBranchId || maybePaymentSessionId) {
               try {
-                const businessName = normalizeBusinessLabel(form.businessName)
-                const businessId = maybeBusinessId || ""
-                const createdBranchId = maybeBranchId || ""
-
-                setBranchId(createdBranchId)
-
-                setCookie("business_name", businessName, { path: "/" })
-                setCookie("business_type", String(form.businessType), { path: "/" })
-                setCookie("business_location", form.businessLocation, { path: "/" })
-                setCookie("business_id", String(businessId), { path: "/" })
-                setCookie("branch_id", createdBranchId, { path: "/" })
-                setCookie("business_registered", "true", {
-                  maxAge: 60 * 60 * 24 * 30,
-                  path: "/",
-                })
-                setDashboardMode(DASHBOARD_MODE_BUSINESS)
-
-                setCookie("profile_completed", "true", {
-                  maxAge: 60 * 60 * 24 * 30,
-                  path: "/",
+                await reportPaymentFlow({
+                  event: maybeBranchId ? "branch_created" : "branch_creation_failed",
+                  branchId: maybeBranchId,
+                  businessId: maybeBusinessId,
+                  orderId,
+                  sessionId: maybePaymentSessionId,
+                  status: maybeBranchId ? BRANCH_PAYMENT_STATUS_PENDING : BRANCH_PAYMENT_STATUS_FAILED,
+                  error: maybeBranchId ? "" : initialErrorMessage,
                 })
 
-                const recoveredProfile = await confirmRegisteredBusinessProfile({
-                  expectedBranchId: createdBranchId,
-                })
-                if (!recoveredProfile) {
-                  redirectToBusinessRegisterLogin(router, "/dashboard/broker")
+                if (!maybeBranchId) {
+                  setSubmitError(
+                    text("errorBranchCreationFailed", "Branch could not be created. Please retry registration.")
+                  )
                   return
                 }
-                finalizeRegistration({ router, businessId, branchId: createdBranchId })
+
+                const registrationContext = {
+                  businessId: maybeBusinessId || "",
+                  createdBranchId: maybeBranchId || "",
+                  orderId,
+                  businessName,
+                  displayName,
+                  businessType: String(form.businessType),
+                  businessEmail,
+                  aboutBranch,
+                  businessLocation: form.businessLocation.trim(),
+                  placeId: resolvedPlaceId,
+                  pan,
+                  gstin,
+                }
+
+                if (maybePaymentSessionId) {
+                  hydrateRegistrationTokens(err?.response)
+                  await reportPaymentFlow({
+                    event: "payment_session_created",
+                    branchId: maybeBranchId,
+                    businessId: maybeBusinessId,
+                    orderId,
+                    sessionId: maybePaymentSessionId,
+                    status: BRANCH_PAYMENT_STATUS_PENDING,
+                  })
+                  stopTransition()
+                  setPendingPaymentContext({
+                    ...registrationContext,
+                    paymentSessionId: maybePaymentSessionId,
+                  })
+                  await launchPaymentAndFinalize({
+                    ...registrationContext,
+                    paymentSessionId: maybePaymentSessionId,
+                  })
+                  return
+                }
+
+                await reportPaymentFlow({
+                  event: "payment_session_missing",
+                  branchId: maybeBranchId,
+                  businessId: maybeBusinessId,
+                  orderId,
+                  status: BRANCH_PAYMENT_STATUS_FAILED,
+                  error: "Payment session ID missing after fallback branch creation.",
+                })
+                setSubmitError(text("errorPaymentUnavailable", "Payment session is unavailable right now."))
                 return
               } catch (fallbackErr) {
                 // If fallback processing fails, fall through to show error below.
@@ -1957,7 +2780,13 @@ export default function BusinessRegisterPage() {
               }
             }
 
-            setSubmitError(getErrorMessage(err, "Registration failed"))
+            await reportPaymentFlow({
+              event: "order_creation_failed",
+              orderId,
+              status: BRANCH_PAYMENT_STATUS_FAILED,
+              error: initialErrorMessage,
+            })
+            setSubmitError(initialErrorMessage)
           })()
         },
       }
@@ -1968,8 +2797,11 @@ export default function BusinessRegisterPage() {
   if (showTransition) {
     return (
       <AuthTransitionOverlay
-        title="Registering business..."
-        description="Creating your business profile and preparing your dashboard."
+        title={text("transitionPreparingTitle", "Preparing registration...")}
+        description={text(
+          "transitionPreparingDescription",
+          "Creating your business profile and preparing secure checkout."
+        )}
       />
     )
   }
@@ -1984,12 +2816,19 @@ export default function BusinessRegisterPage() {
       <div className="business-register-shell">
         <div className="business-register-top">
           <div className="business-register-header">
-            <h1 className="business-register-title">Register Your Business</h1>
-            <p className="business-register-subtitle">Set up your branch profile to start listing and managing leads.</p>
+            <h1 className="business-register-title">{text("title", "Register Your Business")}</h1>
+            <p className="business-register-subtitle">
+              {text("subtitle", "Set up your branch profile to start listing and managing leads.")}
+            </p>
           </div>
           <div className="business-register-progress">
             <div className="business-register-progress-meta">
-              <span>Step {currentStep} of {WIZARD_STEPS.length}</span>
+              <span>
+                {textf("stepProgress", "Step {current} of {total}", {
+                  current: currentStep,
+                  total: wizardSteps.length,
+                })}
+              </span>
               <strong>{currentStepMeta.title}</strong>
             </div>
             <div className="business-register-progress-track">
@@ -1997,7 +2836,7 @@ export default function BusinessRegisterPage() {
             </div>
           </div>
           <div className="business-wizard-stepper">
-            {WIZARD_STEPS.map((step) => {
+            {wizardSteps.map((step) => {
               const isActive = step.id === currentStep
               const isDone = step.id < currentStep
               return (
@@ -2006,6 +2845,7 @@ export default function BusinessRegisterPage() {
                   type="button"
                   className={`business-wizard-step ${isActive ? "active" : ""} ${isDone ? "done" : ""} min-h-[38px]`}
                   onClick={() => handleStepChange(step.id)}
+                  disabled={Boolean(pendingPaymentContext) && step.id !== currentStep}
                 >
                   <span className="business-wizard-step-index">{step.id}</span>
                   <span className="business-wizard-step-text whitespace-nowrap">{step.title}</span>
@@ -2026,11 +2866,14 @@ export default function BusinessRegisterPage() {
           {currentStep === 1 && (
           <section className="business-section-card">
             <div className="business-section-head">
-              <h2>Business Basics</h2>
-              <p>Core identity details visible to your customers.</p>
+              <h2>{text("sectionBasicsTitle", "Business Basics")}</h2>
+              <p>{text("sectionBasicsSubtitle", "Core identity details visible to your customers.")}</p>
             </div>
             <div className="business-grid business-grid--2">
-              <Field label="Business Name *" hint="Type at least 2 letters for name suggestions.">
+              <Field
+                label={text("fieldBusinessName", "Business Name *")}
+                hint={text("hintBusinessName", "Type at least 2 letters for name suggestions.")}
+              >
                 <div className="autocomplete">
                   <input
                     type="text"
@@ -2049,11 +2892,15 @@ export default function BusinessRegisterPage() {
                   {businessSuggestOpen && (
                     <div className="autocomplete-box">
                       {businessSuggestLoading && (
-                        <div className="autocomplete-item loading">Loading...</div>
+                        <div className="autocomplete-item loading">
+                          {text("autocompleteLoading", "Loading...")}
+                        </div>
                       )}
 
                       {!businessSuggestLoading && businessSuggestions.length === 0 && (
-                        <div className="autocomplete-item">No businesses found</div>
+                        <div className="autocomplete-item">
+                          {text("autocompleteNoBusinesses", "No businesses found")}
+                        </div>
                       )}
 
                       {!businessSuggestLoading &&
@@ -2069,10 +2916,15 @@ export default function BusinessRegisterPage() {
                               key={businessPlaceId || `${label}-${index}`}
                               className="autocomplete-item autocomplete-item--media"
                               onMouseDown={() => {
+                                const normalizedLabel = normalizeBusinessLabel(label)
                                 suppressNextBusinessAutocompleteRef.current = true
                                 setForm((prev) => ({
                                   ...prev,
-                                  businessName: normalizeBusinessLabel(label),
+                                  businessName: normalizedLabel,
+                                  displayName:
+                                    !String(prev.displayName || "").trim() || prev.displayName === prev.businessName
+                                      ? normalizedLabel
+                                      : prev.displayName,
                                   businessPlaceId,
                                   photoReference,
                                 }))
@@ -2082,7 +2934,7 @@ export default function BusinessRegisterPage() {
                               <span className="autocomplete-item__thumb" aria-hidden="true">
                                 <Image
                                   src={thumbnailSrc}
-                                  alt=""
+                                  alt={text("selectedBusinessPreviewAlt", "Selected business preview")}
                                   width={48}
                                   height={48}
                                   className="autocomplete-item__thumb-img"
@@ -2100,7 +2952,7 @@ export default function BusinessRegisterPage() {
                   <div className="business-photo-preview">
                     <Image
                       src={selectedBusinessPhotoSrc}
-                      alt="Selected business preview"
+                      alt={text("selectedBusinessPreviewAlt", "Selected business preview")}
                       width={180}
                       height={180}
                       className="business-photo-preview__img"
@@ -2110,13 +2962,13 @@ export default function BusinessRegisterPage() {
                 )}
               </Field>
 
-              <Field label="Display Name *">
+              <Field label={text("fieldDisplayName", "Display Name *")}>
                 <input type="text" className="business-form-input" value={form.displayName} onChange={(e) => setField("displayName", e.target.value)} />
               </Field>
 
-              <Field label="Category *">
+              <Field label={text("fieldCategory", "Category *")}>
                 <select className="business-form-select" value={form.mainCategoryId} onChange={(e) => setField("mainCategoryId", e.target.value)}>
-                  <option value="">Select a category</option>
+                  <option value="">{text("optionSelectCategory", "Select a category")}</option>
                   {categories.length > 0 ? (
                     categories.map((category, index) => {
                       const categoryId = getCategoryId(category)
@@ -2129,18 +2981,18 @@ export default function BusinessRegisterPage() {
                       )
                     })
                   ) : (
-                    <option value="">No categories available</option>
+                    <option value="">{text("optionNoCategoriesAvailable", "No categories available")}</option>
                   )}
                 </select>
               </Field>
 
-              <Field label="Business Type *">
+              <Field label={text("fieldBusinessType", "Business Type *")}>
                 <select className="business-form-select" value={form.businessType} onChange={(e) => setField("businessType", e)}>
-                  <option value="">Select business type</option>
-                  <option value="0">Individual Agent</option>
-                  <option value="1">Real Estate Agency</option>
-                  <option value="2">Developer</option>
-                  <option value="3">Broker Firm</option>
+                  <option value="">{text("optionSelectBusinessType", "Select business type")}</option>
+                  <option value="0">{text("businessTypeIndividualAgent", "Individual Agent")}</option>
+                  <option value="1">{text("businessTypeRealEstateAgency", "Real Estate Agency")}</option>
+                  <option value="2">{text("businessTypeDeveloper", "Developer")}</option>
+                  <option value="3">{text("businessTypeBrokerFirm", "Broker Firm")}</option>
                 </select>
               </Field>
 
@@ -2150,6 +3002,20 @@ export default function BusinessRegisterPage() {
                   onChange={(v) => setField("seanebId", v)}
                   verified={seanebVerified}
                   setVerified={setSeanebVerified}
+                  labels={{
+                    label: text("fieldSeanebId", "SeaNeB ID *"),
+                    placeholder: text("placeholderSeanebId", "username01"),
+                    verify: text("buttonVerify", "Verify"),
+                    edit: text("buttonEdit", "Edit"),
+                    checking: text("buttonChecking", "Checking..."),
+                    hint: text(
+                      "hintSeanebId",
+                      "6-30 characters. Lowercase letters, numbers, and hyphen (-) only."
+                    ),
+                    existsError: text("errorSeanebIdExists", "SeaNeB ID already exists"),
+                    invalidError: text("errorInvalidSeanebId", "Invalid SeaNeB ID"),
+                    unavailableError: text("errorSeanebIdUnavailable", "Unable to verify SeaNeB ID"),
+                  }}
                 />
               </div>
             </div>
@@ -2159,11 +3025,15 @@ export default function BusinessRegisterPage() {
           {currentStep === 2 && (
           <section className="business-section-card business-section-card--contact">
             <div className="business-section-head">
-              <h2>Contact Information</h2>
-              <p>How can customers reach you?</p>
+              <h2>{text("sectionContactTitle", "Contact Information")}</h2>
+              <p>{text("sectionContactSubtitle", "How can customers reach you?")}</p>
             </div>
             <div className="business-contact-grid">
-              <Field label="Business Email (Optional)" hint="Optional. You can verify it now or later." className="business-contact-grid-email">
+              <Field
+                label={text("fieldBusinessEmailOptional", "Business Email (Optional)")}
+                hint={text("hintBusinessEmailOptional", "Optional. You can verify it now or later.")}
+                className="business-contact-grid-email"
+              >
                 <div className="business-inline-action business-inline-action--soft">
                   <input
                     type="email"
@@ -2171,7 +3041,7 @@ export default function BusinessRegisterPage() {
                     value={form.businessEmail}
                     disabled={emailVerified}
                     onChange={(e) => setField("businessEmail", e.target.value)}
-                    placeholder="Enter business email"
+                    placeholder={text("placeholderBusinessEmail", "Enter business email")}
                   />
                   <button
                     type="button"
@@ -2179,20 +3049,35 @@ export default function BusinessRegisterPage() {
                     disabled={emailLoading || (!emailVerified && !form.businessEmail.trim()) || (emailVerified && emailEditCooldown > 0)}
                     className="business-inline-action-btn"
                   >
-                    {emailLoading ? "Sending..." : emailVerified ? "Edit" : "Verify"}
+                    {emailLoading
+                      ? text("buttonSending", "Sending...")
+                      : emailVerified
+                        ? text("buttonEdit", "Edit")
+                        : text("buttonVerify", "Verify")}
                   </button>
                 </div>
                 {emailVerified && emailEditCooldown > 0 && (
-                  <p className="business-verify-note">Try to edit in {formatCooldown(emailEditCooldown)}</p>
+                  <p className="business-verify-note">
+                    {textf("noteTryEditIn", "Try to edit in {time}", {
+                      time: formatCooldown(emailEditCooldown),
+                    })}
+                  </p>
                 )}
               </Field>
 
-              <Field label="Primary Mobile Number *" className="business-contact-grid-primary">
+              <Field
+                label={text("fieldPrimaryMobile", "Primary Mobile Number *")}
+                className="business-contact-grid-primary"
+              >
                 <div className="business-phone-row">
                   <CountryCodePicker
                     value={selectedCountry}
                     options={COUNTRY_OPTIONS}
                     onChange={setSelectedCountry}
+                    labels={{
+                      searchPlaceholder: text("countrySearchPlaceholder", "Search country or code"),
+                      noResults: text("countryNoResults", "No country found."),
+                    }}
                   />
                   <div className="business-phone-input-wrap">
                     <input
@@ -2201,7 +3086,7 @@ export default function BusinessRegisterPage() {
                       value={form.primaryNumber}
                       disabled={mobileVerified}
                       onChange={(e) => setField("primaryNumber", e.target.value.replace(/\D/g, ""))}
-                      placeholder="Enter mobile number"
+                      placeholder={text("placeholderPrimaryNumber", "Enter mobile number")}
                     />
                   </div>
                   <button
@@ -2210,23 +3095,41 @@ export default function BusinessRegisterPage() {
                     disabled={mobileLoading || (!mobileVerified && !form.primaryNumber.trim()) || (mobileVerified && mobileEditCooldown > 0)}
                     className="business-inline-action-btn"
                   >
-                    {mobileLoading ? "Sending..." : mobileVerified ? "Edit" : "Verify"}
+                    {mobileLoading
+                      ? text("buttonSending", "Sending...")
+                      : mobileVerified
+                        ? text("buttonEdit", "Edit")
+                        : text("buttonVerify", "Verify")}
                   </button>
                 </div>
                 {!mobileVerified && (
-                  <p className="business-verify-note">OTP will be sent to this number.</p>
+                  <p className="business-verify-note">
+                    {text("noteOtpSentToThisNumber", "OTP will be sent to this number.")}
+                  </p>
                 )}
                 {mobileVerified && mobileEditCooldown > 0 && (
-                  <p className="business-verify-note">Try to edit in {formatCooldown(mobileEditCooldown)}</p>
+                  <p className="business-verify-note">
+                    {textf("noteTryEditIn", "Try to edit in {time}", {
+                      time: formatCooldown(mobileEditCooldown),
+                    })}
+                  </p>
                 )}
               </Field>
 
-              <Field label="WhatsApp Number" hint="Optional. Leave blank to use the primary number." className="business-contact-grid-whatsapp">
+              <Field
+                label={text("fieldWhatsappNumber", "WhatsApp Number")}
+                hint={text("hintWhatsappOptional", "Optional. Leave blank to use the primary number.")}
+                className="business-contact-grid-whatsapp"
+              >
                 <div className="business-phone-row">
                   <CountryCodePicker
                     value={selectedCountry}
                     options={COUNTRY_OPTIONS}
                     onChange={setSelectedCountry}
+                    labels={{
+                      searchPlaceholder: text("countrySearchPlaceholder", "Search country or code"),
+                      noResults: text("countryNoResults", "No country found."),
+                    }}
                   />
                   <div className="business-phone-input-wrap">
                     <input
@@ -2235,7 +3138,7 @@ export default function BusinessRegisterPage() {
                       value={form.whatsappNumber}
                       disabled={whatsappIsVerified && !whatsappAutoVerified}
                       onChange={(e) => setField("whatsappNumber", e.target.value.replace(/\D/g, ""))}
-                      placeholder="Enter WhatsApp number"
+                      placeholder={text("placeholderWhatsappNumber", "Enter WhatsApp number")}
                     />
                   </div>
                   <button
@@ -2256,34 +3159,47 @@ export default function BusinessRegisterPage() {
                     className="business-inline-action-btn"
                   >
                     {whatsappLoading
-                      ? "Sending..."
+                      ? text("buttonSending", "Sending...")
                       : whatsappIsVerified
                         ? whatsappAutoVerified
-                          ? "Verified"
-                          : "Edit"
-                        : "Verify"}
+                          ? text("buttonVerified", "Verified")
+                          : text("buttonEdit", "Edit")
+                        : text("buttonVerify", "Verify")}
                   </button>
                 </div>
                 {!whatsappIsVerified && form.whatsappNumber.trim() && (
-                  <p className="business-verify-note">OTP will be sent on WhatsApp to this number.</p>
+                  <p className="business-verify-note">
+                    {text("noteWhatsappOtpSent", "OTP will be sent on WhatsApp to this number.")}
+                  </p>
                 )}
                 {whatsappAutoVerified && (
                   <p className="business-verify-note">
-                    Using the same number as primary. WhatsApp verification not required.
+                    {text(
+                      "noteWhatsappSameAsPrimary",
+                      "Using the same number as primary. WhatsApp verification not required."
+                    )}
                   </p>
                 )}
                 {whatsappIsVerified && !whatsappAutoVerified && whatsappEditCooldown > 0 && (
-                  <p className="business-verify-note">Try to edit in {formatCooldown(whatsappEditCooldown)}</p>
+                  <p className="business-verify-note">
+                    {textf("noteTryEditIn", "Try to edit in {time}", {
+                      time: formatCooldown(whatsappEditCooldown),
+                    })}
+                  </p>
                 )}
               </Field>
 
-              <Field label="Business Website (Optional)" hint="Optional. Add your website URL if you have one." className="business-contact-grid-website">
+              <Field
+                label={text("fieldBusinessWebsiteOptional", "Business Website (Optional)")}
+                hint={text("hintBusinessWebsiteOptional", "Optional. Add your website URL if you have one.")}
+                className="business-contact-grid-website"
+              >
                 <input
                   type="url"
                   className="business-form-input"
                   value={form.businessWebsite}
                   onChange={(e) => setField("businessWebsite", e.target.value)}
-                  placeholder="https://yourbusiness.com"
+                  placeholder={text("placeholderBusinessWebsite", "https://yourbusiness.com")}
                 />
               </Field>
             </div>
@@ -2293,22 +3209,33 @@ export default function BusinessRegisterPage() {
           {currentStep === 3 && (
           <section className="business-section-card">
             <div className="business-section-head">
-              <h2>Branch Address</h2>
-              <p>Add accurate location details so listings and local discovery work correctly.</p>
+              <h2>{text("sectionAddressTitle", "Branch Address")}</h2>
+              <p>
+                {text(
+                  "sectionAddressSubtitle",
+                  "Add accurate location details so listings and local discovery work correctly."
+                )}
+              </p>
             </div>
             <div className="business-grid business-grid--2">
-              <Field label="About Branch *">
+              <Field label={text("fieldAboutBranch", "About Branch *")}>
                 <input type="text" className="business-form-input" value={form.aboutBranch} onChange={(e) => setField("aboutBranch", e.target.value)} />
               </Field>
 
-              <Field label="Landmark">
+              <Field label={text("fieldLandmark", "Landmark")}>
                 <input type="text" className="business-form-input" value={form.landmark} onChange={(e) => setField("landmark", e.target.value)} />
               </Field>
 
-              <Field label="Business Location *" hint="Select a valid location from autocomplete results.">
+              <Field
+                label={text("fieldBusinessLocation", "Business Location *")}
+                hint={text("hintBusinessLocation", "Select a valid location from autocomplete results.")}
+              >
                 <AutoComplete
                   value={form.businessLocation}
                   onChange={(v) => setField("businessLocation", v)}
+                  placeholder={text("placeholderBusinessLocation", "Search location")}
+                  loadingText={text("autocompleteLoading", "Loading...")}
+                  noResultsText={text("autocompleteNoLocations", "No cities found")}
                   onSelect={async (city) => {
                     const nextPlaceId = String(city?.place_id || "").trim();
                     const nextCityId = String(city?.city_id || "").trim();
@@ -2344,14 +3271,19 @@ export default function BusinessRegisterPage() {
           </section>
           )}
 
-          {currentStep === 3 && (
+          {currentStep === 4 && (
           <section className="business-section-card">
             <div className="business-section-head">
-              <h2>Compliance (Optional)</h2>
-              <p>You can verify PAN and GST now or later from your dashboard.</p>
+              <h2>{text("sectionComplianceTitle", "Compliance (Optional)")}</h2>
+              <p>
+                {text(
+                  "sectionComplianceSubtitle",
+                  "You can verify PAN and GST now or later from your dashboard."
+                )}
+              </p>
             </div>
             <div className="business-grid business-grid--2">
-              <Field label="PAN (optional)">
+              <Field label={text("fieldPanOptional", "PAN (optional)")}>
                 <div className="business-inline-action">
                   <input
                     type="text"
@@ -2367,13 +3299,17 @@ export default function BusinessRegisterPage() {
                     disabled={!form.pan.trim() || panVerified || verifyingPan}
                     className="h-11 min-w-[110px] rounded-lg border border-blue-600 bg-blue-600 px-4 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
                   >
-                    {verifyingPan ? "Verifying..." : panVerified ? "Verified" : "Verify"}
+                    {verifyingPan
+                      ? text("buttonVerifying", "Verifying...")
+                      : panVerified
+                        ? text("buttonVerified", "Verified")
+                        : text("buttonVerify", "Verify")}
                   </button>
                 </div>
                 {panStatusText && <p className="business-verify-note">{panStatusText}</p>}
               </Field>
 
-              <Field label="GSTIN (optional)">
+              <Field label={text("fieldGstinOptional", "GSTIN (optional)")}>
                 <div className="business-inline-action">
                   <input
                     type="text"
@@ -2389,7 +3325,11 @@ export default function BusinessRegisterPage() {
                     disabled={!form.gstin.trim() || gstVerified || verifyingGst}
                     className="h-11 min-w-[110px] rounded-lg border border-blue-600 bg-blue-600 px-4 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
                   >
-                    {verifyingGst ? "Verifying..." : gstVerified ? "Verified" : "Verify"}
+                    {verifyingGst
+                      ? text("buttonVerifying", "Verifying...")
+                      : gstVerified
+                        ? text("buttonVerified", "Verified")
+                        : text("buttonVerify", "Verify")}
                   </button>
                 </div>
                 {gstStatusText && <p className="business-verify-note">{gstStatusText}</p>}
@@ -2398,22 +3338,118 @@ export default function BusinessRegisterPage() {
           </section>
           )}
 
-          {currentStep === 3 && (
+          {currentStep === 4 && (
             <div className="business-submit-panel">
               <div className="checkbox-row">
                 <input type="checkbox" id="agree" checked={form.agree} onChange={(e) => setField("agree", e.target.checked)} />
                 <label htmlFor="agree" className="text-sm cursor-pointer">
-                  I agree to the business{" "}
+                  {text("agreePrefix", "I agree to the business")}{" "}
                   <button
                     type="button"
                     onClick={() => setTermsModalOpen(true)}
                     className="text-blue-600 underline"
                   >
-                    terms and conditions
+                    {text("agreeTermsLink", "terms and conditions")}
                   </button>
                 </label>
               </div>
             </div>
+          )}
+
+          {currentStep === 5 && (
+          <section className="business-section-card business-section-card--payment">
+            <div className="business-section-head">
+              <h2>{text("sectionPaymentTitle", "Payment Review")}</h2>
+              <p>
+                {text(
+                  "sectionPaymentSubtitle",
+                  "Review the onboarding charge and complete registration with Cashfree."
+                )}
+              </p>
+            </div>
+
+            {pendingPaymentContext && (
+              <div className="business-payment-banner">
+                {text(
+                  "paymentBannerExistingBusiness",
+                  "Your business is already created. Complete the onboarding payment to finish registration."
+                )}
+              </div>
+            )}
+
+            {paymentNotice ? (
+              <div className="business-payment-loading business-payment-loading--info">
+                {paymentNotice}
+              </div>
+            ) : null}
+
+            {loadingOnboardingCharge ? (
+              <div className="business-payment-loading">
+                {text("paymentLoading", "Loading onboarding charge preview...")}
+              </div>
+            ) : onboardingChargePreview ? (
+              <div className="business-payment-grid">
+                <div className="business-payment-card">
+                  <span className="business-payment-card-label">
+                    {text("paymentSummaryTitle", "Registration Summary")}
+                  </span>
+                  <div className="business-payment-summary-list">
+                    <div className="business-payment-summary-row">
+                      <span>{text("paymentSummaryBusinessName", "Business name")}</span>
+                      <strong>{form.businessName || "-"}</strong>
+                    </div>
+                    <div className="business-payment-summary-row">
+                      <span>{text("paymentSummaryDisplayName", "Display name")}</span>
+                      <strong>{form.displayName || "-"}</strong>
+                    </div>
+                    <div className="business-payment-summary-row">
+                      <span>{text("paymentSummaryPrimaryNumber", "Primary number")}</span>
+                      <strong>{form.primaryNumber || "-"}</strong>
+                    </div>
+                    <div className="business-payment-summary-row">
+                      <span>{text("paymentSummaryLocation", "Location")}</span>
+                      <strong>{form.businessLocation || "-"}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="business-payment-card business-payment-card--charge">
+                  <div className="business-payment-charge-head">
+                    <span className="business-payment-card-label">
+                      {text("paymentChargesTitle", "Onboarding Charges")}
+                    </span>
+                    <span className="business-payment-provider">{text("paymentProvider", "Cashfree")}</span>
+                  </div>
+                  <h3>{onboardingChargePreview.description || text("paymentChargesTitle", "Onboarding Charges")}</h3>
+                  <div className="business-payment-summary-list">
+                    <div className="business-payment-summary-row">
+                      <span>{text("paymentBaseAmount", "Base amount")}</span>
+                      <strong>{formatInr(onboardingBaseAmount)}</strong>
+                    </div>
+                    <div className="business-payment-summary-row">
+                      <span>
+                        {textf("paymentGst", "GST ({percentage}%)", {
+                          percentage: onboardingGstPercentage,
+                        })}
+                      </span>
+                      <strong>{formatInr(onboardingGstAmount)}</strong>
+                    </div>
+                    <div className="business-payment-summary-row business-payment-summary-row--total">
+                      <span>{text("paymentTotal", "Total payable")}</span>
+                      <strong>{formatInr(onboardingTotalAmount)}</strong>
+                    </div>
+                  </div>
+                  <p className="business-payment-note">
+                    {text("paymentNote", "A secure Cashfree modal will open when you continue.")}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="business-payment-loading business-payment-loading--error">
+                {text("paymentLoadError", "Unable to load onboarding charges right now. Please try again.")}
+              </div>
+            )}
+          </section>
           )}
 
           <div className="business-wizard-nav pt-1">
@@ -2421,25 +3457,40 @@ export default function BusinessRegisterPage() {
               type="button"
               className="business-wizard-btn business-wizard-btn--ghost inline-flex items-center justify-center"
               onClick={goPreviousStep}
-              disabled={currentStep === 1}
+              disabled={currentStep === 1 || Boolean(pendingPaymentContext) || paymentAwaitingConfirmation}
             >
-              Previous
+              {text("navPrevious", "Previous")}
             </button>
-            {currentStep < WIZARD_STEPS.length ? (
+            {currentStep < wizardSteps.length ? (
               <button
                 type="button"
                 className="business-wizard-btn business-wizard-btn--primary inline-flex items-center justify-center"
                 onClick={goNextStep}
-                disabled={false}
+                disabled={Boolean(pendingPaymentContext) || paymentAwaitingConfirmation}
               >
-                Next
+                {text("navNext", "Next")}
               </button>
             ) : (
               <Button
                 type="submit"
-                label={isTransitioning ? (t.loading || "Registering...") : "Register Business"}
-                disabled={isTransitioning || !isStepThreeReady}
-                className="max-w-[220px]"
+                label={
+                  isTransitioning
+                    ? text("loading", "Registering...")
+                    : paymentLaunching
+                      ? text("actionOpeningPayment", "Opening payment...")
+                      : paymentAwaitingConfirmation
+                        ? text("actionWaitingPayment", "Waiting for payment...")
+                      : pendingPaymentContext
+                        ? text("actionContinuePayment", "Continue payment")
+                        : text("actionPayNowRegister", "Pay now and register")
+                }
+                disabled={
+                  isTransitioning ||
+                  paymentLaunching ||
+                  paymentAwaitingConfirmation ||
+                  !isPaymentStepReady
+                }
+                className="max-w-[240px]"
               />
             )}
           </div>
@@ -2450,43 +3501,74 @@ export default function BusinessRegisterPage() {
         open={otpModalOpen}
         title={
           otpModalType === "email"
-            ? "Verify Business Email"
+            ? text("otpTitleEmail", "Verify Business Email")
             : otpModalType === "whatsapp"
-              ? "Verify WhatsApp Number"
-              : "Verify Business Mobile"
+              ? text("otpTitleWhatsapp", "Verify WhatsApp Number")
+              : text("otpTitleMobile", "Verify Business Mobile")
         }
         subtitle={
           otpModalType === "email"
-            ? "Enter the 4-digit OTP sent to"
+            ? text("otpSubtitleEmail", "Enter the 4-digit OTP sent to")
             : otpModalType === "whatsapp"
-              ? "Enter the 4-digit OTP sent by WhatsApp"
-              : `Enter the 4-digit OTP sent by ${getOtpChannelLabel(mobileOtpVia)}`
+              ? text("otpSubtitleWhatsapp", "Enter the 4-digit OTP sent by WhatsApp")
+              : textf("otpSubtitleMobile", "Enter the 4-digit OTP sent by {channel}", {
+                  channel: getOtpChannelLabel(mobileOtpVia, {
+                    sms: text("otpChannelSms", "SMS"),
+                    whatsapp: text("otpChannelWhatsapp", "WhatsApp"),
+                  }),
+                })
         }
         targetLabel={otpModalTarget}
         helperText={
           otpModalType === "mobile"
             ? mobileOtpVia === OTP_VIA_SMS
-              ? "If the SMS does not arrive, wait for the timer to finish and resend the OTP on WhatsApp."
-              : "We sent the OTP on WhatsApp to the same primary number."
+              ? text(
+                  "otpHelperSms",
+                  "If the SMS does not arrive, wait for the timer to finish and resend the OTP on WhatsApp."
+                )
+              : text(
+                  "otpHelperWhatsappSamePrimary",
+                  "We sent the OTP on WhatsApp to the same primary number."
+                )
             : otpModalType === "whatsapp"
-              ? "We sent the OTP on WhatsApp to the number above."
-            : "Use the code from your inbox to complete verification."
+              ? text("otpHelperWhatsappNumber", "We sent the OTP on WhatsApp to the number above.")
+            : text("otpHelperEmail", "Use the code from your inbox to complete verification.")
         }
         otp={otpValue}
         onOtpChange={setOtpValue}
         onClose={closeOtpModal}
         onVerify={handleVerifyInlineOtp}
         onResend={() => handleResendInlineOtp(otpModalType === "mobile" ? OTP_VIA_SMS : undefined)}
-        resendLabel={otpModalType === "mobile" ? "Resend by SMS" : "Resend OTP"}
+        resendLabel={
+          otpModalType === "mobile"
+            ? text("otpResendSms", "Resend by SMS")
+            : text("otpResendOtp", "Resend OTP")
+        }
         onSecondaryResend={
           otpModalType === "mobile" ? () => handleResendInlineOtp(OTP_VIA_WHATSAPP) : undefined
         }
-        secondaryResendLabel={otpModalType === "mobile" ? "Resend on WhatsApp" : ""}
+        secondaryResendLabel={
+          otpModalType === "mobile"
+            ? text("otpResendWhatsapp", "Resend on WhatsApp")
+            : ""
+        }
         loading={otpVerifying}
         resending={otpResending}
         cooldown={otpResendCooldown}
         error={otpError}
         clearSignal={otpClearSignal}
+        labels={{
+          badge: text("otpBadgeLabel", "Secure verification"),
+          close: text("otpClose", "Close"),
+          instruction: text(
+            "otpEnterCodeHint",
+            "Enter the 4-digit code. You can paste the full OTP into the first box."
+          ),
+          verify: text("otpVerifyButton", "Verify OTP"),
+          verifying: text("otpVerifyingButton", "Verifying..."),
+          sending: text("buttonSending", "Sending..."),
+          resendAvailableIn: text("otpResendAvailableIn", "Resend available in {seconds}s"),
+        }}
       />
       <TermsConditionsModal
         open={termsModalOpen}
@@ -2508,11 +3590,13 @@ function Field({ label, hint, error, children, className = "" }) {
   )
 }
 
-function CountryCodePicker({ value, options, onChange }) {
+function CountryCodePicker({ value, options, onChange, labels = {} }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const rootRef = useRef(null)
   const normalizedQuery = query.trim().toLowerCase()
+  const searchPlaceholder = labels.searchPlaceholder || "Search country or code"
+  const noResults = labels.noResults || "No country found."
 
   useEffect(() => {
     if (!open) return
@@ -2559,7 +3643,7 @@ function CountryCodePicker({ value, options, onChange }) {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="business-country-search"
-              placeholder="Search country or code"
+              placeholder={searchPlaceholder}
               autoFocus
             />
           </div>
@@ -2584,7 +3668,7 @@ function CountryCodePicker({ value, options, onChange }) {
               )
             })}
             {!visibleOptions.length && (
-              <div className="business-country-empty">No country found.</div>
+              <div className="business-country-empty">{noResults}</div>
             )}
           </div>
         </div>

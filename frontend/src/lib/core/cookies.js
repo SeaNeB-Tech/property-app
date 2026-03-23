@@ -27,18 +27,17 @@ const REFRESH_COOKIE_NAME_SET = new Set([
   "refreshtoken_property",
   "property_refresh_token",
 ]);
-const REAL_COOKIE_KEYS = new Set([
-  ...REFRESH_COOKIE_NAME_SET,
-  ...CSRF_COOKIE_NAME_SET,
-  // Server-visible marker to allow profile completion right after OTP verification.
+const LEGACY_VOLATILE_COOKIE_KEYS = [
   "post_otp_verified",
-  // Server-visible proof used by complete-profile/signup handoff.
   "signup_otp_verified",
-  // Server-visible mobile verification markers used across login -> signup handoff.
   "mobile_verified",
   "verified_mobile",
   "otp_cc",
   "otp_mobile",
+];
+const REAL_COOKIE_KEYS = new Set([
+  ...REFRESH_COOKIE_NAME_SET,
+  ...CSRF_COOKIE_NAME_SET,
 ]);
 if (isBrowser) {
   try {
@@ -255,6 +254,24 @@ const removeVolatileValue = (name) => {
   }
 };
 
+const readRealCookieValue = (name) => {
+  if (!isBrowser) return null;
+  const targetName = String(name || "").trim();
+  if (!targetName) return null;
+
+  const pairs = document.cookie.split("; ");
+  for (const pair of pairs) {
+    if (!pair) continue;
+    const eqIndex = pair.indexOf("=");
+    if (eqIndex < 0) continue;
+    const key = decodeURIComponent(pair.substring(0, eqIndex));
+    if (key !== targetName) continue;
+    return decodeURIComponent(pair.substring(eqIndex + 1) || "");
+  }
+
+  return null;
+};
+
 const clearRealCookieOnly = (name, options = {}) => {
   if (!isBrowser) return;
   const { path, domain, sameSite, secure } = resolveCookieOptions(options);
@@ -267,6 +284,12 @@ const clearRealCookieOnly = (name, options = {}) => {
 
 if (isBrowser) {
   clearRealCookieOnly("access_token");
+  for (const key of LEGACY_VOLATILE_COOKIE_KEYS) {
+    const legacyValue = readRealCookieValue(key);
+    if (legacyValue == null) continue;
+    setVolatileValue(key, legacyValue);
+    clearRealCookieOnly(key);
+  }
 }
 
 export const setCookie = (name, value, options = {}) => {

@@ -1,6 +1,7 @@
 import "./globals.css";
 import { getAuthAppUrl, getListingAppUrl } from "@/lib/core/appUrls";
 import { Noto_Sans } from "next/font/google";
+import Script from "next/script";
 import AuthProviderClient from "@/components/providers/AuthProviderClient";
 
 const notoSans = Noto_Sans({
@@ -58,6 +59,10 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <head />
       <body className={`${notoSans.variable} antialiased`}>
+        <Script
+          src="https://sdk.cashfree.com/js/v3/cashfree.js"
+          strategy="afterInteractive"
+        />
         <AuthProviderClient>{children}</AuthProviderClient>
       </body>
     </html>
