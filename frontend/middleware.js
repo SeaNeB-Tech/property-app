@@ -54,13 +54,48 @@ function hasCsrfCookie(request) {
   return hasAnyCookie(request, CSRF_COOKIE_KEYS);
 }
 
+function getRequestProtocol(request) {
+  const forwarded = String(request?.headers?.get("x-forwarded-proto") || "").trim().toLowerCase();
+  if (forwarded) return forwarded;
+  return String(request?.nextUrl?.protocol || "").replace(":", "").trim().toLowerCase();
+}
+
+function getRequestHost(request) {
+  const forwardedHost = String(request?.headers?.get("x-forwarded-host") || "").trim();
+  if (forwardedHost) return forwardedHost.split(",")[0].trim();
+
+  const hostHeader = String(request?.headers?.get("host") || "").trim();
+  if (hostHeader) return hostHeader;
+
+  return String(request?.nextUrl?.host || request?.nextUrl?.hostname || "").trim();
+}
+
+function getExternalRequestOrigin(request) {
+  const protocol = getRequestProtocol(request) || "http";
+  const host = getRequestHost(request);
+  if (!host) return String(request?.nextUrl?.origin || "").trim();
+  return `${protocol}://${host}`;
+}
+
+function getExternalRequestUrl(request) {
+  const origin = getExternalRequestOrigin(request);
+  try {
+    return new URL(
+      `${request?.nextUrl?.pathname || "/"}${request?.nextUrl?.search || ""}`,
+      origin || request?.url || "http://localhost"
+    ).toString();
+  } catch {
+    return String(request?.url || "").trim();
+  }
+}
+
 function getSafeInternalReturnPath(request) {
   const returnTo = String(request.nextUrl.searchParams.get("returnTo") || "").trim();
   if (!returnTo) return "";
   if (returnTo.startsWith("/")) return returnTo;
   try {
     const parsed = new URL(returnTo);
-    if (parsed.origin !== request.nextUrl.origin) return "";
+    if (parsed.origin !== getExternalRequestOrigin(request)) return "";
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;
   } catch {
     return "";
@@ -72,7 +107,7 @@ function hasCrossOriginReturnTo(request) {
   if (!returnTo || returnTo.startsWith("/")) return false;
   try {
     const parsed = new URL(returnTo);
-    return parsed.origin !== request.nextUrl.origin;
+    return parsed.origin !== getExternalRequestOrigin(request);
   } catch {
     return false;
   }
@@ -104,11 +139,12 @@ function resolveExternalAppBaseUrl(rawUrl, request) {
 
   try {
     const targetUrl = new URL(normalized);
-    const requestHost = normalizeHost(request?.nextUrl?.hostname || request?.headers?.get("host") || "");
+    const requestHost = normalizeHost(getRequestHost(request));
     const targetHost = normalizeHost(targetUrl.hostname);
 
     if (requestHost && requestHost !== targetHost && isLoopbackOrIp(targetHost)) {
-      targetUrl.protocol = request?.nextUrl?.protocol || targetUrl.protocol;
+      const requestProtocol = getRequestProtocol(request);
+      if (requestProtocol) targetUrl.protocol = `${requestProtocol}:`;
       targetUrl.hostname = requestHost;
     }
 
@@ -330,7 +366,7 @@ export async function middleware(request) {
   // ✅ FIXED: Redirect unauthenticated users from dashboard to login
   if (pathname.startsWith("/dashboard") && !hasSession && !hasRecoverableSession) {
     const loginUrl = new URL(withBasePath(request, "/auth/login"), request.url);
-    loginUrl.searchParams.set("returnTo", request.nextUrl.href);
+    loginUrl.searchParams.set("returnTo", getExternalRequestUrl(request));
     response = NextResponse.redirect(loginUrl);
   }
 

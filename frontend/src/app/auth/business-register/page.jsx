@@ -32,6 +32,7 @@ import { acquireRefreshLock, releaseRefreshLock } from "@/lib/auth/refreshLock"
 import { createMainCategory, getAllActiveCategories } from "@/app/auth/auth-service/category.service"
 import { getDefaultProductName, getDefaultProductKey, setDefaultProductKey } from "@/services/dashboard.service"
 import { setDashboardMode, DASHBOARD_MODE_BUSINESS } from "@/services/dashboard.service"
+import { getAuthAppUrl } from "@/lib/core/appUrls"
 import useDebounce from "@/hooks/useDebounce"
 import AuthCard1 from "@/components/ui/AuthCard1"
 import AuthHeader from "@/components/ui/AuthHeader"
@@ -509,7 +510,7 @@ const redirectToBusinessRegisterLogin = (router, returnTo = "/auth/business-regi
     source: MAIN_APP_REGISTER_SOURCE,
     returnTo,
   })
-  router.replace("/auth/login")
+  router.replace(getAuthAppUrl("/auth/login"))
 }
 
 const hasBusinessRegistration = (payload = null) => {
