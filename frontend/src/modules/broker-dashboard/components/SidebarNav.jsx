@@ -1,11 +1,11 @@
 "use client";
 
-import { cn } from "@/lib/utils";
-
 const badgeToneClassName = {
   danger: "border-[#f1c8cf] bg-[#fff1f3] text-[#b42318]",
   neutral: "border-black/10 bg-[#f3f4f6] text-[#5f6670]",
 };
+
+const joinClasses = (...values) => values.filter(Boolean).join(" ");
 
 export function SidebarNav({
   items,
@@ -63,7 +63,7 @@ export function SidebarNav({
                       key={item.id}
                       type="button"
                       onClick={() => onSelect(item.id)}
-                      className={cn(
+                      className={joinClasses(
                         "flex w-full items-center justify-between gap-3 rounded-[8px] border-[0.5px] px-3 py-2.5 text-left transition",
                         isActive
                           ? "border-black/10 bg-white"
@@ -72,7 +72,7 @@ export function SidebarNav({
                     >
                       <span className="flex min-w-0 items-center gap-2.5">
                         <span
-                          className={cn(
+                          className={joinClasses(
                             "flex h-7 w-7 items-center justify-center rounded-[8px] border-[0.5px] border-black/10 text-[#5f6670]",
                             isActive ? "bg-[#f4f5f6]" : "bg-white"
                           )}
